@@ -1,0 +1,9 @@
+[project]
+name = "HOMER"
+version = "0.0.1"
+dependencies = [
+    "jax",
+    "scipy",
+    "numpy",
+    "pyvista",
+]

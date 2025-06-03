@@ -3,12 +3,6 @@ from typing import Callable
 
 
 
-
-
-
-
-
-
 """
     The heart of the fitting library, the Jacobian evaluation is designed to take a for loop function implementing a loss, 
     and then analyse and convert this to a function defining the jacobian of the cost function.
@@ -29,6 +23,8 @@ def jacobian( cost_function: Callable):
     # create local optimised multivariate chain rules to do this optimisation.
 
     # create this generic compute graph.
+
+    # split the compute graph into chunks that are jax compilable
 
     # optimise and return the results.
 
