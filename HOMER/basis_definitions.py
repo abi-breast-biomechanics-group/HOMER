@@ -20,6 +20,13 @@ DERIV_ORDER = {
         (0, 1, 2):7,
 }
 
+EVAL_PATTERN = {
+    1:[(1)],
+    3:[(1, 0), (0, 1), (1,1)],
+    7:[(1,0,0), (0,1,0), (0,0,1), (1,1,0), (1,0,1), (0, 1, 1), (1,1,1)],
+    # 7:[(0,0,1), (0,1,0), (1,0,0), (0,1,1), (1,0,1), (1, 1, 0), (1,1,1)],
+}
+
 
 @dataclass
 class AbstractField:
@@ -46,9 +53,7 @@ class AbstractBasis:
     fn:Optional[Callable] = None
     node_fields: Optional[type[AbstractField]] = None
     weights: Optional[list[str]] = None
-    d1:Optional[Callable] = None
-    d2:Optional[Callable] = None
-    d3:Optional[Callable] = None
+    deriv:Optional[list[Callable]] = None
 
 BasisGroup = tuple[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]]
 
@@ -254,30 +259,28 @@ class H3Basis(AbstractBasis):
     fn = H3
     node_fields = DerivativeField()
     weights = ['x0', 'dx0', 'x1', 'dx1'] #then this records the derivatives
-    d1 = H3d1
-    d2 = H3d1d1
+    deriv = [H3, H3d1, H3d1d1]
     
 @dataclass
 class L1Basis(AbstractBasis):
     fn = L1
     weights = ['x0', 'x1']
-    d1 = L1d1
-    d2 = L1d1d1
+    deriv = [L1, L1d1, L1d1d1]
 
 @dataclass
 class L2Basis(AbstractBasis):
     fn = L2
     weights = ['x0', 'x1', 'x3']
-    d1 = L2d1
+    deriv =[L2, L2d1]
 
 @dataclass
 class L3Basis(AbstractBasis):
     fn = L3
     weights = ['x0', 'x1', 'x2', 'x3']
-    d1 = L3d1
+    deriv = [L3, L3d1]
     
 @dataclass
 class L4Basis(AbstractBasis):
     fn = L4
     weights = ['x0', 'x1', 'x2', 'x3', 'x4']
-    d1 = L4d1
+    deriv = [L4, L4d1]
