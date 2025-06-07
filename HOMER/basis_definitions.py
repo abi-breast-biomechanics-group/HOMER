@@ -21,7 +21,8 @@ DERIV_ORDER = {
 }
 
 EVAL_PATTERN = {
-    1:[(1)],
+    0:[],
+    1:[(1,)],
     3:[(1, 0), (0, 1), (1,1)],
     7:[(1,0,0), (0,1,0), (0,0,1), (1,1,0), (1,0,1), (0, 1, 1), (1,1,1)],
     # 7:[(0,0,1), (0,1,0), (1,0,0), (0,1,1), (1,0,1), (1, 1, 0), (1,1,1)],
@@ -91,7 +92,7 @@ def L1d1(x) -> jnp.ndarray:
     """
     W = jnp.ones((x.shape[0], 2))
     W = W.at[:,0].add(-2)
-    return jnp.array([W])
+    return jnp.array(W)
 
 def L1d1d1(x) -> jnp.ndarray:
     """
@@ -270,7 +271,7 @@ class L1Basis(AbstractBasis):
 @dataclass
 class L2Basis(AbstractBasis):
     fn = L2
-    weights = ['x0', 'x1', 'x3']
+    weights = ['x0', 'x1', 'x2']
     deriv =[L2, L2d1]
 
 @dataclass
