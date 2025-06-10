@@ -6,4 +6,5 @@ dependencies = [
     "scipy",
     "numpy",
     "pyvista",
+    "sparsejac",
 ]
