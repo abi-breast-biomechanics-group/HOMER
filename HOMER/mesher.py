@@ -1,10 +1,11 @@
 from typing import Optional, Callable
 import numpy as np
 import jax.numpy as jnp
+import jax
 import pyvista as pv
 from matplotlib import pyplot as plt
 
-from functools import reduce
+from functools import reduce, partial
 from itertools import groupby, combinations_with_replacement, product
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
@@ -18,12 +19,33 @@ class mesh_node(dict):
         """
         self.loc = np.array(loc)
         self.update(kwargs)
+        self.fixed_params = set()
 
         for key, value in self.items():
             if isinstance(value, list):
                 self[key] = np.array(value)
             elif not isinstance(value, np.ndarray):
                 raise ValueError(f"Only np.ndarray are valid additional data, but found key: {key}, value: {value} pair")
+
+    def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray]|np.ndarray]=None) -> None:
+        if isinstance(param_names, str):
+            param_names = [param_names]
+        if not isinstance(values, list):
+            values = [values] * len(param_names)
+        for idp, param in enumerate(param_names):
+            self.fixed_params.add(param)
+            if values[idp] is not None:
+                if param == 'loc':
+                    self.loc = values[idp]
+                else:
+                    self[param] = values[idp]
+
+    def get_optimisability_arr(self):
+        list_data = [np.ones(3) * (not "loc" in self.fixed_params)]
+        for key in self.keys():
+            list_data.append(np.ones(3) * (not key in self.fixed_params))
+        return np.concatenate(list_data, axis=0)
+
 
     def plot(self, scene: Optional[pv.Plotter] = None) -> pv.Plotter | None:
         s = pv.Plotter() if scene is None else scene
@@ -128,7 +150,7 @@ class mesh_element:
 
 
 class mesh:
-    def __init__(self, nodes:Optional[list[mesh_node]] = None, elements: Optional[list[mesh_element]|mesh_element]=None) -> None:
+    def __init__(self, nodes:Optional[list[mesh_node]] = None, elements: Optional[list[mesh_element]|mesh_element]=None, jax_compile:bool = False) -> None:
         
         ######### topology of the mesh
         self.nodes: list[mesh_node] = [] if nodes is None else (nodes if isinstance(nodes, list) else [nodes])
@@ -136,45 +158,22 @@ class mesh:
 
         ######### initialising values to be calculated
         self.elem_evals: Optional[Callable] = None
+        self.evaluate_embeddings = lambda element_ids, xis, params: None #def the function signature here
         self.elem_deriv_evals: Optional[Callable] = None
         self.fit_param: Optional[np.ndarray] = None
 
         ######### optimisation
-        self.param_array: Optional[np.ndarray] = None
+        self.true_param_array: Optional[np.ndarray] = None
+        self.optimisable_param_array: Optional[np.ndarray] = None
+        self.optimisable_param_bool: Optional[np.ndarray] = None
         self.ele_map: Optional[np.ndarray] = None
+
+        ######### Compilation flags
+        self.compile = jax_compile
         if not len(self.nodes) == 0 and not len(self.elements) == 0:
             self.generate_mesh()
 
     ################################## MAIN FUNCTIONS
-    def evaluate_embeddings(self, element_ids, xis):
-        return self.param_evaluate_embeddings(element_ids, xis, self.param_array, self.ele_map)
-
-    def param_evaluate_embeddings(self, element_ids: np.ndarray|list[int]|tuple[int], xis: np.ndarray, fit_params:np.array, ele_map:np.array) -> np.ndarray:
-        """
-        Evaluates embeddings over the elements of the mesh.
-        
-        :param element_ids: an iterable containing the int locations to evaluate the xis locations at.
-        :param xis: the xi locations (within each element) to evaluate points at.
-        :param fit_params: a new set of params that can be used to override the fitting.
-        :returns outputs: the world location of the evaluated embeddings.
-        """
-        if not (isinstance(element_ids, np.ndarray) or isinstance(element_ids, list)):
-            element_ids = [element_ids]
-
-        outputs = [None] * len(element_ids)
-        for ide, ele in enumerate(element_ids):
-            map = ele_map[ele].astype(int)
-            params = fit_params[map]
-            data = self.elem_evals[ele](params, xis)
-            outputs[ide] = data.reshape(-1,3)
-
-
-        # map = ele_map[element_ids].astype(int)
-        # params = fit_params[map]
-        # data = self.elem_evals[ele](params, xis)
-        # return data.reshape(-1,3)
-        return np.concatenate(outputs, axis=0)
-
     def evaluate_deriv_embeddings(self, element_ids: np.ndarray|list[int]|tuple[int], xis: np.ndarray, deriv: list[int]) -> np.ndarray:
         """
         Evaluates embeddings over the elements of the mesh.
@@ -189,7 +188,7 @@ class mesh:
         outputs = [None] * len(element_ids)
         for ide, ele in enumerate(element_ids):
             params = self.get_element_params(ele)
-            data = self.elem_deriv_evals[ele](params, xis, deriv)
+            data = self.elem_deriv_evals(params, xis, deriv)
             outputs[ide] = data.reshape(-1,3)
         return np.concatenate(outputs, axis=0)
 
@@ -267,18 +266,29 @@ class mesh:
         """
         returns the flat vector of node parameters associated with this element.
         """
-        return self.param_array[self.ele_map[ele_num].astype(int)]
+        return self.true_param_array[self.ele_map[ele_num].astype(int)]
 
-    def update_from_params(self, params):
+    def update_from_params(self, inp_params, generate=True):
         """
             Updates all nodes with data from an input param array.
         """
+
+        if len(inp_params) == len(self.optimisable_param_array):
+            params = self.true_param_array.copy()
+            params[self.optimisable_param_bool] = inp_params 
+        elif len(inp_params) == len(self.true_param_array):
+            params = inp_params
+        else:
+            raise ValueError("Input param array was provided that did not match either that set of parameters, or the optimisable subset of parameters")
+
         for node in self.nodes:
             node.loc, params = params[:3], params[3:]
             for key, value in node.items():
                 l_val = value.flatten().shape[0]
                 flat_node = node[key].ravel()
                 flat_node[:], params = params[:l_val], params[l_val:] 
+        if generate:
+            self.generate_mesh()
 
     ################################## MORPHIC INTERFACE COMPATIBILITY
     def generate_mesh(self) -> None:
@@ -290,9 +300,14 @@ class mesh:
 
         """
 
-        self.param_array = np.concatenate([np.concatenate([node.loc] + [d.flatten() for d in node.values()]) for node in self.nodes]).copy()
+        self.true_param_array = np.concatenate([np.concatenate([node.loc] + [d.flatten() for d in node.values()]) for node in self.nodes]).copy()
+        self.optimisable_param_bool = np.concatenate([node.get_optimisability_arr() for node in self.nodes], axis=0).astype(bool)
+        self.optimisable_param_array = self.true_param_array[self.optimisable_param_bool]
 
-        self.update_from_params(np.arange(self.param_array.shape[-1]))
+        self.update_from_params(np.arange(self.true_param_array.shape[-1]), generate=False)
+
+
+
         ele_maps = []
         for ide, element in enumerate(self.elements):
             param_ids = []
@@ -305,10 +320,11 @@ class mesh:
                         raise ValueError(f"Provided node id: {idn} did not have the field '{field}' which is required by element: {ide}")
             ele_maps.append(np.concatenate(param_ids))
         self.ele_map = np.array(ele_maps)
-        self.update_from_params(self.param_array)
+        self.update_from_params(self.true_param_array, generate=False)
 
         self._generate_elem_functions()
         self._generate_elem_deriv_functions()
+        self._generate_eval_function()
 
     def add_node(self, node:mesh_node) -> None:
         self.nodes.append(node)
@@ -335,7 +351,7 @@ class mesh:
             all_points = []
             for ne, e in enumerate(elements_to_iter):
                 grid = self.xi_grid(res=res, ndim=e.ndim, surface=True)
-                all_points.append(self.evaluate_embeddings([ne], grid))
+                all_points.append(self.evaluate_embeddings(np.array([ne]), grid))
             return np.concatenate(all_points, axis=0) 
         else:
             face_pts = []
@@ -346,10 +362,10 @@ class mesh:
 
                 element = self.elements[face[0]]
                 if element.ndim == 2:
-                    face_pts.append(self.evaluate_embeddings([face[0]], xi2grid))
+                    face_pts.append(self.evaluate_embeddings(np.array([face[0]]), xi2grid))
                 elif element.ndim ==3:
                     grid_def = xi3grid[face[1], face[2]]
-                    face_pts.append(self.evaluate_embeddings([face[0]],grid_def))
+                    face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def))
             return np.concatenate(face_pts, axis=0)
 
 
@@ -398,7 +414,7 @@ class mesh:
                         xi_list[ind] = cs * np.ones(res)
                     xi_list[i] = np.linspace(0, 1, res)
                     xis = np.column_stack(xi_list)
-                    comb_pts = self.evaluate_embeddings(ne, xis)
+                    comb_pts = self.evaluate_embeddings(np.array([ne]), xis)
 
                     l_pts = line_points.shape[0]
                     line_points = np.concatenate((line_points, comb_pts))
@@ -430,9 +446,9 @@ class mesh:
                 faces.append((ide, -1, -1))
                 continue
 
-            pts = self.evaluate_embeddings([ide], xis=elem_eval)
+            pts = self.evaluate_embeddings(np.array([ide]), xis=elem_eval)
             for pt, tested in zip(pts, tzip):
-                tp = tuple(np.round(pt, rounding_res).tolist())
+                tp = tuple(np.round(np.asarray(pt), rounding_res).tolist())
                 space = hash_space.setdefault(tp, [])
                 space.append((ide,) + tested)
 
@@ -471,13 +487,60 @@ class mesh:
         """
             Creates the internal function evaluation structure.
         """
-        self.elem_evals = [make_eval(elem.basis_functions, elem.BasisProductInds) for elem in self.elements]
+        self.elem_evals = make_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
+        self.elem_xi_deriv = jax.jacfwd(self.elem_evals, argnums=1)
+        self.elem_param_deriv = jax.jacfwd(self.elem_evals, argnums=0)
 
     def _generate_elem_deriv_functions(self):
         """
             Creates the internal function evaluation structure.
         """
-        self.elem_deriv_evals = [make_deriv_eval(elem.basis_functions, elem.BasisProductInds) for elem in self.elements]
+        self.elem_deriv_evals = make_deriv_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
+
+    def _generate_eval_function(self):
+        """
+            Generates the internal functions that evaluate embeddings.
+            Code is structured so that the result can express custom derivatives
+        """
+        
+        def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
+
+            param_data = jnp.asarray(self.true_param_array)
+            fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
+
+            map = jnp.asarray(ele_map)[jnp.asarray(element_ids)].astype(int)
+            params = jnp.asarray(fit_params)[map]
+            outputs = [None] * len(element_ids)
+            for ide in range(jnp.asarray(element_ids).shape[0]):
+                outputs[ide] = self.elem_evals(params[ide], jnp.asarray(xis)).reshape(-1, 3)
+            return jnp.concatenate(outputs, axis=0)
+
+        # def deriv_xis(element_ids, xis, fit_params=self.param_array, ele_map = self.ele_map):
+        #     map = jnp.asarray(ele_map)[jnp.asarray(element_ids)].astype(int)
+        #     params = jnp.asarray(fit_params)[map]
+        #     outputs = [None] * len(element_ids)
+        #     for ide, ele in enumerate(element_ids):
+        #         outputs[ide] = self.elem_xi_deriv(params[ide], jnp.asarray(xis))
+        #     return jnp.concatenate(outputs, axis=0)
+        #
+        # def deriv_params(element_ids, xis, fit_params=self.param_array, ele_map=self.ele_map):
+        #     map = jnp.asarray(ele_map)[jnp.asarray(element_ids)].astype(int)
+        #     params = jnp.asarray(fit_params)[map]
+        #     outputs = [None] * len(element_ids)
+        #     for ide, ele in enumerate(element_ids):
+        #         outputs[ide] = self.elem_param_deriv(params[ide], jnp.asarray(xis))
+        #     return jnp.concatenate(outputs, axis=0)
+        #
+        # def not_impl(val):
+        #     raise ValueError("This value isn't continuous")
+        #
+        # evaluate_embeddings.custom_deriv([not_impl, deriv_xis, deriv_params, not_impl])
+        
+        self.evaluate_embeddings = evaluate_embeddings
+
+
+
+    ################################# REFINEMENT
 
     def refine(self, refinement_factor: Optional[int]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None):
         """
@@ -514,7 +577,7 @@ class mesh:
                 eval_pts = np.column_stack([x.flatten() for x in np.meshgrid(*by_xi_refinement, indexing='ij')])
                 ref_array = np.array([len(by_xi_refinement[i]) for i in [0,1,2]]) - 1
         
-            pts = self.evaluate_embeddings([ide], eval_pts)
+            pts = self.evaluate_embeddings(np.array([ide]), eval_pts)
             additional_pts = []
             deriv_bound = np.where([np.any([st[:2] == 'dx' for st in b.weights]) for b in e.basis_functions] )[0]
             
@@ -524,12 +587,12 @@ class mesh:
                 for dl, di in zip(deriv_bound, d_val): 
                     derivs[dl] = di
                 d_scale = np.mean(ref_array[np.where(np.array(d_val))])
-                additional_pts.append(self.evaluate_deriv_embeddings([ide], eval_pts, deriv=derivs)/d_scale)
+                additional_pts.append(self.evaluate_deriv_embeddings(np.array([ide]), eval_pts, deriv=derivs)/d_scale)
 
             #check the generated points against the element hashmap.
             pt_index_array = [] 
             for idpt, pt in enumerate(pts):
-                ind = spatial_hash.get(hashp:=tuple(np.round(pt, 6)), None) 
+                ind = spatial_hash.get(hashp:=tuple(np.round(np.asarray(pt), 6)), None) 
                 new_vals = {k:v for k, v in zip(e.used_node_fields, [a[idpt] for a in additional_pts])}
                 if ind is None:
                     node = mesh_node(pt, **new_vals)
@@ -659,3 +722,4 @@ GAUSS = {
         6:[np.array([[0.8306046932331322, 0.1693953067668678, 0.3806904069584016, 0.6193095930415985, 0.0337652428984240, 0.9662347571015760]]).T,
            np.array([0.1803807865240693, 0.1803807865240693, 0.2339569672863455, 0.2339569672863455, 0.0856622461895852, 0.0856622461895852])],
 }
+

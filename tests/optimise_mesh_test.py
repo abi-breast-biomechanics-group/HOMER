@@ -1,8 +1,15 @@
-from HOMER import mesh_node, mesh_element, mesh, L2Basis
 import pyvista as pv
 from scipy.spatial import KDTree
+import numpy as np
+
+from scipy.optimize import least_squares
 
 
+from HOMER import mesh_node, mesh_element, mesh, L2Basis, H3Basis
+from HOMER.fitting import point_cloud_fit
+
+
+#CONSTRUCT THE DATA TO FIT TO
 point0 = mesh_node(loc=[0,0,1])
 point0_1 = mesh_node(loc=[0,0,0.5])
 point1 = mesh_node(loc=[0,0,0])
@@ -12,34 +19,48 @@ point3 = mesh_node(loc=[0,1,0])
 point0_2 = mesh_node(loc=[0,0.5,1])
 point1_3 = mesh_node(loc=[0,0.5,0])
 point_middle = mesh_node(loc=[0.5, 0.5, 0.5])
-
-# element0 = mesh_element(nodes=[0,1,2,3], basis_functions=(L1Basis, L1Basis))
-# objMesh = mesh(nodes=[point0, point1, point2, point3], elements = element0)
-# objMesh.plot()
-
 element0 = mesh_element(nodes=[0,1,2,3,4,5,6,7,8], basis_functions=(L2Basis, L2Basis))
-objMesh = mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3, point2, point2_3, point3], elements = element0)
+objMesh = mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3, point2, point2_3, point3], elements = element0, jax_compile=True)
 
 
-surface_xi = objMesh.xi_grid(30)
+surface_xi = objMesh.xi_grid(100)
 surface_to_fit = objMesh.evaluate_embeddings([0], surface_xi)
-pv.PolyData(surface_to_fit).plot() 
 
 
 
-def create_fitting_function(mesh:mesh, data, res=20):
-    """
-        An example that creates a fitting problem for a mesh.
-        This is a fit that connects a point to a surface.
-    """
+################## CONSTRUCT THE FITTING MESH
+point0 = mesh_node(loc=np.array([0,0,1]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
+point1 = mesh_node(loc=np.array([0,0,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
+point2 = mesh_node(loc=np.array([0,1,1]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
+point3 = mesh_node(loc=np.array([0,1,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 
-    data_tree = KDTree(data)
-    eval_points = mesh.xi_grid(res)
-    # sob_points = mesh.gauss_grid([4, 4])
-    #
-    def fitting_function(params):
-        locs = mesh.evaluate_embeddings([0], xis=eval_points, params=params)
-        dists, _ = data_tree.query(locs, k=1)
-        return dists
-    
-    return fitting_function
+# point0.fix_parameter(['loc', 'du', 'dv', 'dudv'])
+point0.fix_parameter('loc')
+# point1.fix_parameter(['loc', 'du', 'dv', 'dudv'])
+# point2.fix_parameter(['loc', 'du', 'dv', 'dudv'])
+point1.fix_parameter('loc')
+point2.fix_parameter('loc')
+point3.fix_parameter('loc')
+
+element0 = mesh_element(nodes=[0,1,2,3], basis_functions=(H3Basis, H3Basis))
+fitting_mesh = mesh(nodes = [point0, point1, point2, point3], elements = element0)
+
+
+
+################## Show the initial fit
+# s = pv.Plotter()
+# surf_pts = pv.PolyData(np.array(surface_to_fit))
+# s.add_mesh(surf_pts)
+# fitting_mesh.plot(scene=s)
+# s.show()
+
+################## Actual fitting code
+fitting_fn, jacobian = point_cloud_fit(fitting_mesh, surface_to_fit, compile=True)
+init_params = fitting_mesh.optimisable_param_array.copy()
+
+optim = least_squares(fitting_fn, init_params, jac=jacobian, verbose=2)
+
+################## visualise the fit
+fitting_mesh.update_from_params(optim.x)
+fitting_mesh.plot()
+
