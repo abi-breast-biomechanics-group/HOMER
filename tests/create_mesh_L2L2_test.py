@@ -19,7 +19,7 @@ point_middle = mesh_node(loc=[0.25, 0.5, 0.5])
 # objMesh = mesh(nodes=[point0, point1, point2, point3], elements = element0)
 # objMesh.plot()
 
-element0 = mesh_element(nodes=[0,1,2,3,4,5,6,7,8], basis_functions=(L2Basis, L2Basis))
+element0 = mesh_element(node_indexes=[0,1,2,3,4,5,6,7,8], basis_functions=(L2Basis, L2Basis))
 objMesh = mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3, point2, point2_3, point3], elements = element0)
 # objMesh = mesh(nodes=[point0, point0_2, point0_1, point2, point_middle, point2_3, point1, point1_3, point3], elements = element0)
 objMesh.refine(4)

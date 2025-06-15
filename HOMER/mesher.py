@@ -13,11 +13,12 @@ from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, Basis
 
 
 class mesh_node(dict):
-    def __init__(self, loc, **kwargs):
+    def __init__(self, loc, id=None, **kwargs):
         """
         The base node class, handling arbitrary properties over the mesh surface.
         """
         self.loc = np.array(loc)
+        self.id = id
         self.update(kwargs)
         self.fixed_params = set()
 
@@ -66,11 +67,20 @@ class mesh_node(dict):
 
 
 class mesh_element:
-    def __init__(self, nodes: list[int], basis_functions: BasisGroup, BP_inds: Optional = None):
+    def __init__(self, basis_functions: BasisGroup, node_indexes: Optional[list[int]] = None, 
+                 node_ids: Optional[list] = None, BP_inds: Optional = None, id=None):
         """
             A high order mesh element. This element is constructed from 
 
         """
+        if node_ids is None and node_indexes is None:
+            raise ValueError("An element must be associated with a list of nodes, either by index or node id")
+        elif node_ids is not None and node_indexes is not None:
+            raise ValueError("Both node indexes and node ids were provided - only one should be given.")
+
+        nodes = node_indexes if node_indexes is not None else node_ids
+        self.used_index = node_indexes is not None
+
         self.nodes = nodes
         self.basis_functions = basis_functions
         self.ndim: int = len(self.basis_functions)
@@ -78,6 +88,7 @@ class mesh_element:
 
         self.get_used_fields()
         self.BasisProductInds = self._calc_basis_product_inds() if BP_inds is None else BP_inds
+        self.id = id
 
 
     def get_used_fields(self):
@@ -156,6 +167,13 @@ class mesh:
         self.nodes: list[mesh_node] = [] if nodes is None else (nodes if isinstance(nodes, list) else [nodes])
         self.elements: list[mesh_element] = [] if elements is None else (elements if isinstance(elements, list) else [elements])
 
+        self.node_id_to_ind = {}
+        self.element_id_to_ind = {}
+
+
+
+
+
         ######### initialising values to be calculated
         self.elem_evals: Optional[Callable] = None
         self.evaluate_embeddings = lambda element_ids, xis, params: None #def the function signature here
@@ -174,6 +192,10 @@ class mesh:
             self.generate_mesh()
 
     ################################## MAIN FUNCTIONS
+
+    def evaluate_element_embeddings(self, element_id, xis):
+        return self.evaluate_embeddings([self.element_id_to_ind[element_id]], xis)
+
     def evaluate_deriv_embeddings(self, element_ids: np.ndarray|list[int]|tuple[int], xis: np.ndarray, deriv: list[int]) -> np.ndarray:
         """
         Evaluates embeddings over the elements of the mesh.
@@ -306,18 +328,39 @@ class mesh:
 
         self.update_from_params(np.arange(self.true_param_array.shape[-1]), generate=False)
 
+        ########## build the lookup from the input values.
+        self.node_id_to_ind = {}
+        self.element_id_to_ind = {}
+
+        for e, n in [(e, n) for  e , n in enumerate(self.nodes) if n.id is not None]:
+            key_in = self.node_id_to_ind.get(n.id, None)
+            if key_in is not None:
+                raise ValueError(f"Duplicate nodes with the id: {n.id} were added to the mesh")
+            self.node_id_to_ind[n.id] = e 
+
+        for e, el in [(e, el) for  e, el in enumerate(self.elements) if el.id is not None]:
+            key_in = self.element_id_to_ind.get(el.id, None)
+            if key_in is not None:
+                raise ValueError(f"Duplicate nodes with the id: {el.id} were added to the mesh")
+            self.element_id_to_ind[el.id] = e 
 
 
         ele_maps = []
         for ide, element in enumerate(self.elements):
             param_ids = []
-            for idn, node in enumerate([self.nodes[e] for e in element.nodes]):
+            
+            if element.used_index:
+                nodes_to_iter = [self.nodes[e] for e in element.nodes]
+            else:
+                nodes_to_iter = [self.get_node(e) for e in element.nodes]
+
+            for idn, node in enumerate(nodes_to_iter):
                 param_ids.append(node.loc)
                 for field in element.used_node_fields: 
                     try:
                         param_ids.append(node[field].flatten())
                     except KeyError:
-                        raise ValueError(f"Provided node id: {idn} did not have the field '{field}' which is required by element: {ide}")
+                        raise ValueError(f"Node {idn} of element: {ide} did not have the required field '{field}'")
             ele_maps.append(np.concatenate(param_ids))
         self.ele_map = np.array(ele_maps)
         self.update_from_params(self.true_param_array, generate=False)
@@ -334,11 +377,18 @@ class mesh:
         self.elements.append(element)
         self.generate_mesh()
 
-    def get_element(self, element_ids: np.ndarray | int) -> list[mesh_element]:
-        return [self.elements[id] for id in ([element_ids] if isinstance(element_ids, int) else element_ids)]
+    def get_element(self, element_ids: list) -> list[mesh_element]:
+        """
+        Returns the element with the associated id.
+        """
+        if not isinstance(element_ids, list):
+            return self.get_element([element_ids])[0]
+        return [self.elements[self.element_id_to_ind[id]] for id in element_ids]
 
-    def get_node(self, node_ids: np.ndarray | int) -> list[mesh_node]:
-        return [self.nodes[id] for id in ([node_ids] if isinstance(node_ids, int) else node_ids)]
+    def get_node(self, node_ids: list) -> list[mesh_node]:
+        if not isinstance(node_ids, list):
+            return self.get_node([node_ids])[0]
+        return [self.nodes[self.node_id_to_ind[id]] for id in node_ids]
 
     ################################## PLOTTING
     def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, just_faces=False) -> np.ndarray:
@@ -542,7 +592,8 @@ class mesh:
 
     ################################# REFINEMENT
 
-    def refine(self, refinement_factor: Optional[int]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None):
+    def refine(self, refinement_factor: Optional[int]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
+               clean_nodes = True):
         """
             This code refines a mesh, increasing the resolution of every element.
             A refinement factor can be provided, or alternatively a tuple of xi_locations to refine the nodes at can be provided.
@@ -613,14 +664,20 @@ class mesh:
             
             #lr now defines the total number of points per dimension of this elementlet
             pt_inds = np.array(pt_index_array).reshape(lr)
+
+
             for i in range(n_new[0]):
                 i_loc = i * (e.n_in_dim[0] -1) 
                 for j in range(n_new[1]):
                     j_loc = j * (e.n_in_dim[1] -1)
                     if e.ndim == 2:
                         points = pt_inds[i_loc:i_loc + e.n_in_dim[0], j_loc:j_loc + e.n_in_dim[1]]
-                        # breakpoint()
-                        new_e = mesh_element(points.T.flatten().tolist(), basis_functions=e.basis_functions)
+
+                        elem_id = None
+                        if e.id is not None:
+                            elem_id = str(e.id) + f"_subelem_{i}_{j}"
+
+                        new_e = mesh_element(node_indexes=points.T.flatten().tolist(), basis_functions=e.basis_functions, id=elem_id)
                         new_elements.append(new_e)
                         continue
                     for k in range(n_new[2]): 
@@ -633,12 +690,17 @@ class mesh:
                         # points = points.transpose((0,2,1))
                         points = points.flatten(order="F").astype(int)
 
-                        new_e = mesh_element(nodes=points.tolist(), basis_functions=e.basis_functions, BP_inds=e.BasisProductInds)
+                        elem_id = None
+                        if e.id is not None:
+                            elem_id = str(e.id) + f"_subelem_{i}_{j}_{k}"
+
+                        new_e = mesh_element(node_indexes=points.tolist(), basis_functions=e.basis_functions, BP_inds=e.BasisProductInds, id=elem_id)
                         new_elements.append(new_e)
           
 
         self.elements = new_elements
-        self._clean_pts()
+        if clean_nodes:
+            self._clean_pts()
         self.generate_mesh()
             
 

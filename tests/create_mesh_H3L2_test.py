@@ -15,7 +15,7 @@ point3 = mesh_node(loc=[0,1,0], du=[0,0,0])
 # objMesh = mesh(nodes=[point0, point1, point2, point3], elements = element0)
 # objMesh.plot()
 
-element0 = mesh_element(nodes=[0,1,2,3,4,5], basis_functions=(L2Basis, H3Basis))
+element0 = mesh_element(node_indexes=[0,1,2,3,4,5], basis_functions=(L2Basis, H3Basis))
 objMesh = mesh(nodes=[point0, point0_1, point1, point2, point2_3, point3], elements = element0)
 objMesh.refine(refinement_factor=2)
 

@@ -19,7 +19,7 @@ point3 = mesh_node(loc=[0,1,0])
 point0_2 = mesh_node(loc=[0,0.5,1])
 point1_3 = mesh_node(loc=[0,0.5,0])
 point_middle = mesh_node(loc=[0.5, 0.5, 0.5])
-element0 = mesh_element(nodes=[0,1,2,3,4,5,6,7,8], basis_functions=(L2Basis, L2Basis))
+element0 = mesh_element(node_indexes=[0,1,2,3,4,5,6,7,8], basis_functions=(L2Basis, L2Basis))
 objMesh = mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3, point2, point2_3, point3], elements = element0, jax_compile=True)
 
 
@@ -42,17 +42,17 @@ point1.fix_parameter('loc')
 point2.fix_parameter('loc')
 point3.fix_parameter('loc')
 
-element0 = mesh_element(nodes=[0,1,2,3], basis_functions=(H3Basis, H3Basis))
+element0 = mesh_element(node_indexes=[0,1,2,3], basis_functions=(H3Basis, H3Basis))
 fitting_mesh = mesh(nodes = [point0, point1, point2, point3], elements = element0)
 
 
 
 ################## Show the initial fit
-# s = pv.Plotter()
-# surf_pts = pv.PolyData(np.array(surface_to_fit))
-# s.add_mesh(surf_pts)
-# fitting_mesh.plot(scene=s)
-# s.show()
+s = pv.Plotter()
+surf_pts = pv.PolyData(np.array(surface_to_fit))
+s.add_mesh(surf_pts)
+fitting_mesh.plot(scene=s)
+s.show()
 
 ################## Actual fitting code
 fitting_fn, jacobian = point_cloud_fit(fitting_mesh, surface_to_fit, compile=True)
