@@ -710,13 +710,22 @@ class mesh:
         """
         used_points = []
         for element in self.elements:
-            used_points.extend(element.nodes)
+            if element.used_index:
+                used_points.extend(element.nodes)
+            else: 
+                used_points.extend([self.node_id_to_ind[id] for id in element.nodes])
         
         bool_array = np.zeros(len(self.nodes), dtype=bool)
         bool_array[used_points] = True
         new_inds = np.array([0] + np.cumsum(bool_array).tolist())
         for element in self.elements:
-            element.nodes = [new_inds[n] for n in element.nodes]
+            if element.used_index:
+                element.nodes = [new_inds[n] for n in element.nodes]
+
+            if not element.used_index:
+                new_node_nums = new_inds[[self.node_id_to_ind[id] for id in element.nodes]]
+                node_ids = [self.node[n].id for n in new_node_nums]
+                element.nodes = node_ids
         self.nodes = [n for idn, n in enumerate(self.nodes) if bool_array[idn]]
 
 
