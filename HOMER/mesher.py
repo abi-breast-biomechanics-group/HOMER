@@ -724,7 +724,7 @@ class mesh:
 
             if not element.used_index:
                 new_node_nums = new_inds[[self.node_id_to_ind[id] for id in element.nodes]]
-                node_ids = [self.node[n].id for n in new_node_nums]
+                node_ids = [self.nodes[n].id for n in new_node_nums]
                 element.nodes = node_ids
         self.nodes = [n for idn, n in enumerate(self.nodes) if bool_array[idn]]
 
