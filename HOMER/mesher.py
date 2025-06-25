@@ -230,7 +230,7 @@ class Mesh:
         out_array = jnp.zeros((xis.shape[0], 3))
         for ide, e in enumerate(unique_elem):
             mask = ide == inv
-            out_array = out_array.at[mask].set(self.evaluate_embeddings([e], xi_data[mask]), fit_params=fit_params)
+            out_array = out_array.at[mask].set(self.evaluate_embeddings([e], xis[mask], fit_params=fit_params))
         return out_array
 
     def evaluate_ele_xi_pair_deriv_embeddings(self, eles, xis, derivs, fit_params=None):
@@ -244,7 +244,7 @@ class Mesh:
         out_array = jnp.zeros((xis.shape[0], 3))
         for ide, e in enumerate(unique_elem):
             mask = ide == inv
-            out_array = out_array.at[mask].set(self.evaluate_deriv_embeddings([e], xi_data[mask], derivs, fit_params=fit_params))
+            out_array = out_array.at[mask].set(self.evaluate_deriv_embeddings([e], xis[mask], derivs, fit_params=fit_params))
         return out_array
 
     def evaluate_normals(self, element_ids: np.ndarray, xis: np.ndarray) -> np.ndarray:
@@ -569,7 +569,7 @@ class Mesh:
 
         return faces + [k[0] for k in hash_space.values() if len(k) == 1]
 
-    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, res=10, mesh_color='gray'):
+    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, res=10, mesh_color='gray', mesh_opacity=0.1):
         #evaluate the mesh surface and evaluate all of the elements
         lines = self.get_lines()
         node_dots = np.array([node.loc for node in self.nodes])
@@ -582,7 +582,7 @@ class Mesh:
         tri_surf, tris = self.get_triangle_surface(res=res)
         surf_mesh = pv.PolyData(tri_surf)
         surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
-        s.add_mesh(surf_mesh, style='wireframe', color=mesh_color, opacity=0.1)
+        s.add_mesh(surf_mesh, style='wireframe', color=mesh_color, opacity=mesh_opacity)
         if labels:
             s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])])
         if scene is not None:

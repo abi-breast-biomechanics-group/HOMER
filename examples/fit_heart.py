@@ -131,7 +131,7 @@ def FFD_heart(mesh_obj:Mesh, start_points, end_points):
     func, jac = jacobian(ffd, init_estimate=init_params, further_args={"sob_w":0.5})
 
 
-    return func, jac, init_params
+    return func, jac, init_params, (elem, xis)
 
 def fit_heart(func, jac, init_params, sob_w, verbose=2):
     optim = least_squares(partial(func, sob_w=sob_w), init_params, jac=partial(jac, sob_w=sob_w), verbose=verbose, max_nfev=50)
@@ -166,7 +166,6 @@ if __name__ == "__main__":
 
 
 
-    s = pv.Plotter()
     # mesh_obj.plot(s, node_colour='b', node_size=20)
     # s.add_mesh(pv.PolyData(inner_wall), render_points_as_spheres=True, color='r', point_size=10)
     # s.add_mesh(pv.PolyData(outer_wall), render_points_as_spheres=True, color='g', point_size=10)
@@ -174,26 +173,38 @@ if __name__ == "__main__":
     start_points = load_heart_points('bin/landmark_points.ipdata')
     end_points = load_heart_points('bin/target_points.ipdata')
 
-    mesh_obj.plot(s, mesh_color='blue')
+    s = pv.Plotter()
+    mesh_obj.plot(s, mesh_color='blue', mesh_opacity=0.05)
 
     ws = 2**(-np.arange(-5, 20).astype(float))
-    ws = [0.5]
+    ws = [0.1]
 
-    f, j, init_params = FFD_heart(mesh_obj, start_points, end_points)
+    f, j, init_params, embed_ele_xis = FFD_heart(mesh_obj, start_points, end_points)
 
     unreg_sum = []
     for w in tqdm(ws, desc="L curve search"):
         res = fit_heart(f,j, init_params, w, verbose=0)
         unreg_sum.append(np.sum(np.abs(res[:(3 * start_points.shape[0])])))
-
-    plt.loglog(ws, unreg_sum)
-    plt.show()
-
-    mesh_obj.plot(s, mesh_color='gray')
     
-    s.add_mesh(pv.PolyData(start_points), render_points_as_spheres=True, color='orange', point_size=10)
-    s.add_mesh(pv.PolyData(end_points), render_points_as_spheres=True, color='purple', point_size=10)
+    if len(unreg_sum) > 1:
+        plt.loglog(ws, unreg_sum)
+        plt.show()
+
+    mesh_obj.plot(s, mesh_color='gray', mesh_opacity=0.02)
+    
+    s.add_mesh(pv.PolyData(start_points), render_points_as_spheres=True, color='orange', point_size=5)
+    s.add_mesh(pv.PolyData(end_points), render_points_as_spheres=True, color='purple', point_size=5)
     
     s.show()
+
+
+    wpts = mesh_obj.evaluate_ele_xi_pair_embeddings(eles=embed_ele_xis[0], xis=embed_ele_xis[1])
+    deltas = end_points - wpts
+    s = pv.Plotter()
+    mesh_obj.plot(s, mesh_opacity=0.02)
+    s.add_arrows(wpts, deltas, mag=10, cmap="turbo")
+    s.show()
+
+0
 
     # save_mesh(mesh_obj, 'bin/ffd_mesh.json')
