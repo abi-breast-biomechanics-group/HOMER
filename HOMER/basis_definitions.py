@@ -55,6 +55,7 @@ class AbstractBasis:
     node_fields: Optional[type[AbstractField]] = None
     weights: Optional[list[str]] = None
     deriv:Optional[list[Callable]] = None
+    order:Optional[int] = None
 
 BasisGroup = tuple[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]]
 
@@ -261,27 +262,32 @@ class H3Basis(AbstractBasis):
     node_fields = DerivativeField()
     weights = ['x0', 'dx0', 'x1', 'dx1'] #then this records the derivatives
     deriv = [H3, H3d1, H3d1d1]
+    order = 3
     
 @dataclass
 class L1Basis(AbstractBasis):
     fn = L1
     weights = ['x0', 'x1']
     deriv = [L1, L1d1, L1d1d1]
+    order = 1
 
 @dataclass
 class L2Basis(AbstractBasis):
     fn = L2
     weights = ['x0', 'x1', 'x2']
     deriv =[L2, L2d1]
+    order = 2
 
 @dataclass
 class L3Basis(AbstractBasis):
     fn = L3
     weights = ['x0', 'x1', 'x2', 'x3']
     deriv = [L3, L3d1]
+    order = 3
     
 @dataclass
 class L4Basis(AbstractBasis):
     fn = L4
     weights = ['x0', 'x1', 'x2', 'x3', 'x4']
     deriv = [L4, L4d1]
+    order = 4

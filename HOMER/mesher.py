@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Callable
 import numpy as np
 import jax.numpy as jnp
@@ -8,11 +9,15 @@ from matplotlib import pyplot as plt
 from functools import reduce, partial
 from itertools import groupby, combinations_with_replacement, product
 
+from scipy.spatial import KDTree
+from scipy.optimize import least_squares
+
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
+from HOMER.jacobian_evaluator import jacobian
 
 
 
-class mesh_node(dict):
+class MeshNode(dict):
     def __init__(self, loc, id=None, **kwargs):
         """
         The base node class, handling arbitrary properties over the mesh surface.
@@ -22,11 +27,13 @@ class mesh_node(dict):
         self.update(kwargs)
         self.fixed_params = set()
 
-        for key, value in self.items():
+        for key, value in kwargs.items():
             if isinstance(value, list):
                 self[key] = np.array(value)
             elif not isinstance(value, np.ndarray):
                 raise ValueError(f"Only np.ndarray are valid additional data, but found key: {key}, value: {value} pair")
+            else:
+                self[key] = value.copy()
 
     def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray]|np.ndarray]=None) -> None:
         if isinstance(param_names, str):
@@ -66,7 +73,7 @@ class mesh_node(dict):
 
 
 
-class mesh_element:
+class MeshElement:
     def __init__(self, basis_functions: BasisGroup, node_indexes: Optional[list[int]] = None, 
                  node_ids: Optional[list] = None, BP_inds: Optional = None, id=None):
         """
@@ -160,23 +167,20 @@ class mesh_element:
 
 
 
-class mesh:
-    def __init__(self, nodes:Optional[list[mesh_node]] = None, elements: Optional[list[mesh_element]|mesh_element]=None, jax_compile:bool = False) -> None:
+class Mesh:
+    def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False) -> None:
         
         ######### topology of the mesh
-        self.nodes: list[mesh_node] = [] if nodes is None else (nodes if isinstance(nodes, list) else [nodes])
-        self.elements: list[mesh_element] = [] if elements is None else (elements if isinstance(elements, list) else [elements])
+        self.nodes: list[MeshNode] = [] if nodes is None else (nodes if isinstance(nodes, list) else [nodes])
+        self.elements: list[MeshElement] = [] if elements is None else (elements if isinstance(elements, list) else [elements])
 
         self.node_id_to_ind = {}
         self.element_id_to_ind = {}
 
-
-
-
-
         ######### initialising values to be calculated
         self.elem_evals: Optional[Callable] = None
         self.evaluate_embeddings = lambda element_ids, xis, params: None #def the function signature here
+        self.evaluate_deriv_embeddings = lambda element_ids, xis, derivs, params: None
         self.elem_deriv_evals: Optional[Callable] = None
         self.fit_param: Optional[np.ndarray] = None
 
@@ -194,26 +198,54 @@ class mesh:
     ################################## MAIN FUNCTIONS
 
     def evaluate_element_embeddings(self, element_id, xis):
+        """
+        Given an element id, evaluates the embedding
+        """
         return self.evaluate_embeddings([self.element_id_to_ind[element_id]], xis)
-
-    def evaluate_deriv_embeddings(self, element_ids: np.ndarray|list[int]|tuple[int], xis: np.ndarray, deriv: list[int]) -> np.ndarray:
+    
+    def evaluate_embeddings_in_every_element(self, xis, fit_params=None):
         """
-        Evaluates embeddings over the elements of the mesh.
-        
-        :param element_ids: an iterable containing the int locations to evaluate the xis locations at.
-        :param xis: the xi locations (within each element) to evaluate points at.
-        :returns outputs: the world location of the evaluated embeddings.
+        Wrapper around evaluate embeddings that evaluates the embeddings in every element.
         """
-        if not (isinstance(element_ids, np.ndarray) or isinstance(element_ids, list)):
-            element_ids = [element_ids]
+        if fit_params is None:
+            fit_params = self.true_param_array
+        return self.evaluate_embeddings(list(range(len(self.elements))), xis, fit_params=fit_params)
 
-        outputs = [None] * len(element_ids)
-        for ide, ele in enumerate(element_ids):
-            params = self.get_element_params(ele)
-            data = self.elem_deriv_evals(params, xis, deriv)
-            outputs[ide] = data.reshape(-1,3)
-        return np.concatenate(outputs, axis=0)
+    def evaluate_deriv_embeddings_in_every_element(self, xis, derivs, fit_params=None):
+        """
+        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        """
+        if fit_params is None:
+            fit_params = self.true_param_array
+        return self.evaluate_deriv_embeddings(list(range(len(self.elements))), xis, derivs, fit_params=fit_params)
 
+    def evaluate_ele_xi_pair_embeddings(self, eles, xis, fit_params=None):
+        """
+        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        """
+        if fit_params is None:
+            fit_params = self.true_param_array
+
+        unique_elem, inv = np.unique_inverse(eles)
+        out_array = jnp.zeros((xis.shape[0], 3))
+        for ide, e in enumerate(unique_elem):
+            mask = ide == inv
+            out_array = out_array.at[mask].set(self.evaluate_embeddings([e], xi_data[mask]), fit_params=fit_params)
+        return out_array
+
+    def evaluate_ele_xi_pair_deriv_embeddings(self, eles, xis, derivs, fit_params=None):
+        """
+        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        """
+        if fit_params is None:
+            fit_params = self.true_param_array
+
+        unique_elem, inv = np.unique_inverse(eles)
+        out_array = jnp.zeros((xis.shape[0], 3))
+        for ide, e in enumerate(unique_elem):
+            mask = ide == inv
+            out_array = out_array.at[mask].set(self.evaluate_deriv_embeddings([e], xi_data[mask], derivs, fit_params=fit_params))
+        return out_array
 
     def evaluate_normals(self, element_ids: np.ndarray, xis: np.ndarray) -> np.ndarray:
         """
@@ -223,7 +255,7 @@ class mesh:
         :params xis: the locations to evaluate.
         :returns normals: unit vector directions associated with the mesh surface.
         """
-        return
+        raise NotImplementedError()
 
 
     ################################## CONVENIENCE
@@ -275,11 +307,11 @@ class mesh:
                 Xi2, W2 = self.gauss_grid(ng[1])
                 Xi3, W3 = self.gauss_grid(ng[2])
                 gindex = np.mgrid[0:ng[0], 0:ng[1], 0:ng[2]]
-                gindex = np.array([gindex[n].flatten() for n in [2,1,0]]).T
+                gindex = np.array([gindex[n].flatten() for n in [0,1,2]]).T #doesn't seem to work as default
                 Xi = np.array([
                     Xi1[gindex[:, 0]], Xi2[gindex[:, 1]], Xi3[gindex[:, 2]]])[:, :, 0].T
                 W = np.array([
-                    W1[gindex[:, 0]], W2[gindex[:, 1]], W3[gindex[:, 2, ]]]).T.prod(1)
+                    W1[gindex[:, 0]], W2[gindex[:, 1]], W3[gindex[:, 2]]]).T.prod(1)
                 return Xi, W
             
         raise ValueError('Invalid number of gauss points')
@@ -368,16 +400,17 @@ class mesh:
         self._generate_elem_functions()
         self._generate_elem_deriv_functions()
         self._generate_eval_function()
+        self._generate_deriv_function()
 
-    def add_node(self, node:mesh_node) -> None:
+    def add_node(self, node:MeshNode) -> None:
         self.nodes.append(node)
         # self.generate_mesh()
 
-    def add_element(self, element:mesh_element) -> None:
+    def add_element(self, element:MeshElement) -> None:
         self.elements.append(element)
         self.generate_mesh()
 
-    def get_element(self, element_ids: list) -> list[mesh_element]:
+    def get_element(self, element_ids: list) -> list[MeshElement]:
         """
         Returns the element with the associated id.
         """
@@ -385,10 +418,42 @@ class mesh:
             return self.get_element([element_ids])[0]
         return [self.elements[self.element_id_to_ind[id]] for id in element_ids]
 
-    def get_node(self, node_ids: list) -> list[mesh_node]:
+    def get_node(self, node_ids: list) -> list[MeshNode]:
         if not isinstance(node_ids, list):
             return self.get_node([node_ids])[0]
         return [self.nodes[self.node_id_to_ind[id]] for id in node_ids]
+
+    def associated_node_index(self, index_list:list, nodes_to_gather: Optional[list] = None):
+        """
+        Given an index list, returns the associated indexes of features in that index in the input param array.
+        Used to perform manipulations 
+        """
+        true_param_array = np.concatenate([np.concatenate([node.loc] + [d.flatten() for d in node.values()]) for node in self.nodes]).copy()
+        self.update_from_params(np.arange(true_param_array.shape[-1]), generate=False)
+
+        nodes_to_iter = [self.nodes[e] for e in nodes_to_gather] if nodes_to_gather is not None else self.nodes
+
+        param_ids = []
+        for idn, node in enumerate(nodes_to_iter):
+            node_data = []
+
+            for field in index_list: 
+                if field == "loc":
+                    node_data.append(node.loc)
+                else:
+                    try:
+                        node_data.append(node[field].flatten())
+                    except KeyError:
+                        if nodes_to_gather is not None:
+                            ele_name = nodes_to_gather[idn]
+                        else:
+                            ele_name = idn
+
+                        raise ValueError(f"Node {ele_name} did not have the required field '{field}'")
+            param_ids.append(node_data)
+
+        self.update_from_params(true_param_array, generate=False)
+        return param_ids
 
     ################################## PLOTTING
     def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, just_faces=False) -> np.ndarray:
@@ -504,7 +569,7 @@ class mesh:
 
         return faces + [k[0] for k in hash_space.values() if len(k) == 1]
 
-    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False):
+    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, res=10, mesh_color='gray'):
         #evaluate the mesh surface and evaluate all of the elements
         lines = self.get_lines()
         node_dots = np.array([node.loc for node in self.nodes])
@@ -514,10 +579,10 @@ class mesh:
         # node_dots_m['col'] = np.arange(node_dots.shape[0])
         s.add_mesh(node_dots, render_points_as_spheres=True, color=node_colour, point_size=node_size)
 
-        tri_surf, tris = self.get_triangle_surface()
+        tri_surf, tris = self.get_triangle_surface(res=res)
         surf_mesh = pv.PolyData(tri_surf)
         surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
-        s.add_mesh(surf_mesh, style='wireframe', color='gray', opacity=0.1)
+        s.add_mesh(surf_mesh, style='wireframe', color=mesh_color, opacity=0.1)
         if labels:
             s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])])
         if scene is not None:
@@ -564,29 +629,111 @@ class mesh:
             for ide in range(jnp.asarray(element_ids).shape[0]):
                 outputs[ide] = self.elem_evals(params[ide], jnp.asarray(xis)).reshape(-1, 3)
             return jnp.concatenate(outputs, axis=0)
-
-        # def deriv_xis(element_ids, xis, fit_params=self.param_array, ele_map = self.ele_map):
-        #     map = jnp.asarray(ele_map)[jnp.asarray(element_ids)].astype(int)
-        #     params = jnp.asarray(fit_params)[map]
-        #     outputs = [None] * len(element_ids)
-        #     for ide, ele in enumerate(element_ids):
-        #         outputs[ide] = self.elem_xi_deriv(params[ide], jnp.asarray(xis))
-        #     return jnp.concatenate(outputs, axis=0)
-        #
-        # def deriv_params(element_ids, xis, fit_params=self.param_array, ele_map=self.ele_map):
-        #     map = jnp.asarray(ele_map)[jnp.asarray(element_ids)].astype(int)
-        #     params = jnp.asarray(fit_params)[map]
-        #     outputs = [None] * len(element_ids)
-        #     for ide, ele in enumerate(element_ids):
-        #         outputs[ide] = self.elem_param_deriv(params[ide], jnp.asarray(xis))
-        #     return jnp.concatenate(outputs, axis=0)
-        #
-        # def not_impl(val):
-        #     raise ValueError("This value isn't continuous")
-        #
-        # evaluate_embeddings.custom_deriv([not_impl, deriv_xis, deriv_params, not_impl])
         
         self.evaluate_embeddings = evaluate_embeddings
+
+    def _generate_deriv_function(self):
+        """
+            Generates the internal functions that evaluate the derivatives of embeddings
+            Code is structured so that the result can express custom derivatives
+        """
+        
+        def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
+
+            param_data = jnp.asarray(self.true_param_array)
+            fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
+
+            map = jnp.asarray(ele_map)[jnp.asarray(element_ids)].astype(int)
+            params = jnp.asarray(fit_params)[map]
+            outputs = [None] * len(element_ids)
+            for ide in range(jnp.asarray(element_ids).shape[0]):
+                outputs[ide] = self.elem_deriv_evals(params[ide], jnp.asarray(xis), derivs).reshape(-1, 3)
+            return jnp.concatenate(outputs, axis=0)
+        
+        self.evaluate_deriv_embeddings = evaluate_deriv_embeddings
+
+    
+
+    ################################# useful utils.
+
+    def embed_points(self, points, verbose=0):
+
+        # generate a KD tree of self
+        if self.elements[0].ndim == 2:
+            res = 50
+            xis = self.xi_grid(res, 2)
+            ndim = 2
+        else:
+            res = 30
+            xis = self.xi_grid(res, 3)
+            ndim = 3
+        tree = KDTree(self.evaluate_embeddings_in_every_element(xis))
+        _, i = tree.query(points, k=1, workers=-1)
+        elem_num = np.array(i) // xis.shape[0]
+
+        unique_elem, inv = np.unique_inverse(elem_num)
+        xi_ind = np.array(i) % xis.shape[0]
+        init_xi = xis[xi_ind].flatten()
+
+        def optim_embed(params):
+            xi_data = params.reshape(-1,ndim)
+            out_data = []
+            for ide, e in enumerate(unique_elem):
+                mask = ide == inv
+                dist = points[mask] - self.evaluate_embeddings([e], xi_data[mask])
+                out_data.append(dist.flatten())
+            return jnp.concatenate(out_data)
+
+        function, jac = jacobian(optim_embed, init_estimate=init_xi)
+        bounds = (np.zeros_like(init_xi), np.ones_like(init_xi))
+        result = least_squares(function, init_xi, jac=jac, bounds=bounds, verbose=verbose)
+
+        final_mean_dist = np.mean(np.linalg.norm(result.fun.reshape(-1, ndim), axis=-1))
+        if verbose == 2:
+            print(f"final mean error of {final_mean_dist:.2f} units")
+
+        return elem_num, result.x.reshape(-1,ndim)
+
+
+    def evaluate_sobolev(self, weights=None, fit_params=None):
+        """
+        Works out and defines the Sobolev values associated with the derivatives of the input elements.
+        Then calculates the appropriate gauss points, and returns the elements assessed with the appropriate weighting. 
+        """
+
+        n_derivs = [len(b.deriv) for b in self.elements[0].basis_functions]
+        d_order = [b.order for b in self.elements[0].basis_functions]
+        if fit_params is None:
+            fit_params = self.true_param_array
+
+        gp, w = self.gauss_grid(d_order)
+        deriv_combos = list(product(*[range(d) for d in n_derivs]))[1:] # skip the no deriv case
+        n_eles = len(self.elements)
+
+        if weights is None:
+            weights = np.ones(len(deriv_combos))
+        else:
+            if not len(weights) == len(deriv_combos):
+                raise ValueError("The length of the provided weights did not match the number of sobolev terms associated with this element")
+
+        out_data = []
+        for d, sw in zip(deriv_combos, weights):
+            data = self.evaluate_deriv_embeddings_in_every_element(gp, d, fit_params=fit_params)
+            weighted = (data.reshape(n_eles, -1, 3) * w[None, :, None]).ravel() * sw
+            out_data.append(weighted)
+
+        return jnp.concatenate(out_data)
+            
+
+
+
+
+
+        
+
+
+
+
 
 
 
@@ -646,7 +793,7 @@ class mesh:
                 ind = spatial_hash.get(hashp:=tuple(np.round(np.asarray(pt), 6)), None) 
                 new_vals = {k:v for k, v in zip(e.used_node_fields, [a[idpt] for a in additional_pts])}
                 if ind is None:
-                    node = mesh_node(pt, **new_vals)
+                    node = MeshNode(pt, **new_vals)
                     self.add_node(node)
                     pt_index_array.append(len(self.nodes)-1)
                     spatial_hash[hashp] = len(self.nodes)-1
@@ -677,7 +824,7 @@ class mesh:
                         if e.id is not None:
                             elem_id = str(e.id) + f"_subelem_{i}_{j}"
 
-                        new_e = mesh_element(node_indexes=points.T.flatten().tolist(), basis_functions=e.basis_functions, id=elem_id)
+                        new_e = MeshElement(node_indexes=points.T.flatten().tolist(), basis_functions=e.basis_functions, id=elem_id)
                         new_elements.append(new_e)
                         continue
                     for k in range(n_new[2]): 
@@ -694,7 +841,7 @@ class mesh:
                         if e.id is not None:
                             elem_id = str(e.id) + f"_subelem_{i}_{j}_{k}"
 
-                        new_e = mesh_element(node_indexes=points.tolist(), basis_functions=e.basis_functions, BP_inds=e.BasisProductInds, id=elem_id)
+                        new_e = MeshElement(node_indexes=points.tolist(), basis_functions=e.basis_functions, BP_inds=e.BasisProductInds, id=elem_id)
                         new_elements.append(new_e)
           
 

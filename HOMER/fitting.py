@@ -1,13 +1,13 @@
 import numpy as np
 import jax.numpy as jnp
 
-from HOMER.mesher import mesh
+from HOMER.mesher import Mesh
 from HOMER.optim import jax_comp_kdtree_distance_query
 from HOMER.jacobian_evaluator import jacobian
 
 from matplotlib import pyplot as plt
 
-def point_cloud_fit(mesh:mesh, data, res=20, compile=True):
+def point_cloud_fit(mesh:Mesh, data, res=20, compile=True):
     """
         An example that creates a fitting problem for a mesh.
     """

@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 import numpy as np
 
-from HOMER.mesher import mesh, mesh_element, mesh_node
+from HOMER.mesher import Mesh, MeshElement, MeshNode
 from HOMER.basis_definitions import H3Basis, L2Basis
 
 def process_node(node_str, keys, dim=3):
@@ -15,8 +15,6 @@ def process_node(node_str, keys, dim=3):
         datum = float(re.findall(r"[-+]?(?:\d*\.*\d+)", l)[-1])
         node_data[prop_num].append(datum)
 
-
-    print(node_data)
     node_loc = np.array(node_data[0])
     node_keys = {k:np.array(v) for k, v in zip(keys, node_data[1:])}
 
@@ -24,7 +22,7 @@ def process_node(node_str, keys, dim=3):
         breakpoint()
 
     
-    node = mesh_node(node_loc, id=node_num, **node_keys)
+    node = MeshNode(node_loc, id=node_num, **node_keys)
 
     return node
 
@@ -62,7 +60,7 @@ def process_elem(elem_data, basis_def):
     inds = re.findall(r"[-+]?(?:\d*\.*\d+)", elem_data[-1])
     no_dupe = len(inds) == len(set(inds))
     # print(no_dupe)
-    elem = mesh_element(node_ids=inds[2:], basis_functions=basis_def, id=id), no_dupe
+    elem = MeshElement(node_ids=inds[2:], basis_functions=basis_def, id=id), no_dupe
     return elem
 
 def load_elem(loc, basis_def):
@@ -88,6 +86,14 @@ def load_elem(loc, basis_def):
 
     elem = [process_elem(elem_datum, basis_def) for elem_datum in elem_data]
     return [e for e, t in elem]
+
+def load_mesh(ipnode, ipelem, basis=(H3Basis, H3Basis, L2Basis), keys=('du', 'dv', 'dudv')):
+    nodes = load_node(ipnode, keys = keys)
+    elems = load_elem(ipelem, basis_def=basis)
+
+    meshObj = Mesh(nodes, elems)
+    meshObj._clean_pts()
+    return meshObj
 
 if __name__ == "__main__":
     ipnode = Path("bin/cyl.ipnode")

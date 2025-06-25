@@ -1,4 +1,4 @@
-from HOMER.mesher import mesh, mesh_node, mesh_element
+from HOMER.mesher import Mesh, MeshNode, MeshElement
 from HOMER.basis_definitions import L1Basis, L2Basis, L3Basis, L4Basis, H3Basis
 
 from pathlib import Path
@@ -9,7 +9,7 @@ import numpy as np
 STR_LOOKUP = {str(k.__name__):k for k in [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis]}
 
 
-def save_mesh(obj_mesh:mesh, file_location: Path):
+def save_mesh(obj_mesh:Mesh, file_location: Path):
     if not isinstance(file_location, Path):
         file_location = Path(file_location)
 
@@ -18,6 +18,8 @@ def save_mesh(obj_mesh:mesh, file_location: Path):
     for idn, node in enumerate(obj_mesh.nodes):
         node_def = {"loc": node.loc.tolist()}
         node_def.update({k:v.tolist() for k,v in node.items()})
+        if node.id is not None:
+            node_def['id'] = node.id
         nodes[idn] = node_def
     dict_rep["nodes"] = nodes
 
@@ -25,6 +27,7 @@ def save_mesh(obj_mesh:mesh, file_location: Path):
     for ide, element in enumerate(obj_mesh.elements):
         ele_def = {"nodes": element.nodes}
         ele_def['basis'] = [str(b.__name__) for b in element.basis_functions]
+        ele_def['used_index']= element.used_index
         elements[ide] = ele_def
     dict_rep["elements"] = elements
 
@@ -33,24 +36,32 @@ def save_mesh(obj_mesh:mesh, file_location: Path):
     
     return
 
-def load_mesh(file_location: Path) -> mesh:
+def load_mesh(file_location: Path) -> Mesh:
     if not isinstance(file_location, Path):
         file_location = Path(file_location)
     with open(file_location, 'r') as f:
         dict_rep = json.load(f)
 
-    obj_mesh = mesh()
+    obj_mesh = Mesh()
 
     node_dict = dict_rep['nodes']
     for node_def in node_dict.values():
         loc = node_def.pop('loc')
-        obj_mesh.add_node(mesh_node(loc, **{k:np.array(v) for k, v in node_def.items()}))
+        node_id = node_def.pop('id', None)
+        obj_mesh.add_node(
+            MeshNode(loc, **{k:np.array(v) for k, v in node_def.items()}, id=node_id))
 
     elem_dict = dict_rep['elements']
     for elem_def in elem_dict.values():
-        obj_mesh.add_element(mesh_element(
-            elem_def['nodes'], 
-            [STR_LOOKUP[k] for k in elem_def['basis']],
-        ))
+        if elem_def.get('used_index', True):
+            obj_mesh.add_element(MeshElement(
+                node_indexes=elem_def['nodes'], 
+                basis_functions=[STR_LOOKUP[k] for k in elem_def['basis']],
+            ))
+        else:
+            obj_mesh.add_element(MeshElement(
+                node_ids=elem_def['nodes'], 
+                basis_functions=[STR_LOOKUP[k] for k in elem_def['basis']],
+            ))
     obj_mesh.generate_mesh()
     return obj_mesh

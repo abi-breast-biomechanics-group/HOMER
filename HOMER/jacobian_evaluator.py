@@ -9,28 +9,32 @@ import scipy
 from matplotlib import pyplot as plt
 
 
-def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[None] = None, param_range = None, param_n = None, sparsity=None):
+def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[None] = None, param_range = None, param_n = None, sparsity=None, further_args = None):
+
     if init_estimate is None and sparsity is None:
         raise ValueError("Code needs an initial estimate for meaningfull sparsity estimation")
 
     if cost_function is None:
         return partial(jacobian, init_estimate=init_estimate, param_range=param_range, param_n=param_n)
+
+    if further_args is None:
+        further_args = {}
     
     # get the input function
     fwd_func = jax.jit(cost_function)
     # get a sparsity matrix from that input
     if sparsity is None:
-        sparsity = estimate_sparsity(fwd_func, init_estimate, param_range, param_n)
+        sparsity = estimate_sparsity(partial(fwd_func, **further_args), init_estimate, param_range, param_n)
 
 
     @jax.jit
-    def sparse_jacobian(params):
+    def sparse_jacobian(params, **kwargs):
         with jax.ensure_compile_time_eval():
-            jacfwd = sparsejac.jacfwd(cost_function, sparsity=sparsity)
-        return jacfwd(params)
+            jacfwd = sparsejac.jacfwd(cost_function, sparsity=sparsity, argnums=0)
+        return jacfwd(params, **kwargs)
 
-    def scipy_compat(params):
-        jax_sparse = sparse_jacobian(params)
+    def scipy_compat(params, **kwargs):
+        jax_sparse = sparse_jacobian(params, **kwargs)
         return scipy.sparse.coo_array(
             (jax_sparse.data, (jax_sparse.indices[:, 0], jax_sparse.indices[:, 1])),
             shape = jax_sparse.shape,
