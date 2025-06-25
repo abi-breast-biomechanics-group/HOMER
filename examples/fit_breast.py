@@ -9,7 +9,7 @@ from HOMER.jacobian_evaluator import jacobian
 from matplotlib import pyplot as plt
 
 
-def pca_fit(mesh: Mesh, pca_weight_matrix, mean_shape, data, data_normals, res =20):
+def pca_fit(mesh: Mesh, pca_weight_matrix, mean_shape, data, data_normals, res = 20):
 
     #for simplicity, we imagine that the pca_weight matrix
     data_tree = jax_comp_kdtree_normal_distance_query(data, data_normals, kdtree_args={"workers":-1})

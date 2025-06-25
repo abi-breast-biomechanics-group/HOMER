@@ -22,18 +22,20 @@ class MeshNode(dict):
         """
         The base node class, handling arbitrary properties over the mesh surface.
         """
-        self.loc = np.array(loc)
+        self.loc = np.asarray(loc)
         self.id = id
         self.update(kwargs)
         self.fixed_params = set()
 
         for key, value in kwargs.items():
             if isinstance(value, list):
-                self[key] = np.array(value)
+                self[key] = np.asarray(value).copy()
+            elif isinstance(value, jnp.ndarray):
+                self[key] = np.asarray(value).copy()
             elif not isinstance(value, np.ndarray):
                 raise ValueError(f"Only np.ndarray are valid additional data, but found key: {key}, value: {value} pair")
             else:
-                self[key] = value.copy()
+                self[key] = np.array(value).copy()
 
     def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray]|np.ndarray]=None) -> None:
         if isinstance(param_names, str):
@@ -785,13 +787,13 @@ class Mesh:
                 for dl, di in zip(deriv_bound, d_val): 
                     derivs[dl] = di
                 d_scale = np.mean(ref_array[np.where(np.array(d_val))])
-                additional_pts.append(self.evaluate_deriv_embeddings(np.array([ide]), eval_pts, deriv=derivs)/d_scale)
+                additional_pts.append(self.evaluate_deriv_embeddings(np.array([ide]), eval_pts, derivs=derivs)/d_scale)
 
             #check the generated points against the element hashmap.
             pt_index_array = [] 
             for idpt, pt in enumerate(pts):
                 ind = spatial_hash.get(hashp:=tuple(np.round(np.asarray(pt), 6)), None) 
-                new_vals = {k:v for k, v in zip(e.used_node_fields, [a[idpt] for a in additional_pts])}
+                new_vals = {k:np.array(v) for k, v in zip(e.used_node_fields, [a[idpt] for a in additional_pts])}
                 if ind is None:
                     node = MeshNode(pt, **new_vals)
                     self.add_node(node)
