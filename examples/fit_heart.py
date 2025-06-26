@@ -58,7 +58,7 @@ def geometric_fit_heart_to_data(mesh_obj:Mesh, inner_wall, outer_wall, plot=Fals
 
     init_params = np.concatenate((init_yz_mag, base_param_array[node_non_x_deriv_inds]))
 
-    w = 0.001
+    w = 0.1
 
     def fitting_function_params(params):
         lparam = base_param_array.copy()
@@ -165,10 +165,11 @@ if __name__ == "__main__":
         mesh_obj = load_mesh(mloc)
 
 
-
+    # s = pv.Plotter()
     # mesh_obj.plot(s, node_colour='b', node_size=20)
     # s.add_mesh(pv.PolyData(inner_wall), render_points_as_spheres=True, color='r', point_size=10)
     # s.add_mesh(pv.PolyData(outer_wall), render_points_as_spheres=True, color='g', point_size=10)
+    # s.show()
     #
     start_points = load_heart_points('bin/landmark_points.ipdata')
     end_points = load_heart_points('bin/target_points.ipdata')
@@ -177,7 +178,7 @@ if __name__ == "__main__":
     mesh_obj.plot(s, mesh_color='blue', mesh_opacity=0.05)
 
     ws = 2**(-np.arange(-5, 20).astype(float))
-    ws = [0.1]
+    # ws = [0.1]
 
     f, j, init_params, embed_ele_xis = FFD_heart(mesh_obj, start_points, end_points)
 
@@ -205,6 +206,5 @@ if __name__ == "__main__":
     s.add_arrows(wpts, deltas, mag=10, cmap="turbo")
     s.show()
 
-0
 
     # save_mesh(mesh_obj, 'bin/ffd_mesh.json')

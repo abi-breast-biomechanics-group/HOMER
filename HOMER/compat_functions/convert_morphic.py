@@ -1,4 +1,5 @@
 import numpy as np
+import pyvista as pv
 
 from morphic import Mesh as mMesh
 from HOMER import Mesh, MeshElement, MeshNode
@@ -8,7 +9,7 @@ from HOMER.io import load_mesh, save_mesh
 from HOMER.basis_definitions import H3Basis
 
 
-def convert_morphic(morphic_mesh:mMesh, basis_functions):
+def convert_morphic(morphic_mesh:mMesh, basis_functions, plot=False):
 
     nodes = []
     for node in morphic_mesh.nodes:
@@ -30,7 +31,12 @@ def convert_morphic(morphic_mesh:mMesh, basis_functions):
         )
     
     objMesh = Mesh(nodes=nodes, elements=elements)
-    objMesh.plot()
+
+    if plot:
+        objMesh.plot()
+
+    breakpoint()
+
 
     return objMesh
 
