@@ -46,9 +46,9 @@ def jax_comp_kdtree_normal_distance_query(fit_data, normals, kdtree_args=None):
     kd_tree_args = {} if kdtree_args is None else kdtree_args
     local_fit_data = fit_data
     tree = scipy.spatial.KDTree(fit_data)
-    normal_data = normals
+    normal_data = jnp.array(normals)
 
-    def get_distances(pts):
+    def get_local_distances(pts):
         _, i = tree.query(pts, k=1, **kd_tree_args)
         dists = (pts - local_fit_data[i]) * normal_data[i]
         return dists.flatten().astype("float32"), i
@@ -56,20 +56,30 @@ def jax_comp_kdtree_normal_distance_query(fit_data, normals, kdtree_args=None):
     @jax.custom_jvp
     def distances(data):
         # data = jnp.asarray(data).squeeze()
-        try:
-            dists, i = jax.pure_callback(
-                get_distances,
-                jax.ShapeDtypeStruct((data.shape[0] * 3,), data.dtype),
-                data,
-            )
-        except:
-            breakpoint()
+        # try:
+        dists, i = jax.pure_callback(
+            get_local_distances,
+            (jax.ShapeDtypeStruct((data.shape[0] * 3, ), data.dtype),
+             jax.ShapeDtypeStruct((data.shape[0], ), jnp.zeros(3, dtype=int).dtype)),
+            data,
+        )
+        # except:
+        #     breakpoint()
         return dists
-
+    def ind_distances(data):
+        # data = jnp.asarray(data).squeeze()
+        # try:
+        dists, i = jax.pure_callback(
+            get_local_distances,
+            (jax.ShapeDtypeStruct((data.shape[0] * 3, ), data.dtype),
+             jax.ShapeDtypeStruct((data.shape[0], ), jnp.zeros(3, dtype=int).dtype)),
+            data,
+        )
+        return dists, i
     @distances.defjvp
     def distances_jax_deriv(primal, co_tangents):
         x, = primal
-        primal_comp, i = distances(x)
+        primal_comp, i = ind_distances(x)
 
         co_tangent_intermediate, = co_tangents
         co_tangent = co_tangent_intermediate * normal_data[i]

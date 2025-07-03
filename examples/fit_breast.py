@@ -3,36 +3,80 @@ import numpy as np
 import jax.numpy as jnp
 
 from HOMER.mesher import Mesh
-from HOMER.optim import jax_comp_kdtree_normal_distance_query
+from HOMER.optim import jax_comp_kdtree_distance_query, jax_comp_kdtree_normal_distance_query
 from HOMER.jacobian_evaluator import jacobian
 
 from matplotlib import pyplot as plt
-
-
-def pca_fit(mesh: Mesh, pca_weight_matrix, mean_shape, data, data_normals, res = 20):
+def normal_fit(mesh: Mesh,
+            rib_data, rib_data_normal,
+            skin_data, skin_data_normal,
+            rib_range, skin_range,
+            res = 20, w=0.1):
 
     #for simplicity, we imagine that the pca_weight matrix
-    data_tree = jax_comp_kdtree_normal_distance_query(data, data_normals, kdtree_args={"workers":-1})
+    rib_data_tree = jax_comp_kdtree_normal_distance_query(rib_data, rib_data_normal, kdtree_args={"workers":-1})
+    skin_data_tree = jax_comp_kdtree_normal_distance_query(skin_data, skin_data_normal, kdtree_args={"workers":-1})
+    eval_points = mesh.xi_grid(res)
+
+    init_params = mesh.optimisable_param_array.copy()
+
+    def_sob = mesh.evaluate_sobolev()
+    def fitting_func(params):
+        fit_params = params
+        rib_pts = mesh.evaluate_embeddings(rib_range, eval_points, fit_params=fit_params)
+        skin_pts = mesh.evaluate_embeddings(skin_range, eval_points, fit_params=fit_params)
+        rib_dif = rib_data_tree(rib_pts)
+        skin_dif = skin_data_tree(skin_pts)
+        sob_dif = (def_sob - mesh.evaluate_sobolev(fit_params=fit_params)) * w
+        return jnp.concatenate((rib_dif, skin_dif, sob_dif))
+
+    def update_fun(mesh, params):
+        fit_params = params
+        mesh.update_from_params(fit_params)
+
+    fun, jac = jacobian(fitting_func, init_estimate=init_params)
+    return fun, jac, init_params, update_fun
+def pca_fit(mesh: Mesh, pca_weight_matrix, mean_shape,
+            rib_data, rib_data_normal,
+            skin_data, skin_data_normal,
+            rib_range, skin_range,
+            res = 20):
+
+    #for simplicity, we imagine that the pca_weight matrix
+    rib_data_tree = jax_comp_kdtree_normal_distance_query(rib_data, rib_data_normal, kdtree_args={"workers":-1})
+    skin_data_tree = jax_comp_kdtree_normal_distance_query(skin_data, skin_data_normal, kdtree_args={"workers":-1})
     eval_points = mesh.xi_grid(res)
 
     init_params = np.zeros(pca_weight_matrix.shape[0])
 
     def fitting_func(params):
         fit_params = jnp.sum(params[:, None] * pca_weight_matrix, axis=0) + mean_shape
-        pts = mesh.evaluate_embeddings_in_every_element(eval_points, fit_params=fit_params)
-        dif = data_tree(pts)
-        return dif 
-    
+        rib_pts = mesh.evaluate_embeddings(rib_range, eval_points, fit_params=fit_params)
+        skin_pts = mesh.evaluate_embeddings(skin_range, eval_points, fit_params=fit_params)
+        rib_dif = rib_data_tree(rib_pts)
+        skin_dif = skin_data_tree(skin_pts)
+        return jnp.concatenate((rib_dif, skin_dif))
+
+    def update_fun(mesh, params):
+        fit_params = jnp.sum(params[:, None] * pca_weight_matrix, axis=0) + mean_shape
+        mesh.update_from_params(fit_params)
+
     fun, jac = jacobian(fitting_func, init_estimate=init_params)
-    return fun, jac
+    return fun, jac, init_params, update_fun
 
  
-def nonlinear_geometric_sobolev_prior_with_mask(mesh:Mesh, data, data_normal, res=20, w=0.1, dist_thresh=0.01):
+def nonlinear_geometric_sobolev_prior_with_mask(mesh:Mesh,
+                                                rib_data, rib_data_normal,
+                                                skin_data, skin_data_normal,
+                                                rib_range, skin_range,
+                                                res=20, w=0.1, dist_thresh=0.01):
     """
         An example that creates a fitting problem for a mesh.
     """
 
-    data_tree = jax_comp_kdtree_normal_distance_query(data, data_normal, kdtree_args={"workers":-1})
+    # data_tree = jax_comp_kdtree_normal_distance_query(data, data_normal, kdtree_args={"workers":-1})
+    rib_data_tree = jax_comp_kdtree_distance_query(rib_data, kdtree_args={"workers": -1})
+    skin_data_tree = jax_comp_kdtree_distance_query(skin_data, kdtree_args={"workers": -1})
     eval_points = mesh.xi_grid(res)
 
     #do a first evaluation, only using the subset of evals 
