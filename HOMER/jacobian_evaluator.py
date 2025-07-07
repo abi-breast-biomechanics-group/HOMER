@@ -5,11 +5,12 @@ import jax
 import sparsejac
 import numpy as np
 import scipy
+import time
 
 from matplotlib import pyplot as plt
 
 
-def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[None] = None, param_range = None, param_n = None, sparsity=None, further_args = None):
+def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[None] = None, param_range = None, param_n = None, sparsity=None, further_args = None, sparse = True):
 
     if init_estimate is None and sparsity is None:
         raise ValueError("Code needs an initial estimate for meaningfull sparsity estimation")
@@ -26,19 +27,25 @@ def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[N
     if sparsity is None:
         sparsity = estimate_sparsity(partial(fwd_func, **further_args), init_estimate, param_range, param_n)
 
+    if sparse:
+        @jax.jit
+        def sparse_jacobian(params, **kwargs):
+            with jax.ensure_compile_time_eval():
+                jacfwd = sparsejac.jacfwd(cost_function, sparsity=sparsity, argnums=0)
+            return jacfwd(params, **kwargs)
 
-    @jax.jit
-    def sparse_jacobian(params, **kwargs):
-        with jax.ensure_compile_time_eval():
-            jacfwd = sparsejac.jacfwd(cost_function, sparsity=sparsity, argnums=0)
-        return jacfwd(params, **kwargs)
+        def scipy_compat(params, **kwargs):
+            jax_sparse = sparse_jacobian(params, **kwargs)
+            return scipy.sparse.coo_array(
+                (jax_sparse.data, (jax_sparse.indices[:, 0], jax_sparse.indices[:, 1])),
+                shape = jax_sparse.shape,
+            )
+    else:
 
-    def scipy_compat(params, **kwargs):
-        jax_sparse = sparse_jacobian(params, **kwargs)
-        return scipy.sparse.coo_array(
-            (jax_sparse.data, (jax_sparse.indices[:, 0], jax_sparse.indices[:, 1])),
-            shape = jax_sparse.shape,
-        )
+        def scipy_compat(params, **kwargs):
+            with jax.ensure_compile_time_eval():
+                jac_fwd = jax.jit(jax.jacfwd(cost_function, argnums=0))
+            return np.asarray(jac_fwd(params, **kwargs))
 
     return fwd_func, scipy_compat
     # return the compiled function and the compiled 

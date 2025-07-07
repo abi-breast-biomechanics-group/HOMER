@@ -2,11 +2,54 @@
 import numpy as np
 import jax.numpy as jnp
 
-from HOMER.mesher import Mesh
+from HOMER.mesher import Mesh, EVAL_PATTERN
 from HOMER.optim import jax_comp_kdtree_normal_distance_query
 from HOMER.jacobian_evaluator import jacobian
 
 from matplotlib import pyplot as plt
+
+
+
+# first thing to do is fix the nodes.
+
+def make_function_to_update_depnods(mesh:Mesh, dependent_nodes, elem_associated, elem_locs, deriv_scale, params):
+
+
+    #get the derivative pattern to eval:
+    d_to_eval = []
+    e = mesh.elements[0] 
+    deriv_bound = np.where([np.any([st[:2] == 'dx' for st in b.weights]) for b in e.basis_functions] )[0]
+    for d_val in EVAL_PATTERN[len(e.used_node_fields)]:
+        #calculate the additional derivatives in the directions that need them
+        derivs = [0,0,0]
+        for dl, di in zip(deriv_bound, d_val): 
+            derivs[dl] = di
+        d_to_eval.append(derivs)
+
+
+    def 
+
+
+
+
+
+
+
+
+
+    for dep_node_id, elem_num, eloc, dscale in zip(dependent_nodes, elem_associated, elem_locs, deriv_scale):
+        template_node = 
+        e = mesh.elements[elem_num] 
+        deriv_bound = np.where([np.any([st[:2] == 'dx' for st in b.weights]) for b in e.basis_functions] )[0]
+        for d_val in EVAL_PATTERN[len(e.used_node_fields)]:
+            #calculate the additional derivatives in the directions that need them
+            derivs = [0,0,0]
+            for dl, di in zip(deriv_bound, d_val): 
+                derivs[dl] = di
+            additional_pts.append(self.evaluate_deriv_embeddings(np.array([ide]), eval_pts, derivs=derivs)/d_scale)
+
+
+
 
 
 def pca_fit(mesh: Mesh, pca_weight_matrix, mean_shape, data, data_normals, res = 20):

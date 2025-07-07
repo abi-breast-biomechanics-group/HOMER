@@ -15,6 +15,10 @@ point7 = MeshNode(loc=([1,1,0]), du=[0,0,0], dv=[0,0,0], dw = ([1,0.5,-0.5]), du
 
 
 element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=(H3Basis, H3Basis, H3Basis))
+
 objMesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1)
+
+print("volume", objMesh.get_volume())
 objMesh.refine(2)
 objMesh.plot(node_colour='r')
+print("volume", objMesh.get_volume())

@@ -14,6 +14,7 @@ from scipy.optimize import least_squares
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import jacobian
+from HOMER.utils import vol_hexahedron
 
 
 
@@ -211,6 +212,7 @@ class Mesh:
         """
         if fit_params is None:
             fit_params = self.true_param_array
+
         return self.evaluate_embeddings(list(range(len(self.elements))), xis, fit_params=fit_params)
 
     def evaluate_deriv_embeddings_in_every_element(self, xis, derivs, fit_params=None):
@@ -730,14 +732,50 @@ class Mesh:
 
 
 
+    # def get_volume(self, res=4):
+    #     if self.elements[0].ndim == 2:
+    #         raise ValueError("Volume requested on a 2D element")
+    #     grid = self.xi_grid(res=res, dim=3)
+    #     eval_pts = self.evaluate_embeddings_in_every_element(grid).reshape(len(self.elements), res, res, res, 3)
+    #     vols_to_eval = combinations_with_replacement(range(res-1), 3)
+    #
+    #     for ev in eval_pts:
+    #         for vol in vols_to_eval:
+    #             # scene = pv.Plotter()
+    #             # scene.add_point_labels(np.array(ev.reshape(-1, 3)), [f"{e}" for e in range(64)])
+    #             # scene.show()
+    #             # breakpoint()
+    #
+    #             p0 = ev[vol[0], vol[1], vol[2]]
+    #             p1 = ev[vol[0], vol[1], vol[2]+1]
+    #             p2 = ev[vol[0], vol[1]+1, vol[2]]
+    #             p3 = ev[vol[0], vol[1]+1, vol[2]+1]
+    #             p4 = ev[vol[0]+1, vol[1], vol[2]]
+    #             p5 = ev[vol[0]+1, vol[1], vol[2]+1]
+    #             p6 = ev[vol[0]+1, vol[1]+1, vol[2]]
+    #             p7 = ev[vol[0]+1, vol[1]+1, vol[2]+1]
+    #             pts = jnp.array([p0, p1, p2, p3, p4, p5, p6, p7])
+    #
+    #
+    #             # scene = pv.Plotter()
+    #             # scene.add_point_labels(np.array(pts), [f"{e}" for e in range(8)])
+    #             # scene.show()
+    #             vol_hexahedron(pts)
+    def get_volume(self):
+        gauss_points, weights = self.gauss_grid([e.order for e in self.elements[0].basis_functions])
+        n_ele = len(self.elements)
+        du = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [1, 0, 0]).reshape(n_ele, -1, 1, 3)
+        dv = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [0, 1, 0]).reshape(n_ele, -1, 1, 3)
+        dw = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [0, 0, 1]).reshape(n_ele, -1, 1, 3)
+
+        Jmats = jnp.concatenate((du, dv, dw), axis=2)
+        dets = jnp.linalg.det(Jmats)
+        vols = dets * weights[None]
+        return jnp.sum(vols)
+
+
 
         
-
-
-
-
-
-
 
     ################################# REFINEMENT
 
@@ -780,7 +818,6 @@ class Mesh:
             pts = self.evaluate_embeddings(np.array([ide]), eval_pts)
             additional_pts = []
             deriv_bound = np.where([np.any([st[:2] == 'dx' for st in b.weights]) for b in e.basis_functions] )[0]
-            
             for d_val in EVAL_PATTERN[len(e.used_node_fields)]:
                 #calculate the additional derivatives in the directions that need them
                 derivs = [0,0,0]
@@ -931,6 +968,8 @@ def make_deriv_eval(basis_funcs: BasisGroup, bp_inds:list[tuple[int]]):
     return xi_eval
 
 GAUSS = { 
+        1:[np.array([[0.5]]),
+           np.array([1])],
         2:[np.array([[0.21132486540518708], [0.78867513459481287]]),
            np.array([0.5, 0.5])],
         3:[np.array([[0.1127016653792583], [0.5], [0.8872983346207417]]), 
