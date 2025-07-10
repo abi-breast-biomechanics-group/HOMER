@@ -1,5 +1,5 @@
 from pathlib import Path
-from HOMER import mesh
+from HOMER import Mesh
 from HOMER.basis_definitions import H3Basis
 from HOMER.optim import jax_comp_kdtree_distance_query
 from HOMER.compat_functions.load_exelem import load_mesh
