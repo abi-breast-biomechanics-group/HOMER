@@ -2,6 +2,7 @@ from functools import partial
 from typing import Callable, Optional
 from tqdm import tqdm
 import jax
+from jax.extend.core import Var
 import sparsejac
 import numpy as np
 import scipy
@@ -65,9 +66,7 @@ def estimate_sparsity(callable, init_estimate, param_range = None, param_n=None)
     ))
 
     sparsity = jax.experimental.sparse.BCOO((np.ones(inds.shape[0]), inds), shape=(init.shape[0], init_estimate.shape[0]))
-    # plt.imshow(sparsity.todense()
+    # plt.imshow(sparsity.todense()[:1000, :1000])
     # plt.show()
     return sparsity
-
-
 

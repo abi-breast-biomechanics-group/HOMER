@@ -210,16 +210,16 @@ class Mesh:
         Wrapper around evaluate embeddings that evaluates the embeddings in every element.
         """
         if fit_params is None:
-            fit_params = self.true_param_array
-        return self.evaluate_embeddings(list(range(len(self.elements))), xis, fit_params=fit_params)
+            fit_params = self.optimisable_param_array
+        return self.evaluate_embeddings(jnp.array(list(range(len(self.elements)))).astype(int), xis, fit_params=fit_params)
 
     def evaluate_deriv_embeddings_in_every_element(self, xis, derivs, fit_params=None):
         """
         Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
         """
         if fit_params is None:
-            fit_params = self.true_param_array
-        return self.evaluate_deriv_embeddings(list(range(len(self.elements))), xis, derivs, fit_params=fit_params)
+            fit_params = self.optimisable_param_array
+        return self.evaluate_deriv_embeddings(jnp.array(list(range(len(self.elements)))).astype(int), xis, derivs, fit_params=fit_params)
 
     def evaluate_ele_xi_pair_embeddings(self, eles, xis, fit_params=None):
         """
@@ -232,7 +232,7 @@ class Mesh:
         out_array = jnp.zeros((xis.shape[0], 3))
         for ide, e in enumerate(unique_elem):
             mask = ide == inv
-            out_array = out_array.at[mask].set(self.evaluate_embeddings([e], xis[mask], fit_params=fit_params))
+            out_array = out_array.at[mask].set(self.evaluate_embeddings(element_ids=[e], xis=xis[mask], fit_params=fit_params))
         return out_array
 
     def evaluate_ele_xi_pair_deriv_embeddings(self, eles, xis, derivs, fit_params=None):
@@ -420,12 +420,12 @@ class Mesh:
             return self.get_element([element_ids])[0]
         return [self.elements[self.element_id_to_ind[id]] for id in element_ids]
 
-    def get_node(self, node_ids: list) -> list[MeshNode]:
+    def get_node(self, node_ids: list | int | str) -> list[MeshNode] | MeshNode:
         if not isinstance(node_ids, list):
             return self.get_node([node_ids])[0]
         return [self.nodes[self.node_id_to_ind[id]] for id in node_ids]
 
-    def associated_node_index(self, index_list:list, nodes_to_gather: Optional[list] = None):
+    def associated_node_index(self, index_list:list, nodes_to_gather: Optional[list] = None, node_by_id = False):
         """
         Given an index list, returns the associated indexes of features in that index in the input param array.
         Used to perform manipulations 
@@ -433,7 +433,13 @@ class Mesh:
         true_param_array = np.concatenate([np.concatenate([node.loc] + [d.flatten() for d in node.values()]) for node in self.nodes]).copy()
         self.update_from_params(np.arange(true_param_array.shape[-1]), generate=False)
 
-        nodes_to_iter = [self.nodes[e] for e in nodes_to_gather] if nodes_to_gather is not None else self.nodes
+        if nodes_to_gather is None:
+            nodes_to_iter = self.nodes
+        else: 
+            if node_by_id:
+                nodes_to_iter = [self.nodes[self.node_id_to_ind[e]] for e in nodes_to_gather] 
+            else:
+                nodes_to_iter = [self.nodes[e] for e in nodes_to_gather] 
 
         param_ids = []
         for idn, node in enumerate(nodes_to_iter):
@@ -465,13 +471,29 @@ class Mesh:
         ele_iter  = [element_ids] if not isinstance(element_ids, list) else element_ids
         elements_to_iter = self.elements if element_ids is None else ele_iter
         if not just_faces:
-            all_points = []
-            for ne, e in enumerate(elements_to_iter):
-                grid = self.xi_grid(res=res, ndim=e.ndim, surface=True)
-                all_points.append(self.evaluate_embeddings(np.array([ne]), grid))
-            return np.concatenate(all_points, axis=0) 
+            grid = self.xi_grid(res=res, ndim=self.elements[0].ndim, surface=True)
+            if element_ids is not None:
+                all_points = []
+                for ne, e in enumerate(elements_to_iter):
+                    all_points.append(self.evaluate_embeddings(np.array([ne]), grid))
+                return np.concatenate(all_points, axis=0) 
+            else:
+                return self.evaluate_embeddings_in_every_element(grid)
         else:
             face_pts = []
+
+            if self.elements[0].ndim == 3:
+                faces = self.get_faces()
+                xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
+                for face in faces:
+                    element = self.elements[face[0]]
+                    grid_def = xi3grid[face[1], face[2]]
+                    face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def))
+                return np.concatenate(face_pts, axis=0)
+            else:
+                xi2grid = self.xi_grid(res=res, dim=2)
+                return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid))
+
             faces = self.get_faces()
             for face in faces:
                 xi2grid = self.xi_grid(res=res, dim=2)
@@ -502,7 +524,7 @@ class Mesh:
         return surface_pts, tris
 
 
-    def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=20) -> pv.PolyData:
+    def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=10) -> pv.PolyData:
         """
         Returns a pv.PolyData object containing lines defining the edges of the mesh surface.
         """
@@ -516,30 +538,72 @@ class Mesh:
         ))
 
         ele_iter  = [element_ids] if not isinstance(element_ids, list) else element_ids
-        elements_to_iter = self.elements if element_ids is None else ele_iter
-        for ne, e in enumerate(elements_to_iter):
-            n_dim = e.ndim
-            residual_size = n_dim - 1 
-            vals = [0, 1]
-            combs = list(product(vals, repeat=residual_size)) #the combinations 
-            for i in range(n_dim):
-                d = list(range(n_dim))
-                d.pop(i)
-                for comb in combs:
-                    xi_list = [0] * n_dim
-                    for cs, ind in zip(comb, d):
-                        xi_list[ind] = cs * np.ones(res)
-                    xi_list[i] = np.linspace(0, 1, res)
-                    xis = np.column_stack(xi_list)
-                    comb_pts = self.evaluate_embeddings(np.array([ne]), xis)
+        elements_to_iter = self.elements if element_ids is None else ele_iter #if we assume that all elements must be the same because it's easier.
 
-                    l_pts = line_points.shape[0]
-                    line_points = np.concatenate((line_points, comb_pts))
-                    connectivity = np.concatenate((
-                        connectivity,
-                        blank_connectivity + [0, l_pts, l_pts],
-                    ))
-        mesh = pv.PolyData(line_points, lines=connectivity.astype(int))
+
+        n_dim = self.elements[0].ndim
+        residual_size = n_dim - 1 
+        vals = [0, 1]
+        combs = list(product(vals, repeat=residual_size)) #the combinations 
+        all_xis = []
+
+
+        total_ls = 0
+        for i in range(n_dim):
+            d = list(range(n_dim))
+            d.pop(i)
+            for comb in combs:
+                xi_list = [0] * n_dim
+                for cs, ind in zip(comb, d):
+                    xi_list[ind] = cs * np.ones(res)
+                xi_list[i] = np.linspace(0, 1, res)
+                xis = np.column_stack(xi_list)
+                all_xis.append(xis)
+
+                l_pts = total_ls
+                connectivity = np.concatenate((
+                    connectivity,
+                    blank_connectivity + [0, l_pts, l_pts],
+                ))
+                total_ls += xis.shape[0]
+
+        flat_xis = np.array(all_xis).reshape(-1, n_dim)
+                
+        lc = flat_xis.shape[0]
+        n_ele = len(self.elements) 
+        ele_up = lc * np.arange(n_ele)[None, :, None] * [0, 1, 1]
+        long_connectivity = (connectivity[:, None] + ele_up).reshape(-1, 3)
+        line_points = np.asarray(self.evaluate_embeddings_in_every_element(flat_xis)) #.reshape(n_ele, -1 , 3)[:2].reshape(-1, 3)
+
+        # for ne, e in enumerate(elements_to_iter):
+        #     n_dim = e.ndim
+        #     residual_size = n_dim - 1 
+        #     vals = [0, 1]
+        #     combs = list(product(vals, repeat=residual_size)) #the combinations 
+        #     for i in range(n_dim):
+        #         d = list(range(n_dim))
+        #         d.pop(i)
+        #         for comb in combs:
+        #             xi_list = [0] * n_dim
+        #             for cs, ind in zip(comb, d):
+        #                 xi_list[ind] = cs * np.ones(res)
+        #             xi_list[i] = np.linspace(0, 1, res)
+        #             xis = np.column_stack(xi_list)
+        #             comb_pts = self.evaluate_embeddings(np.array([ne]), xis)
+        #
+        #             l_pts = line_points.shape[0]
+        #             line_points = np.concatenate((line_points, comb_pts))
+        #             connectivity = np.concatenate((
+        #                 connectivity,
+        #                 blank_connectivity + [0, l_pts, l_pts],
+        #             ))
+        mesh = pv.PolyData(
+            line_points, 
+            # lines=connectivity.astype(int)
+            lines=long_connectivity.astype(int),
+        )
+        # mesh.plot(color='k', render_points_as_spheres=True)
+        # raise ValueError
         return mesh
 
     def get_faces(self, rounding_res = 10) -> list[tuple[int]]:
@@ -571,7 +635,7 @@ class Mesh:
 
         return faces + [k[0] for k in hash_space.values() if len(k) == 1]
 
-    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, res=10, mesh_color='gray', mesh_opacity=0.1):
+    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, res=10, mesh_color='gray', mesh_opacity=0.1, elem_labels=False):
         #evaluate the mesh surface and evaluate all of the elements
         lines = self.get_lines()
         node_dots = np.array([node.loc for node in self.nodes])
@@ -587,6 +651,12 @@ class Mesh:
         s.add_mesh(surf_mesh, style='wireframe', color=mesh_color, opacity=mesh_opacity)
         if labels:
             s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])])
+        if elem_labels:
+            elem_locs= np.ones((1, self.elements[0].ndim)) * 0.5
+            breakpoint()
+            pts = np.array(self.evaluate_embeddings_in_every_element(elem_locs))
+            s.add_point_labels(points = pts, labels=[f"elem: {i}" for i in range(pts.shape[0])])
+
         if scene is not None:
             return
         s.show()
@@ -623,10 +693,17 @@ class Mesh:
         def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
 
             param_data = jnp.asarray(self.true_param_array)
-            fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
+            if not len(fit_params) == len(param_data):
+                fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
 
-            map = jnp.asarray(ele_map)[jnp.asarray(element_ids)].astype(int)
+            map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
             params = jnp.asarray(fit_params)[map]
+        
+            p_array = params[jnp.asarray(element_ids).astype(int)]
+            outputs = jax.vmap(lambda x: self.elem_evals(x, jnp.asarray(xis)).reshape(-1,3))
+            res =  outputs(p_array)
+            return res.reshape(-1,3)
+
             outputs = [None] * len(element_ids)
             for ide in range(jnp.asarray(element_ids).shape[0]):
                 outputs[ide] = self.elem_evals(params[ide], jnp.asarray(xis)).reshape(-1, 3)
@@ -639,14 +716,21 @@ class Mesh:
             Generates the internal functions that evaluate the derivatives of embeddings
             Code is structured so that the result can express custom derivatives
         """
-        
+        # @partial(jax.jit, static_argnums=2)
         def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
 
             param_data = jnp.asarray(self.true_param_array)
-            fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
+            if not len(fit_params) == len(param_data):
+                fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
 
-            map = jnp.asarray(ele_map)[jnp.asarray(element_ids)].astype(int)
+            map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
             params = jnp.asarray(fit_params)[map]
+            p_array = params[jnp.asarray(element_ids).astype(int)]
+
+            outputs = jax.vmap(lambda x: self.elem_deriv_evals(x, jnp.asarray(xis), derivs).reshape(-1,3))
+            res = outputs(p_array)
+            return res.reshape(-1,3)
+
             outputs = [None] * len(element_ids)
             for ide in range(jnp.asarray(element_ids).shape[0]):
                 outputs[ide] = self.elem_deriv_evals(params[ide], jnp.asarray(xis), derivs).reshape(-1, 3)
@@ -725,19 +809,7 @@ class Mesh:
             out_data.append(weighted)
 
         return jnp.concatenate(out_data)
-            
-
-
-
-
-
-        
-
-
-
-
-
-
+    
 
     ################################# REFINEMENT
 
