@@ -60,6 +60,8 @@ def geometric_fit_heart_to_data(mesh_obj:Mesh, inner_wall, outer_wall, plot=Fals
 
     w = 0.1
 
+    sob = mesh_obj.evaluate_sobolev()
+
     def fitting_function_params(params):
         lparam = base_param_array.copy()
         # first thing to do is create the param array 
@@ -71,28 +73,16 @@ def geometric_fit_heart_to_data(mesh_obj:Mesh, inner_wall, outer_wall, plot=Fals
         )
         lparam = lparam.at[node_non_x_deriv_inds].set(delta_params)
 
-        inner_points = mesh_obj.evaluate_embeddings([0,1,2,3,4,5,6,7], iw_xis, fit_params=lparam)
-        outer_points = mesh_obj.evaluate_embeddings([0,1,2,3,4,5,6,7], ow_xis, fit_params=lparam)
+        inner_points = mesh_obj.evaluate_embeddings_in_every_element(iw_xis, fit_params=lparam)
+        outer_points = mesh_obj.evaluate_embeddings_in_every_element(ow_xis, fit_params=lparam)
 
-
-        #woo smoothing
-
-        gp_100 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [1,0,0], fit_params=lparam).flatten() * w
-        gp_010 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [0,1,0], fit_params=lparam).flatten() * w
-        gp_001 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [0,0,1], fit_params=lparam).flatten() * w
-        gp_110 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [1,1,0], fit_params=lparam).flatten() * w
-        gp_011 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [0,1,1], fit_params=lparam).flatten() * w
-        gp_101 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [1,0,1], fit_params=lparam).flatten() * w
-        gp_111 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [1,1,1], fit_params=lparam).flatten() * w
-        gp_200 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [2,0,0], fit_params=lparam).flatten() * w
-        gp_020 = mesh_obj.evaluate_deriv_embeddings([0,1,2,3,4,5,6,7], gauss_points, [0,2,0], fit_params=lparam).flatten() * w
+        sob_out = (sob - mesh_obj.evaluate_sobolev(fit_params=lparam)).flatten() * w
 
         iw_dists = iw_tree(inner_points)
         ow_dists = ow_tree(outer_points)
-        return jnp.concatenate((iw_dists, ow_dists, gp_100, gp_010, gp_001, gp_110, gp_011, gp_101, gp_111, gp_200, gp_020))
+        return jnp.concatenate((iw_dists, ow_dists, sob_out))
 
     function, jac = jacobian(fitting_function_params, init_estimate=init_params)
-
 
     def update_from_params(mesh_instance, params):
         loc_params = params[:n_locs]
@@ -111,17 +101,18 @@ def geometric_fit_heart_to_data(mesh_obj:Mesh, inner_wall, outer_wall, plot=Fals
 def FFD_heart(mesh_obj:Mesh, start_points, end_points):
 
     elem, xis = mesh_obj.embed_points(start_points)
-    unique_elem, inv = np.unique_inverse(elem)
+    # unique_elem, inv = np.unique_inverse(elem)
     pre_sob = mesh_obj.evaluate_sobolev()
 
     def ffd(params, sob_w):
         out_data = []
 
-        for ide, e in enumerate(unique_elem):
-            mask = ide == inv
-            dist = end_points[mask] - mesh_obj.evaluate_embeddings([e], xis[mask], fit_params=params)
-            out_data.append(dist.flatten())
-        out_data = jnp.concatenate(out_data)
+        # for ide, e in enumerate(unique_elem):
+        #     mask = ide == inv
+        #     dist = end_points[mask] - mesh_obj.evaluate_embeddings([e], xis[mask], fit_params=params)
+        #     out_data.append(dist.flatten())
+        # out_data = jnp.concatenate(out_data)
+        out_data = (mesh_obj.evaluate_ele_xi_pair_embeddings(elem, xis, fit_params=params) - end_points).flatten()
 
         sob_dif = (mesh_obj.evaluate_sobolev(fit_params=params) - pre_sob) * sob_w
         return jnp.concatenate((out_data, sob_dif))

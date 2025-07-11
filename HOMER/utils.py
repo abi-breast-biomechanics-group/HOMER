@@ -9,13 +9,6 @@ def vol_tet(p0, p1, p2, p3):
 VERTS = [[]]
 
 def vol_hexahedron(pts):
-    # tetrahedrons = [
-    #     [pts[0], pts[1], pts[3], pts[4]],  # A, B, D, E
-    #     [pts[1], pts[3], pts[4], pts[5]],  # B, D, E, F
-    #     [pts[3], pts[4], pts[5], pts[7]],  # D, E, F, H
-    #     [pts[1], pts[2], pts[3], pts[5]],  # B, C, D, F
-    #     [pts[5], pts[6], pts[7], pts[2]]   # F, G, H, C
-    # ]
     tetrahedrons = [
         [pts[0], pts[1], pts[3], pts[5]],  # A, B, D, E
         [pts[0], pts[2], pts[3], pts[6]],  # B, D, E, F

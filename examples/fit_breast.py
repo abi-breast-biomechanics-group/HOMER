@@ -3,13 +3,8 @@ import numpy as np
 import jax.numpy as jnp
 import pyvista as pv
 
-<<<<<<< HEAD
-from HOMER.mesher import Mesh, EVAL_PATTERN
-from HOMER.optim import jax_comp_kdtree_normal_distance_query
-=======
 from HOMER.mesher import Mesh
 from HOMER.optim import jax_comp_kdtree_distance_query, jax_comp_kdtree_normal_distance_query
->>>>>>> Anna
 from HOMER.jacobian_evaluator import jacobian
 
 from matplotlib import pyplot as plt
@@ -50,7 +45,7 @@ def dep_node_normal_fit(mesh: Mesh,
             skin_data, skin_data_normal,
             dep_nodes, div_scalar,
             rib_range, skin_range,
-            res = 20, w=0.1):
+            res = 20, w=0.1, sob_weights=None,):
 
     rib_data_tree = jax_comp_kdtree_normal_distance_query(rib_data, rib_data_normal, kdtree_args={"workers":-1})
     skin_data_tree = jax_comp_kdtree_normal_distance_query(skin_data, skin_data_normal, kdtree_args={"workers":-1})
@@ -71,6 +66,9 @@ def dep_node_normal_fit(mesh: Mesh,
 
     init_params = mesh.optimisable_param_array.copy()
     def_sob = mesh.evaluate_sobolev()
+    if sob_weights is None:
+        sob_weights = jnp.ones_like(def_sob)
+
     full_params = jnp.asarray(mesh.true_param_array).copy()
     param_bool = mesh.optimisable_param_bool.copy()
 
@@ -93,7 +91,7 @@ def dep_node_normal_fit(mesh: Mesh,
         skin_pts = mesh.evaluate_embeddings(skin_range, eval_points, fit_params=full_params)
         rib_dif = rib_data_tree(rib_pts)
         skin_dif = skin_data_tree(skin_pts)
-        sob_dif = (def_sob - mesh.evaluate_sobolev(fit_params=fit_params)) * w
+        sob_dif = (def_sob - mesh.evaluate_sobolev(fit_params=fit_params)) * w * sob_weights
         return jnp.concatenate((rib_dif, skin_dif, sob_dif))
 
     fitting_func(init_params)

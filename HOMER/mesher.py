@@ -525,7 +525,7 @@ class Mesh:
         return surface_pts, tris
 
 
-    def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=10) -> pv.PolyData:
+    def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=20) -> pv.PolyData:
         """
         Returns a pv.PolyData object containing lines defining the edges of the mesh surface.
         """
@@ -540,7 +540,6 @@ class Mesh:
 
         ele_iter  = [element_ids] if not isinstance(element_ids, list) else element_ids
         elements_to_iter = self.elements if element_ids is None else ele_iter #if we assume that all elements must be the same because it's easier.
-
 
         n_dim = self.elements[0].ndim
         residual_size = n_dim - 1 
@@ -576,35 +575,11 @@ class Mesh:
         long_connectivity = (connectivity[:, None] + ele_up).reshape(-1, 3)
         line_points = np.asarray(self.evaluate_embeddings_in_every_element(flat_xis)) #.reshape(n_ele, -1 , 3)[:2].reshape(-1, 3)
 
-        # for ne, e in enumerate(elements_to_iter):
-        #     n_dim = e.ndim
-        #     residual_size = n_dim - 1 
-        #     vals = [0, 1]
-        #     combs = list(product(vals, repeat=residual_size)) #the combinations 
-        #     for i in range(n_dim):
-        #         d = list(range(n_dim))
-        #         d.pop(i)
-        #         for comb in combs:
-        #             xi_list = [0] * n_dim
-        #             for cs, ind in zip(comb, d):
-        #                 xi_list[ind] = cs * np.ones(res)
-        #             xi_list[i] = np.linspace(0, 1, res)
-        #             xis = np.column_stack(xi_list)
-        #             comb_pts = self.evaluate_embeddings(np.array([ne]), xis)
-        #
-        #             l_pts = line_points.shape[0]
-        #             line_points = np.concatenate((line_points, comb_pts))
-        #             connectivity = np.concatenate((
-        #                 connectivity,
-        #                 blank_connectivity + [0, l_pts, l_pts],
-        #             ))
         mesh = pv.PolyData(
             line_points, 
-            # lines=connectivity.astype(int)
             lines=long_connectivity.astype(int),
         )
-        # mesh.plot(color='k', render_points_as_spheres=True)
-        # raise ValueError
+
         return mesh
 
     def get_faces(self, rounding_res = 10) -> list[tuple[int]]:
@@ -840,12 +815,13 @@ class Mesh:
     #             # scene.add_point_labels(np.array(pts), [f"{e}" for e in range(8)])
     #             # scene.show()
     #             vol_hexahedron(pts)
-    def get_volume(self):
+
+    def get_volume(self, fit_params = None):
         gauss_points, weights = self.gauss_grid([e.order for e in self.elements[0].basis_functions])
         n_ele = len(self.elements)
-        du = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [1, 0, 0]).reshape(n_ele, -1, 1, 3)
-        dv = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [0, 1, 0]).reshape(n_ele, -1, 1, 3)
-        dw = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [0, 0, 1]).reshape(n_ele, -1, 1, 3)
+        du = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [1, 0, 0], fit_params=fit_params).reshape(n_ele, -1, 1, 3)
+        dv = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [0, 1, 0], fit_params=fit_params).reshape(n_ele, -1, 1, 3)
+        dw = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [0, 0, 1], fit_params=fit_params).reshape(n_ele, -1, 1, 3)
 
         Jmats = jnp.concatenate((du, dv, dw), axis=2)
         dets = jnp.linalg.det(Jmats)
