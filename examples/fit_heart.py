@@ -177,7 +177,7 @@ if __name__ == "__main__":
     s = pv.Plotter()
     mesh_obj.plot(s, mesh_color='blue', mesh_opacity=0.05)
 
-    ws = 2**(-np.arange(-5, 20).astype(float))
+    ws = 2**(-np.arange(-5, 10).astype(float))
     ws = [0.1]
 
     f, j, init_params, embed_ele_xis = FFD_heart(mesh_obj, start_points, end_points)
