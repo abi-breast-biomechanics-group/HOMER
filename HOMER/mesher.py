@@ -250,7 +250,7 @@ class Mesh:
             out_array = out_array.at[mask].set(self.evaluate_deriv_embeddings([e], xis[mask], derivs, fit_params=fit_params))
         return out_array
 
-    def evaluate_normals(self, element_ids: np.ndarray, xis: np.ndarray) -> np.ndarray:
+    def evaluate_normals(self, element_ids: np.ndarray, xis: np.ndarray, fit_params=None) -> np.ndarray:
         """
         Returns the normal at the element surface.
         Only valid for manifold meshes.
@@ -258,17 +258,54 @@ class Mesh:
         :params xis: the locations to evaluate.
         :returns normals: unit vector directions associated with the mesh surface.
         """
-        raise NotImplementedError()
 
+        if self.ndim == 3: 
+            raise ValueError("Normals aren't defined on a volume mesh")
+        if fit_params is None:
+            fit_params = self.optimisable_param_array
+
+        d0 = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1], fit_params) 
+        d1 = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0], fit_params)
+        return jnp.cross(d0, d1)
+
+    def evaluate_normals_in_every_element(self, xis, fit_params=None):
+        """
+        Convinience wrapper around evaluate normals that evaluates the embeddings in every element.
+        """
+        if fit_params is None:
+            fit_params = self.optimisable_param_array
+        return self.evaluate_normals(jnp.array(list(range(len(self.elements)))).astype(int), xis, fit_params=fit_params)
+
+    def evaluate_ele_xi_pair_normals(self, eles, xis, fit_params=None):
+        """
+        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        """
+        if fit_params is None:
+            fit_params = self.true_param_array
+
+        unique_elem, inv = np.unique_inverse(eles)
+        out_array = jnp.zeros((xis.shape[0], 3))
+        for ide, e in enumerate(unique_elem):
+            mask = ide == inv
+            out_array = out_array.at[mask].set(self.evaluate_normals([e], xis[mask], fit_params=fit_params))
+        return out_array
 
     ################################## CONVENIENCE
-    def xi_grid(self, res: int, dim=2, surface=False) -> np.ndarray:
+    def xi_grid(self, res: int, dim=2, surface=False, boundary_points=True) -> np.ndarray:
+        b_off= 0 if boundary_points else 1
         if dim == 2:
-            X,Y = np.mgrid[:res, :res]/(res - 1)
+            X,Y = (np.mgrid[
+                0:res - b_off,
+                0:res - b_off,
+            ] + b_off * 0.5)/(res - 1)
             return np.column_stack((X.flatten(), Y.flatten()))
         else:
             if not surface:
-                X,Y,Z = np.mgrid[:res, :res, :res]/(res - 1)
+                X,Y,Z = (np.mgrid[
+                    0:res - b_off,
+                    0:res - b_off,
+                    0:res - b_off,
+                ] + b_off * 0.5 )/(res - 1)
                 return np.column_stack((X.flatten(), Y.flatten(), Z.flatten()))
             else:
                 raw_x = np.array([x.flatten() for x in np.mgrid[:res, :res]/(res-1)])
@@ -356,7 +393,7 @@ class Mesh:
         'fast' pathway numpy array representation.
 
         """
-
+        self.ndim = self.elements[0].ndim
         self.true_param_array = np.concatenate([np.concatenate([node.loc] + [d.flatten() for d in node.values()]) for node in self.nodes]).copy()
         self.optimisable_param_bool = np.concatenate([node.get_optimisability_arr() for node in self.nodes], axis=0).astype(bool)
         self.optimisable_param_array = self.true_param_array[self.optimisable_param_bool]
@@ -629,9 +666,9 @@ class Mesh:
             s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])])
         if elem_labels:
             elem_locs= np.ones((1, self.elements[0].ndim)) * 0.5
-            breakpoint()
             pts = np.array(self.evaluate_embeddings_in_every_element(elem_locs))
-            s.add_point_labels(points = pts, labels=[f"elem: {i}" for i in range(pts.shape[0])])
+            elem_labels = [f"elem: {i}" if self.elements[0].id is None else f"elem: ind {i}, id {self.elements[i].id}" for i in range(pts.shape[0])] 
+            s.add_point_labels(points = pts, labels=elem_labels)
 
         if scene is not None:
             return
@@ -828,6 +865,65 @@ class Mesh:
         vols = dets * weights[None]
         return jnp.sum(vols)
 
+
+
+    def strain_tensor(self, othr, eles, xis, coord_function: Optional[Callable] = None):
+        """
+        Assesses the strain in a deformed state at a set of given locations.
+        """
+
+        n_ele = len(eles)
+        if self.ndim == 2:
+            if coord_function is None:
+                raise ValueError("Strain tensor on manifold mesh requires a coord function to provide a meaninful basis")
+            def_self = jnp.concatenate([ 
+                self.evaluate_deriv_embeddings(eles, xis, [0, 1]).reshape(n_ele, -1, 3, 1),
+                self.evaluate_deriv_embeddings(eles, xis, [1, 0]).reshape(n_ele, -1, 3, 1),
+            ], axis=-1)
+            def_self = coord_function(self, eles, xis, def_self)
+
+            def_othr = jnp.concatenate([ 
+                othr.evaluate_deriv_embeddings(eles, xis, [0, 1]).reshape(n_ele, -1, 3, 1),
+                othr.evaluate_deriv_embeddings(eles, xis, [1, 0]).reshape(n_ele, -1, 3, 1),
+            ], axis=-1)
+            def_othr = coord_function(othr, eles, xis, def_othr)
+            
+        elif self.ndim == 3:
+            def_self = jnp.concatenate([ 
+                self.evaluate_deriv_embeddings(eles, xis, [0, 0, 1]).reshape(n_ele, -1, 3, 1),
+                self.evaluate_deriv_embeddings(eles, xis, [0, 1, 0]).reshape(n_ele, -1, 3, 1),
+                self.evaluate_deriv_embeddings(eles, xis, [1, 0, 0]).reshape(n_ele, -1, 3, 1),
+            ], axis=-1)
+
+            def_othr = jnp.concatenate([ 
+                othr.evaluate_deriv_embeddings(eles, xis, [0, 0, 1]).reshape(n_ele, -1, 3, 1),
+                othr.evaluate_deriv_embeddings(eles, xis, [0, 1, 0]).reshape(n_ele, -1, 3, 1),
+                othr.evaluate_deriv_embeddings(eles, xis, [1, 0, 0]).reshape(n_ele, -1, 3, 1),
+            ], axis=-1)
+
+            if coord_function is not None:
+                def_self = coord_function(self, eles, xis, def_self)
+                def_othr = coord_function(othr, eles, xis, def_othr)
+        else:
+            raise NotImplementedError
+
+        str_tensor = jnp.linalg.inv(def_self) @ def_othr
+        F = str_tensor.reshape(-1, self.ndim, self.ndim)
+  
+        strain = F.transpose(0,2,1) @ F - np.eye(self.ndim)[None]
+        return strain.reshape(-1, self.ndim, self.ndim)
+
+    def strain_tensor_iee(self, othr, xis, coord_function=None):
+        eles = list(range(len(self.elements)))
+        return self.strain_tensor(othr, eles, xis, coord_function)
+
+    def strain_tensor_in_ele_xi_pairs(self, othr, eles, xis, coord_function=None):
+        unique_elem, inv = np.unique_inverse(eles)
+        out_array = jnp.zeros((xis.shape[0], self.ndim, self.ndim))
+        for ide, e in enumerate(unique_elem):
+            mask = ide == inv
+            out_array = out_array.at[mask].set(self.strain_tensor(othr, [e], xis[mask], coord_function))
+        return out_array
 
     ################################# REFINEMENT
 

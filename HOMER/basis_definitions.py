@@ -75,6 +75,56 @@ def N3_weights(w0, w1, w2, bp_inds) -> jnp.ndarray:
     weights = jnp.vstack(w_list)
     return weights
 
+######################################## BASIS FUNCS
+
+def B3(x) -> jnp.ndarray:
+    """
+    Cubic bezier basis function.
+    :param x: points to interpolaet
+
+    :param x: points to interpolate
+    :return: basis weights
+    """
+
+    return jnp.concatenate((
+        (1 - x)**3,
+        3*x*((1 - x)**2),
+        3*(x**2) * (1 - x),
+        x**3,
+    ))
+
+def B3d1(x) -> jnp.ndarray:
+    """
+    First derivative with respect to x of the Cubic Bezier basis function.
+    :param x: points to interpolaet
+
+    :param x: points to interpolate
+    :return: basis weights
+    """
+
+    return jnp.concatenate((
+        (1 - x)**3,
+        3*x*((1 - x)**2),
+        3*(x**2) * (1 - x),
+        3*x**2,
+    ))
+
+def B3d1d1(x) -> jnp.ndarray:
+    """
+    Second derivative with respect to x of the Cubic Bezier basis function.
+    :param x: points to interpolaet
+
+    :param x: points to interpolate
+    :return: basis weights
+    """
+
+    return jnp.concatenate((
+        (1 - x)**3,
+        3*x*((1 - x)**2),
+        3*(x**2) * (1 - x),
+        6*x,
+    ))
+
 def L1(x) -> jnp.ndarray:
     """
     Linear lagrange basis function.
@@ -230,7 +280,7 @@ def L4(x):
     x2 = x*x
     x3 = x2*x
     x4 = x3*x
-    return numpy.array([
+    return jnp.array([
         sc*(32*x4-80*x3+70*x2-25*x+3),
         sc*(-128*x4+288*x3-208*x2+48*x),
         sc*(192*x4-384*x3+228*x2-36*x),
@@ -249,7 +299,7 @@ def L4d1(x):
     sc = 1/3.
     x2 = x*x
     x3 = x2*x
-    return numpy.array([ \
+    return jnp.array([ \
         sc*(128*x3-240*x2+140*x-25), \
         sc*(-512*x3+864*x2-416*x+48), \
         sc*(768*x3-1152*x2+456*x-36), \
