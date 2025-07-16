@@ -12,5 +12,5 @@ point3 = MeshNode(loc=np.array([0,1,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np
 element0 = MeshElement(node_indexes=[0,1,2,3], basis_functions=(H3Basis, H3Basis))
 
 objMesh = Mesh(nodes = [point0, point1, point2, point3], elements = element0)
-objMesh.refine(2)
+objMesh.refine(by_xi_refinement=[[0, 1/2, 2/2], [0, 1/3, 2/3, 3/3]])
 objMesh.plot()

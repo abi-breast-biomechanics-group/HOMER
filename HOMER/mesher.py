@@ -667,7 +667,7 @@ class Mesh:
         if elem_labels:
             elem_locs= np.ones((1, self.elements[0].ndim)) * 0.5
             pts = np.array(self.evaluate_embeddings_in_every_element(elem_locs))
-            elem_labels = [f"elem: {i}" if self.elements[0].id is None else f"elem: ind {i}, id {self.elements[i].id}" for i in range(pts.shape[0])] 
+            elem_labels = [f"elem: {i}" if self.elemements[0].id is None else f"elem: ind {i}, id {self.elements[i].id}" for i in range(pts.shape[0])] 
             s.add_point_labels(points = pts, labels=elem_labels)
 
         if scene is not None:
@@ -961,7 +961,10 @@ class Mesh:
                     lr.append(n_points)
                     new_xi_refinement.append(np.interp(np.linspace(0,1, n_points), np.linspace(0,1, len(b)), b))
                 eval_pts = np.column_stack([x.flatten() for x in np.meshgrid(*by_xi_refinement, indexing='ij')])
-                ref_array = np.array([len(by_xi_refinement[i]) for i in [0,1,2]]) - 1
+                if self.ndim == 2:
+                    ref_array = np.array([len(by_xi_refinement[i]) for i in [0,1]]) - 1
+                else:
+                    ref_array = np.array([len(by_xi_refinement[i]) for i in [0,1, 2]]) - 1
         
             pts = self.evaluate_embeddings(np.array([ide]), eval_pts)
             additional_pts = []
