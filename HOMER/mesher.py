@@ -39,6 +39,12 @@ class MeshNode(dict):
                 self[key] = np.array(value).copy()
 
     def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray]|np.ndarray]=None) -> None:
+        """
+        Given the node parameter strings, identifies the nodes as fixed nodes, which are not part of the default optimisable parameters of a mesh.
+
+        :param param_names: The parameter name to fix
+        :param values: The optional value of the parameter to be fixed too.
+        """
         if isinstance(param_names, str):
             param_names = [param_names]
         if not isinstance(values, list):
@@ -52,6 +58,9 @@ class MeshNode(dict):
                     self[param] = values[idp]
 
     def get_optimisability_arr(self):
+        """
+        Returns the optimisable status of all data stored on the node.
+        """
         list_data = [np.ones(3) * (not "loc" in self.fixed_params)]
         for key in self.keys():
             list_data.append(np.ones(3) * (not key in self.fixed_params))
@@ -59,6 +68,10 @@ class MeshNode(dict):
 
 
     def plot(self, scene: Optional[pv.Plotter] = None) -> pv.Plotter | None:
+        """
+        Draws the node, and any quantities, to a pyvista plotter.
+        :param scene: An existing pyvista scene to draw too - if given will not draw the plot.
+        """
         s = pv.Plotter() if scene is None else scene
         
         s.add_mesh(pv.PolyData(self.loc), point_size=5, render_points_as_spheres=True)
@@ -80,7 +93,8 @@ class MeshElement:
     def __init__(self, basis_functions: BasisGroup, node_indexes: Optional[list[int]] = None, 
                  node_ids: Optional[list] = None, BP_inds: Optional = None, id=None):
         """
-            A high order mesh element. This element is constructed from 
+            A high order mesh element. This element is constructed from a series of basis functions.
+            These can be 2D, manifold meshes, or 3D, volume meshes.
 
         """
         if node_ids is None and node_indexes is None:
@@ -157,7 +171,11 @@ class MeshElement:
     def argsort_derivs(self, derivs_struct: list[list[str]], order_dict: dict[tuple]):
         """
         Given a derivs struct defined iternally, returns the canonical ordering according to a given order dict.
+
+        :params derivs_struct: The calculated derivative pairs to evaluate.
+        :params order_dict: The ordering to follow
         """
+
         indexed_keys = [
             (i, (abs(lst[0]), (order_dict[tuple(lst[1:])] if len(lst) > 1 else 0)))
             for i, lst in enumerate(derivs_struct)
@@ -172,6 +190,11 @@ class MeshElement:
 
 class Mesh:
     def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False) -> None:
+        """
+        Defines a collection of homogenous elements, which link a collection of nodes.
+        :param nodes: The nodes of the Mesh
+        :param elements: The elements of the Mesh.
+        """
         
         ######### topology of the mesh
         self.nodes: list[MeshNode] = [] if nodes is None else (nodes if isinstance(nodes, list) else [nodes])
@@ -202,7 +225,10 @@ class Mesh:
 
     def evaluate_element_embeddings(self, element_id, xis):
         """
-        Given an element id, evaluates the embedding
+        Given an element id, evaluates the embedding.
+        
+        :param element_id: The element id to evaluate the xi location in
+        :param xis: The xis to evaluate.
         """
         return self.evaluate_embeddings([self.element_id_to_ind[element_id]], xis)
     
@@ -224,7 +250,7 @@ class Mesh:
 
     def evaluate_ele_xi_pair_embeddings(self, eles, xis, fit_params=None):
         """
-        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        Wrapper around evaluate embedings that evaluates the embaeddings at pairs of ele xi coordinates.
         """
         if fit_params is None:
             fit_params = self.true_param_array
@@ -238,7 +264,7 @@ class Mesh:
 
     def evaluate_ele_xi_pair_deriv_embeddings(self, eles, xis, derivs, fit_params=None):
         """
-        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        Wrapper around evaluate deriv embeddings that evaluates the embeddings at pairs of ele and xi coordinates.
         """
         if fit_params is None:
             fit_params = self.true_param_array
@@ -278,7 +304,7 @@ class Mesh:
 
     def evaluate_ele_xi_pair_normals(self, eles, xis, fit_params=None):
         """
-        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        Wrapper around evaluate normals that evaluates the function at pairs of ele, xi coordinates.
         """
         if fit_params is None:
             fit_params = self.true_param_array
@@ -291,7 +317,22 @@ class Mesh:
         return out_array
 
     ################################## CONVENIENCE
-    def xi_grid(self, res: int, dim=2, surface=False, boundary_points=True) -> np.ndarray:
+    def xi_grid(self, res: int, dim=None, surface=False, boundary_points=True) -> np.ndarray:
+
+        """
+        Convinience function for defining grids of xi points over elements on the surface of the mesh.
+        Returns a grid of xi points at the requested resolution.
+
+        :param res: the mxm resolution.
+        :param dim: the dimension of the grid, i.e. 2 or 3.
+        :param surface: for a 3D grid, only return grid points on the element boundary.
+        :param boundary_points: whether to include 0, 1 in the grid of points. Prevents doubly selecting points on mesh boundarys.
+
+        :returns xi_grid: a np array containing grid points.
+
+        """
+        dim = self.ndim if dim is None else dim
+
         b_off= 0 if boundary_points else 1
         if dim == 2:
             X,Y = (np.mgrid[
@@ -365,6 +406,9 @@ class Mesh:
     def update_from_params(self, inp_params, generate=True):
         """
             Updates all nodes with data from an input param array.
+
+            :param inp_params: the input params to update the mesh with
+            :param generate: whether to rebuild the mesh after updating.
         """
 
         if len(inp_params) == len(self.optimisable_param_array):
@@ -390,7 +434,7 @@ class Mesh:
         Builds the mesh representation on call.
 
         This code is responsible for handling on-the-fly functions, and the generation of the
-        'fast' pathway numpy array representation.
+        'fast' pathway jax.numpy array representation.
 
         """
         self.ndim = self.elements[0].ndim
@@ -443,10 +487,16 @@ class Mesh:
         self._generate_deriv_function()
 
     def add_node(self, node:MeshNode) -> None:
+        """
+        Add a node to the node list.
+        """
         self.nodes.append(node)
         # self.generate_mesh()
 
     def add_element(self, element:MeshElement) -> None:
+        """
+        Adds an element to the element list.
+        """
         self.elements.append(element)
         self.generate_mesh()
 
@@ -649,6 +699,19 @@ class Mesh:
         return faces + [k[0] for k in hash_space.values() if len(k) == 1]
 
     def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, res=10, mesh_color='gray', mesh_opacity=0.1, elem_labels=False):
+        """
+        Draws the mesh as a pyvista scene.
+
+        :param scene: A pyvista scene, if provided will not call .show().
+        :param node_colour: The colour to draw the node values.
+        :param node_size: The size of the node points.
+        :param labels: Whether to label the node numbers.
+        :param res: The resolution of the surface mesh.
+        :param mesh_color: The mesh surface colour.
+        :param mesh_opacity: The mesh surface opacity.
+        :param elem_labels: Whether to label the mesh elements.
+
+        """
         #evaluate the mesh surface and evaluate all of the elements
         lines = self.get_lines()
         node_dots = np.array([node.loc for node in self.nodes])
@@ -667,7 +730,7 @@ class Mesh:
         if elem_labels:
             elem_locs= np.ones((1, self.elements[0].ndim)) * 0.5
             pts = np.array(self.evaluate_embeddings_in_every_element(elem_locs))
-            elem_labels = [f"elem: {i}" if self.elemements[0].id is None else f"elem: ind {i}, id {self.elements[i].id}" for i in range(pts.shape[0])] 
+            elem_labels = [f"elem: {i}" if self.elements[0].id is None else f"elem: ind {i}, id {self.elements[i].id}" for i in range(pts.shape[0])] 
             s.add_point_labels(points = pts, labels=elem_labels)
 
         if scene is not None:
@@ -675,6 +738,9 @@ class Mesh:
         s.show()
 
     def transform(self, htform):
+        """
+        Apply a 3D homogenous transform to the mesh surface.
+        """
         for node in self.nodes:
             node.loc = h_tform(node.loc, htform, fill=1)
             for k,v in node.items():  
@@ -756,6 +822,13 @@ class Mesh:
     ################################# useful utils.
 
     def embed_points(self, points, verbose=0):
+        """
+        Given an mx3 array of points, returns the embedded xi locations which best match these points.
+        Minimises the squared distance between the embedded locations and the given points, as a non linear least squares.
+
+        :param points: The points to embed
+        :param verbose: Level of information printed by the least squares fitting process
+        """
 
         # generate a KD tree of self
         if self.elements[0].ndim == 2:
@@ -854,6 +927,12 @@ class Mesh:
     #             vol_hexahedron(pts)
 
     def get_volume(self, fit_params = None):
+        """
+        Calculates the mesh volume using a gauss point integration scheme.
+
+        :param fit_params: an overide of the standard mesh parameters to use for fitting.
+        :returns vol: The estimated volume of the mesh.
+        """
         gauss_points, weights = self.gauss_grid([e.order for e in self.elements[0].basis_functions])
         n_ele = len(self.elements)
         du = self.evaluate_deriv_embeddings_in_every_element(gauss_points, [1, 0, 0], fit_params=fit_params).reshape(n_ele, -1, 1, 3)
@@ -867,9 +946,14 @@ class Mesh:
 
 
 
-    def strain_tensor(self, othr, eles, xis, coord_function: Optional[Callable] = None):
+    def strain_tensor(self, othr: "Mesh", eles, xis, coord_function: Optional[Callable] = None):
         """
         Assesses the strain in a deformed state at a set of given locations.
+
+        :param othr: A second mesh object with the same topology to assess strain against.
+        :param eles: The elements to asses strain in.
+        :param xis: The xi locations to evaluate strain in.
+        :param coord_function: A function with input Mesh, eles, xis, tensors -> remapped_tensors. Used to evaluate strains in relevant coordinate schemes.
         """
 
         n_ele = len(eles)
@@ -914,10 +998,16 @@ class Mesh:
         return strain.reshape(-1, self.ndim, self.ndim)
 
     def strain_tensor_iee(self, othr, xis, coord_function=None):
+        """
+        A convinience function to assess strain tensors (i)n (e)very (e)lement
+        """
         eles = list(range(len(self.elements)))
         return self.strain_tensor(othr, eles, xis, coord_function)
 
     def strain_tensor_in_ele_xi_pairs(self, othr, eles, xis, coord_function=None):
+        """
+        A convinience fucntion for assessing strain tensors in pairs of element and xi locations.
+        """
         unique_elem, inv = np.unique_inverse(eles)
         out_array = jnp.zeros((xis.shape[0], self.ndim, self.ndim))
         for ide, e in enumerate(unique_elem):
