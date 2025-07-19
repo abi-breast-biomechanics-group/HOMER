@@ -1,5 +1,7 @@
 from HOMER.mesher import Mesh, MeshElement, MeshNode
 from HOMER.basis_definitions import H3Basis, L1Basis, L3Basis, L2Basis
+from HOMER.io import load_mesh, save_mesh
+from HOMER.jacobian_evaluator import jacobian
 
 import jax
 
