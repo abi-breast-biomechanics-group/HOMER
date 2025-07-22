@@ -973,6 +973,7 @@ class Mesh:
             def_othr = coord_function(othr, eles, xis, def_othr)
             
         elif self.ndim == 3:
+
             def_self = jnp.concatenate([ 
                 self.evaluate_deriv_embeddings(eles, xis, [0, 0, 1]).reshape(n_ele, -1, 3, 1),
                 self.evaluate_deriv_embeddings(eles, xis, [0, 1, 0]).reshape(n_ele, -1, 3, 1),
@@ -990,7 +991,7 @@ class Mesh:
                 def_othr = coord_function(othr, eles, xis, def_othr)
         else:
             raise NotImplementedError
-
+        
         str_tensor = jnp.linalg.inv(def_self) @ def_othr
         F = str_tensor.reshape(-1, self.ndim, self.ndim)
   
@@ -1008,11 +1009,16 @@ class Mesh:
         """
         A convinience fucntion for assessing strain tensors in pairs of element and xi locations.
         """
-        unique_elem, inv = np.unique_inverse(eles)
+        unique_elem, inv = jnp.unique_inverse(eles)
         out_array = jnp.zeros((xis.shape[0], self.ndim, self.ndim))
         for ide, e in enumerate(unique_elem):
             mask = ide == inv
-            out_array = out_array.at[mask].set(self.strain_tensor(othr, [e], xis[mask], coord_function))
+            try:
+                strain_tens = self.strain_tensor(othr, [e], xis[mask], coord_function)
+                out_array = out_array.at[mask].set(strain_tens)
+            except Exception as e:
+                print(e)
+                breakpoint()
         return out_array
 
     ################################# REFINEMENT
