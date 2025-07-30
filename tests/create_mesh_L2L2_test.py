@@ -25,10 +25,3 @@ objMesh = Mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3
 objMesh.refine(4)
 objMesh.plot()
 
-test =  objMesh.evaluate_embeddings.deriv(1, [0], [[0.5,0.5]])
-print(test.shape)
-print(test)
-
-test =  objMesh.evaluate_embeddings.deriv(2, [1, 3], [[0.25, 0.25], [0.5,0.5]])
-print(test.shape)
-print(test)

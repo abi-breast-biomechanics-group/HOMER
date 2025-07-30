@@ -14,7 +14,7 @@ from scipy.optimize import least_squares
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import jacobian
-from HOMER.utils import vol_hexahedron
+from HOMER.utils import vol_hexahedron, make_tiling
 
 
 
@@ -317,7 +317,7 @@ class Mesh:
         return out_array
 
     ################################## CONVENIENCE
-    def xi_grid(self, res: int, dim=None, surface=False, boundary_points=True) -> np.ndarray:
+    def xi_grid(self, res: int, dim=None, surface=False, boundary_points=True, lattice=None) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
 
         """
         Convinience function for defining grids of xi points over elements on the surface of the mesh.
@@ -335,11 +335,14 @@ class Mesh:
 
         b_off= 0 if boundary_points else 1
         if dim == 2:
-            X,Y = (np.mgrid[
-                0:res - b_off,
-                0:res - b_off,
-            ] + b_off * 0.5)/(res - 1)
-            return np.column_stack((X.flatten(), Y.flatten()))
+            if lattice is None:
+                X,Y = (np.mgrid[
+                    0:res - b_off,
+                    0:res - b_off,
+                ] + b_off * 0.5)/(res - 1)
+                return np.column_stack((X.flatten(), Y.flatten()))
+            else:
+                return make_tiling(*lattice)
         else:
             if not surface:
                 X,Y,Z = (np.mgrid[
@@ -349,7 +352,12 @@ class Mesh:
                 ] + b_off * 0.5 )/(res - 1)
                 return np.column_stack((X.flatten(), Y.flatten(), Z.flatten()))
             else:
-                raw_x = np.array([x.flatten() for x in np.mgrid[:res, :res]/(res-1)])
+                if lattice is None:
+                    raw_x = np.array([x.flatten() for x in np.mgrid[:res, :res]/(res-1)])
+                else:
+                    raw_x, connectivity = make_tiling(*lattice) 
+                    raw_x = raw_x.T
+
                 zero_r = np.zeros(shape=raw_x[0].shape[0])
                 ones_r = np.ones(shape=raw_x[0].shape[0])
 
@@ -361,7 +369,9 @@ class Mesh:
                         np.column_stack((raw_x[0], raw_x[1], zero_r)),
                         np.column_stack((raw_x[0], raw_x[1], ones_r)),
                 ]
-                return np.concatenate(arrays) 
+                if lattice is None:
+                    return np.concatenate(arrays) 
+                return np.concatenate(arrays), connectivity
 
 
     def gauss_grid(self, ng):
@@ -552,14 +562,14 @@ class Mesh:
         return param_ids
 
     ################################## PLOTTING
-    def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, just_faces=False) -> np.ndarray:
+    def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, just_faces=False, tiling=None) -> np.ndarray|tuple[np.ndarray, np.ndarray]:
         """
         Returns a set of points evaluated over the mesh surface.
         """
         ele_iter  = [element_ids] if not isinstance(element_ids, list) else element_ids
         elements_to_iter = self.elements if element_ids is None else ele_iter
         if not just_faces:
-            grid = self.xi_grid(res=res, ndim=self.elements[0].ndim, surface=True)
+            grid = self.xi_grid(res=res, ndim=self.ndim, surface=True)
             if element_ids is not None:
                 all_points = []
                 for ne, e in enumerate(elements_to_iter):
@@ -570,31 +580,45 @@ class Mesh:
         else:
             face_pts = []
 
-            if self.elements[0].ndim == 3:
+            if self.ndim == 3:
                 faces = self.get_faces()
-                xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
-                for face in faces:
-                    element = self.elements[face[0]]
+                if tiling is None:
+                    xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
+                    for face in faces:
+                        grid_def = xi3grid[face[1], face[2]]
+                        face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def))
+                    return np.concatenate(face_pts, axis=0)
+                
+                c = []
+                xi3grid, connectivity = self.xi_grid(res=res, dim=3, surface=True, lattice=tiling)
+                connectivity = connectivity.reshape(-1, 3)
+                xi3grid = xi3grid.reshape(3,2,-1,3)
+                l_xi = xi3grid.shape[2]
+
+                for idf, face in enumerate(faces):
                     grid_def = xi3grid[face[1], face[2]]
                     face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def))
-                return np.concatenate(face_pts, axis=0)
+                    c.append([[0, idf * l_xi, idf * l_xi]] + connectivity)
+                return np.concatenate(face_pts, axis=0), np.concatenate(c, axis=0)
             else:
-                xi2grid = self.xi_grid(res=res, dim=2)
-                return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid))
+                if tiling is None:
+                    xi2grid = self.xi_grid(res=res, dim=2)
+                    return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid))
+                xi2grid, connectivity = self.xi_grid(res=res, dim=2, lattice=tiling)
+                lc = len(xi2grid)
+                c = np.concatenate([connectivity.reshape(-1, 3) + [[0, idc * lc, idc * lc]] for idc in range(len(self.elements))], axis=0)
+                return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid)), c
 
-            faces = self.get_faces()
-            for face in faces:
-                xi2grid = self.xi_grid(res=res, dim=2)
-                xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
 
-                element = self.elements[face[0]]
-                if element.ndim == 2:
-                    face_pts.append(self.evaluate_embeddings(np.array([face[0]]), xi2grid))
-                elif element.ndim ==3:
-                    grid_def = xi3grid[face[1], face[2]]
-                    face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def))
-            return np.concatenate(face_pts, axis=0)
 
+    def get_hex_surface(self, element_ids, tiling = (10, 6)) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Returns lines evaluating a hexagon tiling of the element surface
+
+        :params tiling: the repetitions of the underlying unit surface (5/3 ratio "looks good")
+        """
+        surface_points, single_face_connectivity = self.get_surface(element_ids, just_faces=True, tiling=tiling)
+        return surface_points, single_face_connectivity.astype(int)
 
     def get_triangle_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -698,7 +722,7 @@ class Mesh:
 
         return faces + [k[0] for k in hash_space.values() if len(k) == 1]
 
-    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, res=10, mesh_color='gray', mesh_opacity=0.1, elem_labels=False):
+    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, tiling=(10, 6), mesh_color='gray', mesh_opacity=0.1, elem_labels=False):
         """
         Draws the mesh as a pyvista scene.
 
@@ -721,9 +745,10 @@ class Mesh:
         # node_dots_m['col'] = np.arange(node_dots.shape[0])
         s.add_mesh(node_dots, render_points_as_spheres=True, color=node_colour, point_size=node_size)
 
-        tri_surf, tris = self.get_triangle_surface(res=res)
-        surf_mesh = pv.PolyData(tri_surf)
-        surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
+        # tri_surf, tris = self.get_triangle_surface(res=res)
+        hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling)
+        surf_mesh = pv.PolyData(hex_surf, lines)
+        # surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
         s.add_mesh(surf_mesh, style='wireframe', color=mesh_color, opacity=mesh_opacity)
         if labels:
             s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])])

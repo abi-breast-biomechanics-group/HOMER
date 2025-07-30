@@ -62,5 +62,5 @@ optim = least_squares(fitting_fn, init_params, jac=jacobian, verbose=2)
 
 ################## visualise the fit
 fitting_mesh.update_from_params(optim.x)
-fitting_mesh.plot(mesh_opacity=0.5, res=40)
+fitting_mesh.plot(mesh_opacity=0.5)
 

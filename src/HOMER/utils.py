@@ -36,3 +36,39 @@ def vol_hexahedron(pts):
 def draw_tet(pts):
     tet = pv.PolyData(np.array(pts), faces = [3, 0, 1, 2,   3, 0, 1, 3,   3, 0, 2, 3,   3, 1,2,3 ])
     return tet
+
+unit_0 = np.array([
+    [0, 0],
+    [0, 1/3],
+    [1/2, 1/3 + 1/6], 
+    [1/2, 2/3 + 1/6],
+    [0, 1],
+])
+unit_1 = np.array([
+    [1, 0],
+    [1, 1/3],
+    [1/2, 1/3 + 1/6], 
+    [1/2, 2/3 + 1/6],
+    [1, 1],
+])
+
+base_line = np.array([
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 4],
+])
+
+combined_ls = np.concatenate((unit_0[None], unit_1[None]))
+
+def make_tiling(xn, yn):
+    base_unit = (combined_ls / [[[xn, yn]]])
+    up_grid = np.column_stack([a.flatten() for a in np.mgrid[:xn, :yn]]) / [[xn, yn]]
+    long_grid = base_unit[None] + up_grid[:, None, None, :]
+    
+    shape_mat = np.arange(np.prod(long_grid.shape[:-1])).reshape(long_grid.shape[:-1]) 
+    ind_mat = shape_mat[:, :, 0][..., None, None] + base_line[None, None]
+    connectivity = np.ones(ind_mat.shape[:-1] + (1,)) * 2
+    lmat = np.concatenate((connectivity, ind_mat), axis=-1).ravel()
+
+    return long_grid.reshape(-1, 2), lmat

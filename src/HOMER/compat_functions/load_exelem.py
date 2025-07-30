@@ -1,3 +1,4 @@
+from os import PathLike
 import re
 from pathlib import Path
 import numpy as np
@@ -26,9 +27,11 @@ def process_node(node_str, keys, dim=3):
 
     return node
 
-def load_node(loc: Path, keys):
+def load_node(loc: PathLike, keys):
+    if not isinstance(loc, Path):
+        loc = Path(loc)
     if not loc.exists():
-        raise ValueError("file {loc} doesn't exist")
+        raise ValueError(f"file {loc} doesn't exist")
 
     with open(loc, "r") as f:
 

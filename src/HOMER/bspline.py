@@ -136,6 +136,7 @@ class jax_spline_not_a_knot:
         u = u / jnp.linalg.norm(u, axis=-1, keepdims=True)
         n = self.normal(params, eval_locs).squeeze()
         m = jnp.cross(u, n)
+        m = m / jnp.linalg.norm(m, axis=-1, keepdims=True)
         coord_mat = jnp.concatenate((u[..., None], m[..., None], n[..., None]), axis=-1)
         return jnp.linalg.inv(coord_mat)
         breakpoint()
