@@ -26,7 +26,7 @@ class MeshNode(dict):
         self.loc = np.asarray(loc)
         self.id = id
         self.update(kwargs)
-        self.fixed_params = set()
+        self.fixed_params = {}
 
         for key, value in kwargs.items():
             if isinstance(value, list):
@@ -38,32 +38,41 @@ class MeshNode(dict):
             else:
                 self[key] = np.array(value).copy()
 
-    def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray]|np.ndarray]=None) -> None:
+    def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray]|np.ndarray]=None, inds: Optional[list[int]] = None) -> None:
         """
         Given the node parameter strings, identifies the nodes as fixed nodes, which are not part of the default optimisable parameters of a mesh.
 
         :param param_names: The parameter name to fix
         :param values: The optional value of the parameter to be fixed too.
         """
+        if inds is not None:
+            inds = np.array(inds).astype(int)
         if isinstance(param_names, str):
             param_names = [param_names]
         if not isinstance(values, list):
             values = [values] * len(param_names)
+
         for idp, param in enumerate(param_names):
-            self.fixed_params.add(param)
+            if inds is None:
+                inds = [0,1,2]
+            self.fixed_params[param] = inds
             if values[idp] is not None:
                 if param == 'loc':
-                    self.loc = values[idp]
+                    self.loc[inds] = values[idp]
                 else:
-                    self[param] = values[idp]
+                    self[param][inds] = values[idp]
 
     def get_optimisability_arr(self):
         """
         Returns the optimisable status of all data stored on the node.
         """
-        list_data = [np.ones(3) * (not "loc" in self.fixed_params)]
+        free_loc = np.ones(3) 
+        free_loc[self.fixed_params.get('loc', [])] = 0
+        list_data = [free_loc]
         for key in self.keys():
-            list_data.append(np.ones(3) * (not key in self.fixed_params))
+            free_key = np.ones(3)
+            free_key[self.fixed_params.get(key, [])] = 0
+            list_data.append(free_key)
         return np.concatenate(list_data, axis=0)
 
 
