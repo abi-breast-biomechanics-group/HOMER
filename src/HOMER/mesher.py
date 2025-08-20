@@ -14,6 +14,8 @@ from scipy.optimize import least_squares
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import jacobian
+from HOMER.utils import vol_hexahedron, make_tiling
+
 
 
 class MeshNode(dict):
@@ -24,7 +26,7 @@ class MeshNode(dict):
         self.loc = np.asarray(loc)
         self.id = id
         self.update(kwargs)
-        self.fixed_params = set()
+        self.fixed_params = {}
 
         for key, value in kwargs.items():
             if isinstance(value, list):
@@ -32,33 +34,55 @@ class MeshNode(dict):
             elif isinstance(value, jnp.ndarray):
                 self[key] = np.asarray(value).copy()
             elif not isinstance(value, np.ndarray):
-                raise ValueError(
-                    f"Only np.ndarray are valid additional data, but found key: {key}, value: {value} pair")
+                raise ValueError(f"Only np.ndarray are valid additional data, but found key: {key}, value: {value} pair")
             else:
                 self[key] = np.array(value).copy()
 
-    def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray] | np.ndarray] = None) -> None:
+    def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray]|np.ndarray]=None, inds: Optional[list[int]] = None) -> None:
+        """
+        Given the node parameter strings, identifies the nodes as fixed nodes, which are not part of the default optimisable parameters of a mesh.
+
+        :param param_names: The parameter name to fix
+        :param values: The optional value of the parameter to be fixed too.
+        """
+        if inds is not None:
+            inds = np.array(inds).astype(int)
         if isinstance(param_names, str):
             param_names = [param_names]
         if not isinstance(values, list):
             values = [values] * len(param_names)
+
         for idp, param in enumerate(param_names):
-            self.fixed_params.add(param)
+            if inds is None:
+                inds = [0,1,2]
+            self.fixed_params[param] = inds
             if values[idp] is not None:
                 if param == 'loc':
-                    self.loc = values[idp]
+                    self.loc[inds] = values[idp]
                 else:
-                    self[param] = values[idp]
+                    self[param][inds] = values[idp]
 
     def get_optimisability_arr(self):
-        list_data = [np.ones(3) * (not "loc" in self.fixed_params)]
+        """
+        Returns the optimisable status of all data stored on the node.
+        """
+        free_loc = np.ones(3)
+        free_loc[self.fixed_params.get('loc', [])] = 0
+        list_data = [free_loc]
         for key in self.keys():
-            list_data.append(np.ones(3) * (not key in self.fixed_params))
+            free_key = np.ones(3)
+            free_key[self.fixed_params.get(key, [])] = 0
+            list_data.append(free_key)
         return np.concatenate(list_data, axis=0)
 
-    def plot(self, scene: Optional[pv.Plotter] = None) -> pv.Plotter | None:
-        s = pv.Plotter() if scene is None else scene
 
+    def plot(self, scene: Optional[pv.Plotter] = None) -> pv.Plotter | None:
+        """
+        Draws the node, and any quantities, to a pyvista plotter.
+        :param scene: An existing pyvista scene to draw too - if given will not draw the plot.
+        """
+        s = pv.Plotter() if scene is None else scene
+        
         s.add_mesh(pv.PolyData(self.loc), point_size=5, render_points_as_spheres=True)
         label_locs = []
         label_names = []
@@ -73,11 +97,13 @@ class MeshNode(dict):
         return s
 
 
+
 class MeshElement:
-    def __init__(self, basis_functions: BasisGroup, node_indexes: Optional[list[int]] = None,
+    def __init__(self, basis_functions: BasisGroup, node_indexes: Optional[list[int]] = None, 
                  node_ids: Optional[list] = None, BP_inds: Optional = None, id=None):
         """
-            A high order mesh element. This element is constructed from
+            A high order mesh element. This element is constructed from a series of basis functions.
+            These can be 2D, manifold meshes, or 3D, volume meshes.
 
         """
         if node_ids is None and node_indexes is None:
@@ -91,11 +117,12 @@ class MeshElement:
         self.nodes = nodes
         self.basis_functions = basis_functions
         self.ndim: int = len(self.basis_functions)
-        self.n_in_dim = [sum([l[0] == 'x' for l in b.weights]) for b in self.basis_functions]
+        self.n_in_dim = [sum([l[0]=='x' for l in b.weights]) for b in self.basis_functions]
 
         self.get_used_fields()
         self.BasisProductInds = self._calc_basis_product_inds() if BP_inds is None else BP_inds
         self.id = id
+
 
     def get_used_fields(self):
         """
@@ -108,8 +135,7 @@ class MeshElement:
         if len(grouped) == 0:
             self.used_node_fields = []
             return
-        fields = reduce(lambda x, y: x + y,
-                        [f.get_needed_fields() for f in [reduce(lambda x, y: x + y, g) for g in grouped]])
+        fields = reduce(lambda x,y:x+y,[f.get_needed_fields() for f in [reduce(lambda x,y: x+y, g) for g in grouped]])
         self.used_node_fields = [fields] if isinstance(fields, str) else fields
 
     def _calc_basis_product_inds(self):
@@ -119,31 +145,33 @@ class MeshElement:
         :params b_def: the definition of the parameters associated with the basis functions.
         """
         dim_step = [1] + np.cumprod(self.n_in_dim)[:-1].tolist()
-        n_param = [len(b.weights) for b in self.basis_functions]
+        n_param  = [len(b.weights) for b in self.basis_functions]
 
-        if len(self.basis_functions) == 3:
-            w_mat = np.mgrid[:n_param[0], :n_param[1], :n_param[2]].astype(int)  # this is the pairing.
+        
+        if   len(self.basis_functions) == 3:
+            w_mat = np.mgrid[:n_param[0], :n_param[1], :n_param[2]].astype(int) # this is the pairing.
         elif len(self.basis_functions) == 2:
-            w_mat = np.mgrid[:n_param[0], :n_param[1]].astype(int)  # this is the pairing.
+            w_mat = np.mgrid[:n_param[0], :n_param[1]].astype(int) # this is the pairing.
         l_mat = np.column_stack([w.flatten() for w in w_mat])
 
-        ind_names = [0] + np.cumsum(
-            [np.any([f[:2] == 'dx' for f in bparam.weights]) for bparam in self.basis_functions]).tolist()
-
+        
+        ind_names  = [0] + np.cumsum([np.any([f[:2]=='dx' for f in bparam.weights]) for bparam in self.basis_functions]).tolist()
+        
         keyvals = []
         for pairing in l_mat:
             id = 0
             deriv = []
             for idind, ind in enumerate(pairing):
                 l_name = self.basis_functions[idind].weights[ind]
-                id += int(l_name[-1]) * dim_step[idind]  # encodes the surface representation
+                id += int(l_name[-1]) * dim_step[idind] #encodes the surface representation
                 if l_name[0] == 'd':
                     deriv.append(ind_names[idind])
             keyvals.append([id] + deriv)
 
         # breakpoint()
 
-        sorted = self.argsort_derivs(keyvals, DERIV_ORDER)
+
+        sorted  = self.argsort_derivs(keyvals, DERIV_ORDER)
         new_ind_pairs = [tuple(l_mat[i].tolist()) for i in sorted]
         # print([keyvals[i] for i in sorted])
         return new_ind_pairs
@@ -152,31 +180,41 @@ class MeshElement:
     def argsort_derivs(self, derivs_struct: list[list[str]], order_dict: dict[tuple]):
         """
         Given a derivs struct defined iternally, returns the canonical ordering according to a given order dict.
+
+        :params derivs_struct: The calculated derivative pairs to evaluate.
+        :params order_dict: The ordering to follow
         """
+
         indexed_keys = [
             (i, (abs(lst[0]), (order_dict[tuple(lst[1:])] if len(lst) > 1 else 0)))
             for i, lst in enumerate(derivs_struct)
         ]
-
+        
         indexed_keys.sort(key=lambda x: x[1])
-        return [i for i, _ in indexed_keys]
+        return [i for i,  _ in indexed_keys]
+
+
+
 
 
 class Mesh:
-    def __init__(self, nodes: Optional[list[MeshNode]] = None,
-                 elements: Optional[list[MeshElement] | MeshElement] = None, jax_compile: bool = False) -> None:
-
+    def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False) -> None:
+        """
+        Defines a collection of homogenous elements, which link a collection of nodes.
+        :param nodes: The nodes of the Mesh
+        :param elements: The elements of the Mesh.
+        """
+        
         ######### topology of the mesh
         self.nodes: list[MeshNode] = [] if nodes is None else (nodes if isinstance(nodes, list) else [nodes])
-        self.elements: list[MeshElement] = [] if elements is None else (
-            elements if isinstance(elements, list) else [elements])
+        self.elements: list[MeshElement] = [] if elements is None else (elements if isinstance(elements, list) else [elements])
 
         self.node_id_to_ind = {}
         self.element_id_to_ind = {}
 
         ######### initialising values to be calculated
         self.elem_evals: Optional[Callable] = None
-        self.evaluate_embeddings = lambda element_ids, xis, params: None  # def the function signature here
+        self.evaluate_embeddings = lambda element_ids, xis, params: None #def the function signature here
         self.evaluate_deriv_embeddings = lambda element_ids, xis, derivs, params: None
         self.elem_deriv_evals: Optional[Callable] = None
         self.fit_param: Optional[np.ndarray] = None
@@ -196,18 +234,20 @@ class Mesh:
 
     def evaluate_element_embeddings(self, element_id, xis):
         """
-        Given an element id, evaluates the embedding
+        Given an element id, evaluates the embedding.
+        
+        :param element_id: The element id to evaluate the xi location in
+        :param xis: The xis to evaluate.
         """
         return self.evaluate_embeddings([self.element_id_to_ind[element_id]], xis)
-
+    
     def evaluate_embeddings_in_every_element(self, xis, fit_params=None):
         """
         Wrapper around evaluate embeddings that evaluates the embeddings in every element.
         """
         if fit_params is None:
             fit_params = self.optimisable_param_array
-        return self.evaluate_embeddings(jnp.array(list(range(len(self.elements)))).astype(int), xis,
-                                        fit_params=fit_params)
+        return self.evaluate_embeddings(jnp.array(list(range(len(self.elements)))).astype(int), xis, fit_params=fit_params)
 
     def evaluate_deriv_embeddings_in_every_element(self, xis, derivs, fit_params=None):
         """
@@ -215,12 +255,11 @@ class Mesh:
         """
         if fit_params is None:
             fit_params = self.optimisable_param_array
-        return self.evaluate_deriv_embeddings(jnp.array(list(range(len(self.elements)))).astype(int), xis, derivs,
-                                              fit_params=fit_params)
+        return self.evaluate_deriv_embeddings(jnp.array(list(range(len(self.elements)))).astype(int), xis, derivs, fit_params=fit_params)
 
     def evaluate_ele_xi_pair_embeddings(self, eles, xis, fit_params=None):
         """
-        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        Wrapper around evaluate embedings that evaluates the embaeddings at pairs of ele xi coordinates.
         """
         if fit_params is None:
             fit_params = self.true_param_array
@@ -229,13 +268,12 @@ class Mesh:
         out_array = jnp.zeros((xis.shape[0], 3))
         for ide, e in enumerate(unique_elem):
             mask = ide == inv
-            out_array = out_array.at[mask].set(
-                self.evaluate_embeddings(element_ids=[e], xis=xis[mask], fit_params=fit_params))
+            out_array = out_array.at[mask].set(self.evaluate_embeddings(element_ids=[e], xis=xis[mask], fit_params=fit_params))
         return out_array
 
     def evaluate_ele_xi_pair_deriv_embeddings(self, eles, xis, derivs, fit_params=None):
         """
-        Wrapper around evaluate deriv embeddings that evaluates the embeddings in every element.
+        Wrapper around evaluate deriv embeddings that evaluates the embeddings at pairs of ele and xi coordinates.
         """
         if fit_params is None:
             fit_params = self.true_param_array

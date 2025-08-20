@@ -34,7 +34,7 @@ point1 = MeshNode(loc=np.array([0,0,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np
 point2 = MeshNode(loc=np.array([0,1,1]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 point3 = MeshNode(loc=np.array([0,1,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 
-point0.fix_parameter(['loc', 'du', 'dv', 'dudv'])
+point0.fix_parameter(['loc'], inds=[0,2], values=np.array([1,0]))
 # point0.fix_parameter('loc')
 point1.fix_parameter(['loc', 'du', 'dv'])
 point2.fix_parameter(['loc', 'du', 'dv', 'dudv'])
@@ -51,7 +51,7 @@ fitting_mesh = Mesh(nodes = [point0, point1, point2, point3], elements = element
 s = pv.Plotter()
 surf_pts = pv.PolyData(np.array(surface_to_fit))
 s.add_mesh(surf_pts)
-fitting_mesh.plot(scene=s, mesh_opacity=0.5, res=40)
+fitting_mesh.plot(scene=s, mesh_opacity=0.5)
 s.show()
 
 ################## Actual fitting code
