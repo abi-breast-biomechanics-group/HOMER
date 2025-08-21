@@ -34,7 +34,10 @@ point1 = MeshNode(loc=np.array([0,0,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np
 point2 = MeshNode(loc=np.array([0,1,1]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 point3 = MeshNode(loc=np.array([0,1,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 
-point0.fix_parameter(['loc'], inds=[0,2], values=np.array([1,0]))
+point0.fix_parameter(['loc'], inds=[2], values=np.array([0]))
+point0.fix_parameter(['loc'], inds=[0], values=np.array([1]))
+
+print(point0.fixed_params)
 # point0.fix_parameter('loc')
 point1.fix_parameter(['loc', 'du', 'dv'])
 point2.fix_parameter(['loc', 'du', 'dv', 'dudv'])
