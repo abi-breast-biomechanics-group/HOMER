@@ -54,10 +54,9 @@ class MeshNode(dict):
 
         for idp, param in enumerate(param_names):
             if inds is None:
-                inds = [0,1,2]
+                inds = np.array([0,1,2]).astype(int)
             if param in self.fixed_params:
-                total = list(set(self.fixed_params[params]) + set(inds))
-                self.fixed_params[params] = total
+                self.fixed_params[param] = np.union1d(self.fixed_params[param], inds)
             else:
                 self.fixed_params[param] = inds
 
