@@ -55,7 +55,12 @@ class MeshNode(dict):
         for idp, param in enumerate(param_names):
             if inds is None:
                 inds = [0,1,2]
-            self.fixed_params[param] = inds
+            if param in self.fixed_params:
+                total = list(set(self.fixed_params[params]) + set(inds))
+                self.fixed_params[params] = total
+            else:
+                self.fixed_params[param] = inds
+
             if values[idp] is not None:
                 if param == 'loc':
                     self.loc[inds] = values[idp]
