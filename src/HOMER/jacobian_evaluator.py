@@ -1,3 +1,4 @@
+import logging
 from functools import partial
 from typing import Callable, Optional
 from tqdm import tqdm
@@ -42,6 +43,11 @@ def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[N
     if sparse:
         if sparsity is None:
             sparsity = estimate_sparsity(partial(fwd_func, **further_args), init_estimate)
+
+            param_used = np.array(np.sum(sparsity, axis=0).todense())
+            not_used_param = np.where(param_used == 0)[0]
+            if len(not_used_param) > 0:
+                logging.warning(f'found that params {not_used_param} had no effect on the output')
 
         @jax.jit
         def sparse_jacobian(params, **kwargs):
