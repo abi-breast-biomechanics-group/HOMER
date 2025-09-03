@@ -1,4 +1,5 @@
 import logging
+
 from typing import Optional, Callable
 import numpy as np
 import jax.numpy as jnp
@@ -465,7 +466,6 @@ class Mesh:
         self.optimisable_param_bool = np.concatenate([node.get_optimisability_arr() for node in self.nodes], axis=0).astype(bool)
         self.optimisable_param_array = self.true_param_array[self.optimisable_param_bool]
 
-        self.update_from_params(np.arange(self.true_param_array.shape[-1]), generate=False)
 
         ########## build the lookup from the input values.
         self.node_id_to_ind = {}
@@ -483,6 +483,7 @@ class Mesh:
                 raise ValueError(f"Duplicate nodes with the id: {el.id} were added to the mesh")
             self.element_id_to_ind[el.id] = e 
 
+        self.update_from_params(np.arange(self.true_param_array.shape[-1]), generate=False)
 
         ele_maps = []
         for ide, element in enumerate(self.elements):
@@ -984,7 +985,7 @@ class Mesh:
 
 
 
-    def strain_tensor(self, othr: "Mesh", eles, xis, coord_function: Optional[Callable] = None):
+    def strain_tensor(self, othr: "Mesh", eles, xis, coord_function: Optional[Callable] = None, return_F=False):
         """
         Assesses the strain in a deformed state at a set of given locations.
 
@@ -1032,8 +1033,10 @@ class Mesh:
         
         str_tensor = jnp.linalg.inv(def_self) @ def_othr
         F = str_tensor.reshape(-1, self.ndim, self.ndim)
+        if return_F:
+            return F
   
-        strain = F.transpose(0,2,1) @ F - np.eye(self.ndim)[None]
+        strain = F.transpose(0,2,1) @ F - np.eye(self.ndim)[None]/2
         return strain.reshape(-1, self.ndim, self.ndim)
 
     def strain_tensor_iee(self, othr, xis, coord_function=None):
@@ -1060,7 +1063,6 @@ class Mesh:
         return out_array
 
     ################################# REFINEMENT
-
     def refine(self, refinement_factor: Optional[int]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
                clean_nodes = True):
         """
@@ -1174,32 +1176,50 @@ class Mesh:
             self._clean_pts()
         self.generate_mesh()
             
+    def _update_id_mappings(self):
+        self.node_id_to_ind = {}
+        self.element_id_to_ind = {}
+        for e, n in [(e, n) for  e , n in enumerate(self.nodes) if n.id is not None]:
+            key_in = self.node_id_to_ind.get(n.id, None)
+            if key_in is not None:
+                raise ValueError(f"Duplicate nodes with the id: {n.id} were added to the mesh")
+            self.node_id_to_ind[n.id] = e 
+
+        for e, el in [(e, el) for  e, el in enumerate(self.elements) if el.id is not None]:
+            key_in = self.element_id_to_ind.get(el.id, None)
+            if key_in is not None:
+                raise ValueError(f"Duplicate nodes with the id: {el.id} were added to the mesh")
+            self.element_id_to_ind[el.id] = e 
 
     def _clean_pts(self):
         """
         Removes nodes unreferenced by all elements, and then reorderers the associated nodes of each element.
         """
+
+        self._update_id_mappings()
+
+        used_ids = []
         used_points = []
         for element in self.elements:
             if element.used_index:
                 used_points.extend(element.nodes)
             else: 
                 used_points.extend([self.node_id_to_ind[id] for id in element.nodes])
-        
+                used_ids.extend(element.nodes)
+
+        # print(np.sort(np.unique(used_ids)))
         bool_array = np.zeros(len(self.nodes), dtype=bool)
         bool_array[used_points] = True
         new_inds = np.array([0] + np.cumsum(bool_array).tolist())
+
         for element in self.elements:
             if element.used_index:
                 element.nodes = [new_inds[n] for n in element.nodes]
 
-            if not element.used_index:
-                new_node_nums = new_inds[[self.node_id_to_ind[id] for id in element.nodes]]
-                node_ids = [self.nodes[n].id for n in new_node_nums]
-                element.nodes = node_ids
         self.nodes = [n for idn, n in enumerate(self.nodes) if bool_array[idn]]
 
-
+        self._update_id_mappings()
+        self.generate_mesh()
 
 
         
