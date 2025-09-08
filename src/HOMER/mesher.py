@@ -1,5 +1,6 @@
 import logging
 
+from os import PathLike
 from typing import Optional, Callable
 import numpy as np
 import jax.numpy as jnp
@@ -100,6 +101,9 @@ class MeshNode(dict):
             s.show()
             return None
         return s
+
+    def unfix_params(self):
+        self.fixed_params = {}
 
 
 
@@ -575,6 +579,14 @@ class Mesh:
         self.update_from_params(true_param_array, generate=False)
         return param_ids
 
+    def unfix_mesh(self):
+        """
+        Removes all fixed parameters in the mesh, and regenerates the mesh structure.
+        """
+        for node in self.nodes:
+            node.unfix_params()
+        self.generate_mesh()
+
     ################################## PLOTTING
     def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, just_faces=False, tiling=None) -> np.ndarray|tuple[np.ndarray, np.ndarray]:
         """
@@ -736,7 +748,10 @@ class Mesh:
 
         return faces + [k[0] for k in hash_space.values() if len(k) == 1]
 
-    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, tiling=(10, 6), mesh_color='gray', mesh_opacity=0.1, elem_labels=False):
+    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, tiling=(10, 6), mesh_colour='gray', mesh_opacity=0.1, 
+             elem_labels=False,
+             render_label:Optional[str] = None,
+             ):
         """
         Draws the mesh as a pyvista scene.
 
@@ -750,27 +765,40 @@ class Mesh:
         :param elem_labels: Whether to label the mesh elements.
 
         """
+
+        if labels:
+            if not node_size == 10:
+                logging.warning("Requested non-default node size, but setting node_size to 0 to allow labels to be visualised")
+            node_size = 0
+
+        is_tag = render_label is None
+        render_label = '' if render_label is None else render_label
+        l_tag = render_label + "_lines" if is_tag else None 
+        n_tag = render_label + "_nodes" if is_tag else None 
+        h_tag = render_label + "_hexes" if is_tag else None 
+        v_tag = render_label + "_nnums" if is_tag else None 
+        e_tag = render_label + "_enums" if is_tag else None 
+
         #evaluate the mesh surface and evaluate all of the elements
         lines = self.get_lines()
         node_dots = np.array([node.loc for node in self.nodes])
         s=pv.Plotter() if scene is None else scene
-        s.add_mesh(lines, line_width=2, color='k')
+        s.add_mesh(lines, line_width=2, color='k', label=l_tag)
         node_dots_m = pv.PolyData(node_dots)
-        # node_dots_m['col'] = np.arange(node_dots.shape[0])
-        s.add_mesh(node_dots, render_points_as_spheres=True, color=node_colour, point_size=node_size)
+        s.add_mesh(node_dots, render_points_as_spheres=True, color=node_colour, point_size=node_size, label=n_tag)
 
         # tri_surf, tris = self.get_triangle_surface(res=res)
         hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling)
         surf_mesh = pv.PolyData(hex_surf, lines)
         # surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
-        s.add_mesh(surf_mesh, style='wireframe', color=mesh_color, opacity=mesh_opacity)
+        s.add_mesh(surf_mesh, style='wireframe', color=mesh_colour, opacity=mesh_opacity, label=h_tag)
         if labels:
-            s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])])
+            s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])], name=v_tag)
         if elem_labels:
             elem_locs= np.ones((1, self.elements[0].ndim)) * 0.5
             pts = np.array(self.evaluate_embeddings_in_every_element(elem_locs))
             elem_labels = [f"elem: {i}" if self.elements[0].id is None else f"elem: ind {i}, id {self.elements[i].id}" for i in range(pts.shape[0])] 
-            s.add_point_labels(points = pts, labels=elem_labels)
+            s.add_point_labels(points = pts, labels=elem_labels, name=e_tag)
 
         if scene is not None:
             return
@@ -1220,6 +1248,23 @@ class Mesh:
 
         self._update_id_mappings()
         self.generate_mesh()
+
+
+    def save(self, loc: PathLike):
+        """
+        Saves the mesh to a .json formated file in the given location
+        """
+        from HOMER.io import save_mesh #avoid the circular import here
+        save_mesh(self, loc)
+
+    def dump_to_dict(self):
+        """
+        Returns a dict structure representing the mesh object, for ease of saving
+        """
+
+        from HOMER.io import dump_mesh_to_dict
+        return dump_mesh_to_dict(self)
+
 
 
         

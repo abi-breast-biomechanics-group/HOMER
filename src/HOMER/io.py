@@ -1,3 +1,4 @@
+from os import PathLike
 from HOMER.mesher import Mesh, MeshNode, MeshElement
 from HOMER.basis_definitions import L1Basis, L2Basis, L3Basis, L4Basis, H3Basis
 
@@ -8,11 +9,10 @@ import numpy as np
 #how do we io these files
 STR_LOOKUP = {str(k.__name__):k for k in [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis]}
 
-
-def save_mesh(obj_mesh:Mesh, file_location: Path):
-    if not isinstance(file_location, Path):
-        file_location = Path(file_location)
-
+def dump_mesh_to_dict(obj_mesh:Mesh):
+    """
+    Takes an input mesh, and returns a dict structure representing the information about that mesh object.
+    """
     dict_rep = {}
     nodes = {}
     for idn, node in enumerate(obj_mesh.nodes):
@@ -30,18 +30,12 @@ def save_mesh(obj_mesh:Mesh, file_location: Path):
         ele_def['used_index']= element.used_index
         elements[ide] = ele_def
     dict_rep["elements"] = elements
+    return dict_rep
 
-    with open(file_location, "w") as f:
-        json.dump(dict_rep, fp=f, indent=4)
-    
-    return
-
-def load_mesh(file_location: Path) -> Mesh:
-    if not isinstance(file_location, Path):
-        file_location = Path(file_location)
-    with open(file_location, 'r') as f:
-        dict_rep = json.load(f)
-
+def parse_mesh_from_dict(dict_rep:dict) -> Mesh:
+    """
+    Parses a dict representing a mesh to a new mesh object
+    """
     obj_mesh = Mesh()
 
     node_dict = dict_rep['nodes']
@@ -65,3 +59,26 @@ def load_mesh(file_location: Path) -> Mesh:
             ))
     obj_mesh.generate_mesh()
     return obj_mesh
+
+def save_mesh(obj_mesh:Mesh, file_location: PathLike):
+    """
+    Writes a given mesh to a .json file.
+    """
+    if not isinstance(file_location, Path):
+        file_location = Path(file_location)
+    dict_rep = dump_mesh_to_dict(obj_mesh)
+
+    with open(file_location, "w") as f:
+        json.dump(dict_rep, fp=f, indent=4)
+    return
+
+def load_mesh(file_location:PathLike) -> Mesh:
+    """
+    loads a mesh from a given .json structured file.
+    """
+    if not isinstance(file_location, Path):
+        file_location = Path(file_location)
+    with open(file_location, 'r') as f:
+        dict_rep = json.load(f)
+    return parse_mesh_from_dict(dict_rep)
+

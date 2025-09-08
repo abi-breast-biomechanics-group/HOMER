@@ -14,6 +14,8 @@ element0 = MeshElement(node_ids=['node_1', 2, '3', (1,1)], basis_functions=(H3Ba
 objMesh = Mesh(nodes = [point0, point1, point2, point3], elements = element0)
 objMesh.refine(2)
 
-objMesh.plot(elem_labels=True)
+objMesh.plot(elem_labels=True, 
+             # render_label='test',
+             )
 
 print(objMesh.element_id_to_ind)
