@@ -750,7 +750,7 @@ class Mesh:
 
     def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, tiling=(10, 6), mesh_colour='gray', mesh_opacity=0.1, 
              elem_labels=False,
-             render_label:Optional[str] = None,
+             render_name:Optional[str] = None,
              ):
         """
         Draws the mesh as a pyvista scene.
@@ -771,27 +771,27 @@ class Mesh:
                 logging.warning("Requested non-default node size, but setting node_size to 0 to allow labels to be visualised")
             node_size = 0
 
-        is_tag = render_label is None
-        render_label = '' if render_label is None else render_label
-        l_tag = render_label + "_lines" if is_tag else None 
-        n_tag = render_label + "_nodes" if is_tag else None 
-        h_tag = render_label + "_hexes" if is_tag else None 
-        v_tag = render_label + "_nnums" if is_tag else None 
-        e_tag = render_label + "_enums" if is_tag else None 
+        is_tag = render_name is None
+        render_name = '' if render_name is None else render_name
+        l_tag = render_name + "_lines" if is_tag else None 
+        n_tag = render_name + "_nodes" if is_tag else None 
+        h_tag = render_name + "_hexes" if is_tag else None 
+        v_tag = render_name + "_nnums" if is_tag else None 
+        e_tag = render_name + "_enums" if is_tag else None 
 
         #evaluate the mesh surface and evaluate all of the elements
         lines = self.get_lines()
         node_dots = np.array([node.loc for node in self.nodes])
         s=pv.Plotter() if scene is None else scene
-        s.add_mesh(lines, line_width=2, color='k', label=l_tag)
+        s.add_mesh(lines, line_width=2, color='k', name=l_tag)
         node_dots_m = pv.PolyData(node_dots)
-        s.add_mesh(node_dots, render_points_as_spheres=True, color=node_colour, point_size=node_size, label=n_tag)
+        s.add_mesh(node_dots, render_points_as_spheres=True, color=node_colour, point_size=node_size, name=n_tag)
 
         # tri_surf, tris = self.get_triangle_surface(res=res)
         hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling)
         surf_mesh = pv.PolyData(hex_surf, lines)
         # surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
-        s.add_mesh(surf_mesh, style='wireframe', color=mesh_colour, opacity=mesh_opacity, label=h_tag)
+        s.add_mesh(surf_mesh, style='wireframe', color=mesh_colour, opacity=mesh_opacity, name=h_tag)
         if labels:
             s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])], name=v_tag)
         if elem_labels:

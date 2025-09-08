@@ -19,7 +19,7 @@ objMesh_refine = Mesh(nodes = [point0, point1, point2, point3, point4, point5, p
 s = pv.Plotter()
 objMesh.plot(scene=s, node_colour='b', node_size=20)
 # objMesh_refine.refine(refinement_factor=2)
-objMesh_refine.refine(refinement_factor=8)
+objMesh_refine.refine(refinement_factor=2)
 # objMesh_refine.plot(scene=s, node_colour='g', node_size=15)
 # objMesh_refine.refine(by_xi_refinement=([0, 1/4, 2/4, 3/4, 1], [0, 1/3, 2/3, 1], [0, 1/2, 1]))
 # objMesh_refine.refine(by_xi_refinement=([0, 2/4, 1], [0, 1/2, 1], [0, 1/2, 1]))
