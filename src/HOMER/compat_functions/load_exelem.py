@@ -5,7 +5,7 @@ import numpy as np
 from functools import reduce
 
 from HOMER.mesher import Mesh, MeshElement, MeshNode
-from HOMER.basis_definitions import H3Basis, L2Basis
+from HOMER.basis_definitions import H3Basis, L2Basis, L1Basis
 
 def extract_numbers(text):
     pattern = r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?'
@@ -70,6 +70,16 @@ def process_node(node_str, keys, dim=3):
     #     breakpoint()
     return nodes
 
+
+def load_nodes_ipdata(loc: PathLike, keys):
+    data = np.genfromtxt(loc, skip_header=1)
+    nodes = []
+    for datum in data:
+        node_keys = {key:keylet for key, keylet in zip(keys, datum[4:].reshape(-1,3))}
+        new_node = MeshNode(datum[1:4], id=str(int(datum[0])), **node_keys)
+        nodes.append(new_node)
+
+    return nodes
 
 def load_node(loc: PathLike, keys):
     if not isinstance(loc, Path):
@@ -170,19 +180,25 @@ def load_elem(loc, basis_def):
                 continue
 
             if idl == 3:
+                # breakpoint()
                 nums = re.findall(r"[-+]?(?:\d*\.*\d+)", line)
-                num_elems = int(nums[-1])
-                elem_data = [[] for _ in range(num_elems)]
-                elem_index = -1
+                num_elems = max([int(n) for n in nums])
+                # elem_data = [[] for _ in range(num_elems)]
+                elem_data = []
+                # elem_index = -1
                 continue
-            
-            if line == ' \n':
-                elem_index += 1
-
+           
+            if line.strip() == '':
+                # elem_index += 1
+                elem_data.append([])
+                # pass
             else:
-                elem_data[elem_index].append(line)
+                try:
+                    elem_data[-1].append(line)
+                except:
+                    breakpoint()
 
-    elem = [process_elem(elem_datum, basis_def) for elem_datum in elem_data]
+    elem = [process_elem(elem_datum, basis_def) for elem_datum in elem_data if not len(elem_datum) == 0]
     return [e for e, t in elem]
 
 def load_mesh(ipnode, ipelem, basis=(H3Basis, H3Basis, L2Basis), keys=('du', 'dv', 'dudv')):
@@ -197,16 +213,27 @@ if __name__ == "__main__":
     ipnode = Path("bin/heart/BB001_RC_Cubic_59.ipnode")
     ipelem = Path("bin/heart/BB001_RC_Cubic_59.ipelem")
     # ipelem = Path("bin/cyl.ipelem")
-    nodes = load_node(ipnode, 
+    # nodes = load_node(ipnode, 
+    #                   # keys = ['du', 'dv', 'dudv'],
+    #                   keys = ['du', 'dv', 'dudv', 'dw', 'dudw', 'dvdw', 'dudvdw'],
+    #                   )
+    #
+    # elems = load_elem(ipelem, basis_def=(H3Basis, H3Basis, H3Basis))
+    ipdata = Path("scaffold_test/sternum.ipdata")
+    ipelem = Path("scaffold_test/sternum.ipelem")
+
+    nodes = load_nodes_ipdata(ipdata, 
                       # keys = ['du', 'dv', 'dudv'],
-                      keys = ['du', 'dv', 'dudv', 'dw', 'dudw', 'dvdw', 'dudvdw'],
+                      keys = ['du'],
                       )
-    elems = load_elem(ipelem, basis_def=(H3Basis, H3Basis, H3Basis))
+    elems = load_elem(ipelem, basis_def=(L1Basis, L1Basis))
 
     meshObj = Mesh(nodes, elems)
     meshObj._clean_pts()
-    meshObj.plot(node_size=0, labels=True)
+    meshObj.plot(labels=True)
 
-    node = meshObj.get_node('3')
-    print(node)
+    meshObj.save("scaffold_test/sternum.json")
+
+    # node = meshObj.get_node('3')
+    # print(node)
 

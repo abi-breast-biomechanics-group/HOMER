@@ -771,13 +771,15 @@ class Mesh:
                 logging.warning("Requested non-default node size, but setting node_size to 0 to allow labels to be visualised")
             node_size = 0
 
-        is_tag = render_name is None
-        render_name = '' if render_name is None else render_name
+        is_tag = render_name is not None
+        render_name = "" if render_name is None else render_name
         l_tag = render_name + "_lines" if is_tag else None 
         n_tag = render_name + "_nodes" if is_tag else None 
         h_tag = render_name + "_hexes" if is_tag else None 
         v_tag = render_name + "_nnums" if is_tag else None 
         e_tag = render_name + "_enums" if is_tag else None 
+        render_name = None if is_tag else render_name
+
 
         #evaluate the mesh surface and evaluate all of the elements
         lines = self.get_lines()
@@ -1028,29 +1030,29 @@ class Mesh:
             if coord_function is None:
                 raise ValueError("Strain tensor on manifold mesh requires a coord function to provide a meaninful basis")
             def_self = jnp.concatenate([ 
-                self.evaluate_deriv_embeddings(eles, xis, [0, 1]).reshape(n_ele, -1, 3, 1),
                 self.evaluate_deriv_embeddings(eles, xis, [1, 0]).reshape(n_ele, -1, 3, 1),
+                self.evaluate_deriv_embeddings(eles, xis, [0, 1]).reshape(n_ele, -1, 3, 1),
             ], axis=-1)
             def_self = coord_function(self, eles, xis, def_self)
 
             def_othr = jnp.concatenate([ 
-                othr.evaluate_deriv_embeddings(eles, xis, [0, 1]).reshape(n_ele, -1, 3, 1),
                 othr.evaluate_deriv_embeddings(eles, xis, [1, 0]).reshape(n_ele, -1, 3, 1),
+                othr.evaluate_deriv_embeddings(eles, xis, [0, 1]).reshape(n_ele, -1, 3, 1),
             ], axis=-1)
             def_othr = coord_function(othr, eles, xis, def_othr)
             
         elif self.ndim == 3:
 
             def_self = jnp.concatenate([ 
-                self.evaluate_deriv_embeddings(eles, xis, [0, 0, 1]).reshape(n_ele, -1, 3, 1),
-                self.evaluate_deriv_embeddings(eles, xis, [0, 1, 0]).reshape(n_ele, -1, 3, 1),
                 self.evaluate_deriv_embeddings(eles, xis, [1, 0, 0]).reshape(n_ele, -1, 3, 1),
+                self.evaluate_deriv_embeddings(eles, xis, [0, 1, 0]).reshape(n_ele, -1, 3, 1),
+                self.evaluate_deriv_embeddings(eles, xis, [0, 0, 1]).reshape(n_ele, -1, 3, 1),
             ], axis=-1)
 
             def_othr = jnp.concatenate([ 
-                othr.evaluate_deriv_embeddings(eles, xis, [0, 0, 1]).reshape(n_ele, -1, 3, 1),
-                othr.evaluate_deriv_embeddings(eles, xis, [0, 1, 0]).reshape(n_ele, -1, 3, 1),
                 othr.evaluate_deriv_embeddings(eles, xis, [1, 0, 0]).reshape(n_ele, -1, 3, 1),
+                othr.evaluate_deriv_embeddings(eles, xis, [0, 1, 0]).reshape(n_ele, -1, 3, 1),
+                othr.evaluate_deriv_embeddings(eles, xis, [0, 0, 1]).reshape(n_ele, -1, 3, 1),
             ], axis=-1)
 
             if coord_function is not None:
@@ -1064,7 +1066,7 @@ class Mesh:
         if return_F:
             return F
   
-        strain = F.transpose(0,2,1) @ F - np.eye(self.ndim)[None]/2
+        strain = (F.transpose(0,2,1) @ F - np.eye(self.ndim)[None])/2
         return strain.reshape(-1, self.ndim, self.ndim)
 
     def strain_tensor_iee(self, othr, xis, coord_function=None):
