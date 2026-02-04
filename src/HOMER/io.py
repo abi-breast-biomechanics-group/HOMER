@@ -25,7 +25,8 @@ def dump_mesh_to_dict(obj_mesh:Mesh):
 
     elements = {}
     for ide, element in enumerate(obj_mesh.elements):
-        ele_def = {"nodes": element.nodes}
+        nodes_sanitised = [n if not isinstance(n, np.int64) else int(n) for n in element.nodes]
+        ele_def = {"nodes":nodes_sanitised}
         ele_def['basis'] = [str(b.__name__) for b in element.basis_functions]
         ele_def['used_index']= element.used_index
         elements[ide] = ele_def

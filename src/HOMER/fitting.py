@@ -25,9 +25,9 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
     #get the initial params
     # create the handler object.
 
-    def fitting_function(params):
+    def fitting_function(params: np.ndarray):
         outputs = []
-        wpts = mesh.evaluate_embeddings(mesh_elements, eval_points, params[:])
+        wpts = mesh.evaluate_embeddings(mesh_elements, eval_points, fit_params=params[:])
         dists = data_tree(wpts)
         outputs.append(dists.flatten())
         outputs.append(mesh.evaluate_sobolev().flatten() * sob_weight)
