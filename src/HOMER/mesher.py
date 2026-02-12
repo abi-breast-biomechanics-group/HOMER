@@ -227,6 +227,7 @@ class Mesh:
         self.evaluate_deriv_embeddings = lambda element_ids, xis, derivs, params: None
         self.elem_deriv_evals: Optional[Callable] = None
         self.fit_param: Optional[np.ndarray] = None
+        self.generate_weight_matrix: Optional[Callable] = None
 
         ######### optimisation
         self.true_param_array: Optional[np.ndarray] = None
@@ -513,6 +514,7 @@ class Mesh:
         self._generate_elem_deriv_functions()
         self._generate_eval_function()
         self._generate_deriv_function()
+        self._generate_weight_function()
 
     def add_node(self, node:MeshNode) -> None:
         """
@@ -818,6 +820,7 @@ class Mesh:
 
     ################################## INTERNAL
 
+
     def _generate_elem_functions(self):
         """
             Creates the internal function evaluation structure.
@@ -886,7 +889,11 @@ class Mesh:
         
         self.evaluate_deriv_embeddings = evaluate_deriv_embeddings
 
-    
+    def _generate_weight_function(self):
+        """
+        Creastes the weight matrix of the mesh. Useful for direct linear fitting with constant xi embeddings.
+        """
+        self.generate_weight_matrix = make_weight_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
 
     ################################# useful utils.
 
@@ -1315,6 +1322,24 @@ def make_deriv_eval(basis_funcs: BasisGroup, bp_inds:list[tuple[int]]):
             weights = N3_weights(w0, w1, w2, b_inds)
             output = jnp.sum(elem_params.reshape(-1,3)[:, None] * weights[..., None], axis=0).flatten()
             return output
+    else:
+        raise ValueError("Currently, meshes must be 2D or 3D")
+    return xi_eval
+
+def make_weight_eval(basis_funcs: BasisGroup, bp_inds):
+    if len(basis_funcs) == 2:
+        def xi_eval(xis, b_inds = bp_inds):
+            w0 = basis_funcs[0].fn(xis[:, 0])  
+            w1 = basis_funcs[1].fn(xis[:, 1])
+            weights = N2_weights(w0, w1, b_inds)
+            return weights
+    elif len(basis_funcs) == 3:
+        def xi_eval(xis, b_inds = bp_inds):
+            w0 = basis_funcs[0].fn(xis[:, 0])  
+            w1 = basis_funcs[1].fn(xis[:, 1])
+            w2 = basis_funcs[2].fn(xis[:, 2])
+            weights = N3_weights(w0, w1, w2, b_inds)
+            return weights
     else:
         raise ValueError("Currently, meshes must be 2D or 3D")
     return xi_eval

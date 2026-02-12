@@ -11,7 +11,7 @@ import time
 from matplotlib import pyplot as plt
 
 
-def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[None] = None, sparsity=None, further_args = None, sparse = True):
+def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[None] = None, sparsity=None, further_args = None, sparse = True, return_sparsity=False):
     """
     Given a jax compatible callable, returns both a compiled jax function, but also the autodifferentiated jacobian of the function.
 
@@ -62,6 +62,8 @@ def jacobian(cost_function: Optional[Callable] = None, init_estimate: Optional[N
                 jac_fwd = jax.jit(jax.jacfwd(cost_function, argnums=0))
             return np.asarray(jac_fwd(params, **kwargs))
 
+    if return_sparsity:
+        return fwd_func, scipy_compat, sparsity
     return fwd_func, scipy_compat
     # return the compiled function and the compiled 
     
