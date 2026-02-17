@@ -1099,6 +1099,39 @@ class Mesh:
                 breakpoint()
         return out_array
 
+
+
+
+    ################################# FASTFITTING
+
+    def get_xi_weight_mat(self, eles, xis):
+        """
+        Given an input set of poinst ele, yi, evaluates the meta-weight matrix that can be inverted to solve the least squares shape update.
+        """
+        out_weight = np.zeros((len(eles), len(self.true_param_array)//3)) #
+        unique_elem, inv = jnp.unique_inverse(eles)
+        for ide, e in enumerate(unique_elem):
+            mask = ide == inv
+            weight_mat = self.generate_weight_matrix(xis[mask]).T #weights associated with each of the parameters for the input matrix.
+            relevant_weight_locs = (self.ele_map[e, ::3]//3).astype(int)
+            out_weight[np.ix_(mask, relevant_weight_locs)] = weight_mat #basically we construct a much smaller weight matrix because the problems are seperable.
+        return out_weight
+
+    def linear_fit(self, targets, weight_mat, target_empty=-1):
+        """
+        Performs a linear fit between the target using the current weight matrix.
+        Does not currently respect fixed parameters (maybe an Ax + c = b situation)
+        """
+
+        target_mask = np.any(targets != target_empty, axis=-1)
+        A = weight_mat[target_mask]
+        b = targets[target_mask]
+        assert A.shape[0] > A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
+        new_params, residual, rank, s = np.linalg.lstsq(A, b)
+
+        self.update_from_params(new_params.flatten(), generate=True)
+
+
     ################################# REFINEMENT
     def refine(self, refinement_factor: Optional[int]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
                clean_nodes = True):
