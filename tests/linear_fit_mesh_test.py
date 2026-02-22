@@ -34,10 +34,12 @@ element0 = MeshElement(node_indexes=[0,1,2,3], basis_functions=(H3Basis, H3Basis
 fitting_mesh = Mesh(nodes = [point0, point1, point2, point3], elements = element0)
 fitting_mesh.refine(2)
 
+
+res = 5
 #node locs 
-grid = fitting_mesh.xi_grid(20)
+grid = fitting_mesh.xi_grid(res)
 grid = np.tile(grid, (4,1))
-elems = np.repeat([0,1,2,3], 20**2)
+elems = np.repeat([0,1,2,3], res**2)
 
 target_points = target_mesh.evaluate_ele_xi_pair_embeddings(elems, grid)
 
@@ -48,11 +50,7 @@ fitting_mesh.plot(scene=s, mesh_opacity=0.5)
 s.add_mesh(np.asarray(target_points), render_points_as_spheres=True, color='g')
 s.show()
 
-
-
-
 wmat = fitting_mesh.get_xi_weight_mat(elems, grid)
 fitting_mesh.linear_fit(target_points, weight_mat=wmat)
 fitting_mesh.plot()
 
-breakpoint()

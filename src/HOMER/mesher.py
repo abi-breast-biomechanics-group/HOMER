@@ -13,6 +13,7 @@ from itertools import groupby, combinations_with_replacement, product
 
 from scipy.spatial import KDTree
 from scipy.optimize import least_squares
+from scipy.sparse import coo_array
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import jacobian
@@ -445,6 +446,7 @@ class Mesh:
             params[self.optimisable_param_bool] = inp_params 
         elif len(inp_params) == len(self.true_param_array):
             params = inp_params
+            # self.true_param_array = inp_params
         else:
             raise ValueError("Input param array was provided that did not match either that set of parameters, or the optimisable subset of parameters")
 
@@ -750,7 +752,11 @@ class Mesh:
 
         return faces + [k[0] for k in hash_space.values() if len(k) == 1]
 
-    def plot(self, scene:Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels = False, tiling=(10, 6), mesh_colour='gray', mesh_opacity=0.1, 
+    def plot(self, scene:Optional[pv.Plotter] = None,
+             node_colour='r', node_size=10,
+             labels = False, tiling=(10, 6), 
+             mesh_colour: str | np.ndarray ='gray', mesh_opacity=0.1, mesh_width = 2, mesh_col_scalar_name="Field",
+             line_colour: str | np.ndarray ='black', line_opacity=1, line_width=2, line_col_scalar_name="Field",
              elem_labels=False,
              render_name:Optional[str] = None,
              ):
@@ -787,15 +793,22 @@ class Mesh:
         lines = self.get_lines()
         node_dots = np.array([node.loc for node in self.nodes])
         s=pv.Plotter() if scene is None else scene
-        s.add_mesh(lines, line_width=2, color='k', name=l_tag)
+
+        if isinstance(line_colour, np.ndarray):
+            lines[line_col_scalar_name] = line_colour
+
+        s.add_mesh(lines, line_width=line_width, color=line_colour if line_colour is not isinstance(line_colour, np.ndarray) else None, name=l_tag, opacity=line_opacity)
         node_dots_m = pv.PolyData(node_dots)
         s.add_mesh(node_dots, render_points_as_spheres=True, color=node_colour, point_size=node_size, name=n_tag)
 
         # tri_surf, tris = self.get_triangle_surface(res=res)
         hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling)
         surf_mesh = pv.PolyData(hex_surf, lines)
+        
+        if isinstance(mesh_colour, np.ndarray):
+            surf_mesh[mesh_col_scalar_name] = mesh_colour
         # surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
-        s.add_mesh(surf_mesh, style='wireframe', color=mesh_colour, opacity=mesh_opacity, name=h_tag)
+        s.add_mesh(surf_mesh, style='wireframe', color=None if isinstance(mesh_colour, np.ndarray) else mesh_colour, opacity=mesh_opacity, name=h_tag, line_width=mesh_width, render_lines_as_tubes=True)
         if labels:
             s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])], name=v_tag)
         if elem_labels:
@@ -897,31 +910,40 @@ class Mesh:
 
     ################################# useful utils.
 
-    def embed_points(self, points, verbose=0):
+    def embed_points(self, points, verbose=0, init_elexi=None):
         """
         Given an mx3 array of points, returns the embedded xi locations which best match these points.
         Minimises the squared distance between the embedded locations and the given points, as a non linear least squares.
 
         :param points: The points to embed
         :param verbose: Level of information printed by the least squares fitting process
+        :param init_elexi: Initial locations of the points, just so skip straigh to optimising
         """
 
-        # generate a KD tree of self
-        if self.elements[0].ndim == 2:
-            res = 50
-            xis = self.xi_grid(res, 2)
-            ndim = 2
+        points = np.asarray(points).reshape(-1,3) #ensure correct shape and type
+        
+        if init_elexi is None:
+            # generate a KD tree of self
+            if self.elements[0].ndim == 2:
+                res = 50
+                xis = self.xi_grid(res, 2)
+                ndim = 2
+            else:
+                res = 30
+                xis = self.xi_grid(res, 3)
+                ndim = 3
+            tree = KDTree(self.evaluate_embeddings_in_every_element(xis))
+            _, i = tree.query(points, k=1, workers=-1)
+            elem_num = np.array(i) // xis.shape[0]
+
+            xi_ind = np.array(i) % xis.shape[0]
+            init_xi = xis[xi_ind].flatten()
         else:
-            res = 30
-            xis = self.xi_grid(res, 3)
-            ndim = 3
-        tree = KDTree(self.evaluate_embeddings_in_every_element(xis))
-        _, i = tree.query(points, k=1, workers=-1)
-        elem_num = np.array(i) // xis.shape[0]
+            elem_num, init_xi = init_elexi
+            init_xi = np.array(init_xi).flatten()
+            ndim = self.elements[0].ndim
 
         unique_elem, inv = np.unique_inverse(elem_num)
-        xi_ind = np.array(i) % xis.shape[0]
-        init_xi = xis[xi_ind].flatten()
 
         def optim_embed(params):
             xi_data = params.reshape(-1,ndim)
@@ -932,11 +954,49 @@ class Mesh:
                 out_data.append(dist.flatten())
             return jnp.concatenate(out_data)
 
-        function, jac = jacobian(optim_embed, init_estimate=init_xi)
-        bounds = (np.zeros_like(init_xi), np.ones_like(init_xi))
-        result = least_squares(function, init_xi, jac=jac, bounds=bounds, verbose=verbose)
+        #the jacobian should be well defined, so pregame it
+       
+        n_out = 0
+        rows = []
+        cols = []
+        for ide, e in enumerate(unique_elem):
+            mask = ide == inv
+            n_in_ele = np.sum(mask)
+            #create the backlookup, which param had this effect.
+            xi_inds = np.repeat((np.repeat(np.where(mask)[0] * 2, ndim).reshape(-1, 2) + np.array([0, 1])).flatten(), 3)
+            #cols should be simpler
+            row = (3 * np.arange(n_in_ele)[:, None] + [[0, 1, 2]*ndim]).flatten() + n_out
+            n_out += 3 * n_in_ele
 
-        final_mean_dist = np.mean(np.linalg.norm(result.fun.reshape(-1, ndim), axis=-1))
+            rows.append(row)
+            cols.append(xi_inds)
+
+
+        rows = np.concatenate(rows)
+        cols = np.concatenate(cols)
+        data = np.zeros_like(rows)
+        spm = coo_array((data, (rows, cols)))
+
+        def jac(params):
+            xi_data = params.reshape(-1,ndim)
+            out_data = []
+            for ide, e in enumerate(unique_elem):
+                mask = ide == inv
+                d0 = -self.evaluate_deriv_embeddings([e], xi_data[mask], [1, 0])
+                d1 = -self.evaluate_deriv_embeddings([e], xi_data[mask], [0, 1])
+                ds = jnp.concatenate((d0, d1), axis=1)
+                out_data.append(ds.flatten())
+            data = np.concatenate(out_data)
+            spm.data = data
+            return spm
+
+        function = optim_embed
+        # d = jac(init_xi)
+        # function, jac = jacobian(optim_embed, init_estimate=init_xi)
+        bounds = (np.zeros_like(init_xi), np.ones_like(init_xi))
+        result = least_squares(function, init_xi, jac=jac, bounds=bounds, verbose=2)#verbose)
+
+        final_mean_dist = np.mean(np.linalg.norm(result.fun.reshape(-1, 3), axis=-1))
         if verbose == 2:
             print(f"final mean error of {final_mean_dist:.2f} units")
 
@@ -1128,8 +1188,9 @@ class Mesh:
         b = targets[target_mask]
         assert A.shape[0] > A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
         new_params, residual, rank, s = np.linalg.lstsq(A, b)
-
-        self.update_from_params(new_params.flatten(), generate=True)
+        self.true_param_array = new_params.flatten()
+        self.optimisable_param_array = self.true_param_array[self.optimisable_param_bool]
+        self.update_from_params(new_params.flatten(), generate=False)
 
 
     ################################# REFINEMENT
