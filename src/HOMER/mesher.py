@@ -963,7 +963,7 @@ class Mesh:
             mask = ide == inv
             n_in_ele = np.sum(mask)
             #create the backlookup, which param had this effect.
-            xi_inds = np.repeat((np.repeat(np.where(mask)[0] * 2, ndim).reshape(-1, 2) + np.array([0, 1])).flatten(), 3)
+            xi_inds = np.repeat((np.repeat(np.where(mask)[0] * ndim, ndim).reshape(-1, ndim) + np.arange(ndim)).flatten(), 3)
             #cols should be simpler
             row = (3 * np.arange(n_in_ele)[:, None] + [[0, 1, 2]*ndim]).flatten() + n_out
             n_out += 3 * n_in_ele
@@ -982,9 +982,12 @@ class Mesh:
             out_data = []
             for ide, e in enumerate(unique_elem):
                 mask = ide == inv
-                d0 = -self.evaluate_deriv_embeddings([e], xi_data[mask], [1, 0])
-                d1 = -self.evaluate_deriv_embeddings([e], xi_data[mask], [0, 1])
-                ds = jnp.concatenate((d0, d1), axis=1)
+                d = []
+                for i in range(ndim): 
+                    z = np.zeros(ndim, dtype=int)
+                    z[i] = 1
+                    d.append(-self.evaluate_deriv_embeddings([e], xi_data[mask], z))
+                ds = jnp.concatenate(d, axis=1)
                 out_data.append(ds.flatten())
             data = np.concatenate(out_data)
             spm.data = data
