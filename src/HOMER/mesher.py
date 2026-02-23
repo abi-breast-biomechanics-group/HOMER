@@ -925,11 +925,11 @@ class Mesh:
         if init_elexi is None:
             # generate a KD tree of self
             if self.elements[0].ndim == 2:
-                res = 50
+                res = 200
                 xis = self.xi_grid(res, 2)
                 ndim = 2
             else:
-                res = 30
+                res = 50
                 xis = self.xi_grid(res, 3)
                 ndim = 3
             tree = KDTree(self.evaluate_embeddings_in_every_element(xis))
@@ -994,7 +994,7 @@ class Mesh:
         # d = jac(init_xi)
         # function, jac = jacobian(optim_embed, init_estimate=init_xi)
         bounds = (np.zeros_like(init_xi), np.ones_like(init_xi))
-        result = least_squares(function, init_xi, jac=jac, bounds=bounds, verbose=2)#verbose)
+        result = least_squares(function, init_xi, jac=jac, bounds=bounds, verbose=verbose)
 
         final_mean_dist = np.mean(np.linalg.norm(result.fun.reshape(-1, 3), axis=-1))
         if verbose == 2:
@@ -1151,12 +1151,8 @@ class Mesh:
         out_array = jnp.zeros((xis.shape[0], self.ndim, self.ndim))
         for ide, e in enumerate(unique_elem):
             mask = ide == inv
-            try:
-                strain_tens = self.strain_tensor(othr, [e], xis[mask], coord_function)
-                out_array = out_array.at[mask].set(strain_tens)
-            except Exception as e:
-                print(e)
-                breakpoint()
+            strain_tens = self.strain_tensor(othr, [e], xis[mask], coord_function)
+            out_array = out_array.at[mask].set(strain_tens)
         return out_array
 
 

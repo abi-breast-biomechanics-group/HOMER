@@ -80,7 +80,7 @@ def estimate_sparsity(callable, init_estimate) -> jax.experimental.sparse.BCOO:
     rows = []
     cols = []
 
-    print(init_estimate.shape)
+    # print(init_estimate.shape)
 
     start = time.time()
     for idp in tqdm(range(init_estimate.shape[0]), desc="Building jacobian"):

@@ -1,4 +1,4 @@
-import numpy as np
+# import numpy as np
 import pyvista as pv
 
 from morphic import Mesh as mMesh
@@ -40,7 +40,7 @@ def convert_morphic(morphic_mesh:mMesh, basis_functions, plot=False):
                     id=str(node.id)
             )
         )
-        print(node.id)
+        # print(node.id)
    
     elements = []
     for element in morphic_mesh.elements:

@@ -6,15 +6,15 @@ import jax
 from matplotlib import pyplot as plt
 
 
-point0 = MeshNode(loc=[0,0,1])
-point0_1 = MeshNode(loc=[0,0,0.5])
+point0 = MeshNode(loc=[0,0,.5])
+point0_1 = MeshNode(loc=[0,0,0.25])
 point1 = MeshNode(loc=[0,0,0])
-point2 = MeshNode(loc=[0,1,1])
-point2_3 = MeshNode(loc=[0,1,0.5])
+point2 = MeshNode(loc=[0,1,0.5])
+point2_3 = MeshNode(loc=[0,1,0.25])
 point3 = MeshNode(loc=[0,1,0])
-point0_2 = MeshNode(loc=[0,0.5,1])
+point0_2 = MeshNode(loc=[0,0.5,0.5])
 point1_3 = MeshNode(loc=[0,0.5,0])
-point_middle = MeshNode(loc=[0, 0.5, 0.5])
+point_middle = MeshNode(loc=[0, 0.5, 0.25])
 
 element0 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7,8], basis_functions=(L2Basis, L2Basis))
 mesh = Mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3, point2, point2_3, point3], elements = element0)
@@ -61,7 +61,7 @@ def make_tiling(xn, yn):
     return long_grid.reshape(-1, 2), lmat
 
 
-evals, lines = make_tiling(2, 1)
+evals, lines = make_tiling(1, 1)
 
 
 l0 = np.array(mesh.evaluate_embeddings([0], evals) )

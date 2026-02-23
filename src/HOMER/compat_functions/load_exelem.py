@@ -157,7 +157,7 @@ def re_ind_elem_nodes(ls, nodes):
         return nodes
     occurs = count_occurrences(nodes)
     new_nodes = [rename_conditional(a,b,edict) for a, b in zip(nodes, occurs)]
-    print(new_nodes)
+    # print(new_nodes)
     return new_nodes
  
 def process_elem(elem_data, basis_def):
