@@ -2,6 +2,29 @@ import jax.numpy as jnp
 import numpy as np
 import pyvista as pv
 
+def h_tform(points: np.ndarray, transform:np.ndarray, fill=1) -> np.ndarray:
+    """
+    Performms a homogenous transformation on data
+    :param points: the points to transform
+    :param transform: the 4x4 transformation
+    :param fill: 1 for points, 0 for vectors.
+    :return pts: the transformed points
+    """
+    if points.ndim == 1:
+        points = points[None, ...]
+
+    homogenous_points = np.concatenate(
+        [points, np.ones((len(points), 1))*fill], axis=-1
+    )[..., None]
+    new_points = (transform[None, ...] @ homogenous_points)[..., 0] #always 0 on this axis
+    if fill==1:
+        new_points = (
+                new_points[:, :-1] / new_points[:, -1][..., None]
+        )
+    else:
+        new_points = new_points[:,:-1]
+    return new_points.squeeze()
+
 def vol_tet(p0, p1, p2, p3):
     return jnp.abs( 1/6 * jnp.dot( p1 - p0, jnp.cross(p2 - p0, p3 - p0)))
 

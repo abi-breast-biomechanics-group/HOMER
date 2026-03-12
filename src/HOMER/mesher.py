@@ -17,8 +17,7 @@ from scipy.sparse import coo_array
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import jacobian
-from HOMER.utils import vol_hexahedron, make_tiling
-
+from HOMER.utils import vol_hexahedron, make_tiling, h_tform
 
 
 class MeshNode(dict):
@@ -821,14 +820,14 @@ class Mesh:
             return
         s.show()
 
-    def transform(self, htform):
+    def transform(self, tform):
         """
-        Apply a 3D homogenous transform to the mesh surface.
+        Apply a 4x4 3D homogenous transform to the mesh.
         """
         for node in self.nodes:
-            node.loc = h_tform(node.loc, htform, fill=1)
+            node.loc = h_tform(node.loc, tform, fill=1)
             for k,v in node.items():  
-                node[k] = htform(v, htform, fill=0)
+                node[k] = h_tform(v, tform, fill=0)
         self.generate_mesh()
 
     ################################## INTERNAL
