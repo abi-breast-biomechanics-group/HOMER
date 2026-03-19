@@ -352,7 +352,9 @@ class Mesh:
         """
         dim = self.ndim if dim is None else dim
 
-        b_off= 0 if boundary_points else 1
+        b_off = 0 if boundary_points else 1
+        if boundary_points:
+            res = res + 1 #boundary points drops a res
         if dim == 2:
             if lattice is None:
                 X,Y = (np.mgrid[
@@ -925,11 +927,15 @@ class Mesh:
             # generate a KD tree of self
             if self.elements[0].ndim == 2:
                 res = 200
-                xis = self.xi_grid(res, 2)
+                xis = self.xi_grid(res, 2,
+                                   boundary_points=False,
+                                   )
                 ndim = 2
             else:
-                res = 50
-                xis = self.xi_grid(res, 3)
+                res = 100
+                xis = self.xi_grid(res, 3,
+                                   boundary_points=False,
+                                   )
                 ndim = 3
             tree = KDTree(self.evaluate_embeddings_in_every_element(xis))
             _, i = tree.query(points, k=1, workers=-1)
@@ -996,11 +1002,27 @@ class Mesh:
         # d = jac(init_xi)
         # function, jac = jacobian(optim_embed, init_estimate=init_xi)
         bounds = (np.zeros_like(init_xi), np.ones_like(init_xi))
+        if verbose == 2: 
+            print("Beginninng embedding")
         result = least_squares(function, init_xi, jac=jac, bounds=bounds, verbose=verbose)
 
         final_mean_dist = np.mean(np.linalg.norm(result.fun.reshape(-1, 3), axis=-1))
+        final_max_dist = np.max(np.linalg.norm(result.fun.reshape(-1, 3), axis=-1))
         if verbose == 2:
-            print(f"final mean error of {final_mean_dist:.2f} units")
+            print(f"final mean error of {final_mean_dist} units, max error of {final_max_dist}")
+
+        locs = self.evaluate_ele_xi_pair_embeddings(elem_num, result.x.reshape(-1, ndim))
+        vec_errors = points - locs
+        # errors = np.linalg.norm(result.fun.reshape(-1, 3), axis=-1)
+        errors = np.linalg.norm(vec_errors, axis=-1)
+        s = pv.Plotter()
+        self.plot(s)
+        data = pv.PolyData(points)
+        data['err'] = np.log(errors + 1e-16)
+        s.add_mesh(data, render_points_as_spheres=True, point_size=20)
+        # data.plot()
+        s.show()
+        raise ValueError()
 
         return elem_num, result.x.reshape(-1,ndim)
 
@@ -1185,7 +1207,7 @@ class Mesh:
         A = weight_mat[target_mask]
         b = targets[target_mask]
         assert A.shape[0] > A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
-        new_params, residual, rank, s = np.linalg.lstsq(A, b)
+        new_params, residual, rank, s = np.linalg.lstsq(np.asarray(A).astype(np.double), np.asarray(b).astype(np.double))
         self.true_param_array = new_params.flatten()
         self.optimisable_param_array = self.true_param_array[self.optimisable_param_bool]
         self.update_from_params(new_params.flatten(), generate=False)
