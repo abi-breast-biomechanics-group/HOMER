@@ -1022,7 +1022,7 @@ class Mesh:
         s.add_mesh(data, render_points_as_spheres=True, point_size=20)
         # data.plot()
         s.show()
-        raise ValueError()
+        # raise ValueError()
 
         return elem_num, result.x.reshape(-1,ndim)
 
