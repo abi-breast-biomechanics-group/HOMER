@@ -21,7 +21,10 @@ def process_node(node_str, keys, dim=3):
         node_data = [[] for _ in range(num_properties)]
         for idl, l in enumerate(node_str[1:]):
             prop_num = idl % num_properties
-            datum = float(re.findall(r"[-+]?(?:\d*\.*\d+)", l)[-1])
+
+            # datum = re.findall(r"[-+]?(?:\d*\.*\d+)", l)[-1]
+            datum = extract_numbers(l)[-1]
+            datum = float(datum)
             node_data[prop_num].append(datum)
 
         node_loc = np.array(node_data[0])
@@ -52,7 +55,8 @@ def process_node(node_str, keys, dim=3):
             # print(node_version)
             l_since_reset = 0
         else:
-            datum = float(extract_numbers(l)[-1])
+            datum = extract_numbers(l)[-1]
+            datum=float(datum)
             node_data[node_version - 1][dim].append(datum)
             l_since_reset += 1
         # if num_versions > 1:
@@ -212,27 +216,40 @@ def load_mesh(ipnode, ipelem, basis=(H3Basis, H3Basis, L2Basis), keys=('du', 'dv
 if __name__ == "__main__":
     ipnode = Path("bin/heart/BB001_RC_Cubic_59.ipnode")
     ipelem = Path("bin/heart/BB001_RC_Cubic_59.ipelem")
+
+
+    ipelem = Path("/Users/robinlaven/Documents/mobstr_3D/compphan/snr_inf/cmiss_ref/cylinder_geofitted.ipelem")
+    ipnode = Path("/Users/robinlaven/Documents/mobstr_3D/compphan/snr_inf/cmiss_ref/cylinder_ffdfitted.ipnode")
+    # ipnode = Path("/Users/robinlaven/Documents/mobstr_3D/compphan/snr_inf/cmiss_ref/cylinder_geofitted.ipnode")
     # ipelem = Path("bin/cyl.ipelem")
-    # nodes = load_node(ipnode, 
-    #                   # keys = ['du', 'dv', 'dudv'],
-    #                   keys = ['du', 'dv', 'dudv', 'dw', 'dudw', 'dvdw', 'dudvdw'],
-    #                   )
-    #
-    # elems = load_elem(ipelem, basis_def=(H3Basis, H3Basis, H3Basis))
-    ipdata = Path("scaffold_test/sternum.ipdata")
-    ipelem = Path("scaffold_test/sternum.ipelem")
-
-    nodes = load_nodes_ipdata(ipdata, 
-                      # keys = ['du', 'dv', 'dudv'],
-                      keys = ['du'],
+    nodes = load_node(ipnode, 
+                      keys = ['du', 'dv', 'dudv'],
+                      # keys = ['dv', 'du', 'dudv'],
+                      # keys = ['du', 'dv', 'dudv', 'dw', 'dudw', 'dvdw', 'dudvdw'],
                       )
-    elems = load_elem(ipelem, basis_def=(L1Basis, L1Basis))
+    # for n in nodes:
+    #     print(n['du'])
+    #     n['du'] = n['du'] * [1, 1, 0]
+    #
+    #     # n['dudv'] = -n['dudv'] * -100
+    #     pass
 
-    meshObj = Mesh(nodes, elems)
-    meshObj._clean_pts()
-    meshObj.plot(labels=True)
+    elems = load_elem(ipelem, basis_def=(H3Basis, H3Basis, L2Basis))
+    # ipdata = Path("scaffold_test/sternum.ipdata")
+    # ipelem = Path("scaffold_test/sternum.ipelem")
+    #
+    # nodes = load_nodes_ipdata(ipdata, 
+    #                   # keys = ['du', 'dv', 'dudv'],
+    #                   keys = ['du'],
+    #                   )
+    # elems = load_elem(ipelem, basis_def=(L1Basis, L1Basis))
 
-    meshObj.save("scaffold_test/sternum.json")
+    mesh = Mesh(nodes, elems)
+    mesh._clean_pts()
+    mesh.plot(labels=False)
+
+    mesh.save("/Users/robinlaven/Documents/mobstr_3D/compphan/snr_inf/cmiss_ref/FFD.json")
+    # meshObj.save("scaffold_test/sternum.json")
 
     # node = meshObj.get_node('3')
     # print(node)
