@@ -1,6 +1,44 @@
 import jax.numpy as jnp
 import numpy as np
 import pyvista as pv
+import itertools
+from copy import copy
+from scipy.sparse import csr_array
+
+def block_diagonal_jacobian(n: int, m: int, num_blocks: int) -> csr_array:
+    """
+    Build a block-diagonal sparse matrix with `num_blocks` dense blocks,
+    each of shape (n, m), filled with placeholder 1s.
+
+    Parameters
+    ----------
+    n           : number of rows per block
+    m           : number of columns per block
+    num_blocks  : number of blocks along the diagonal
+
+    Returns
+    -------
+    csr_array of shape (n * num_blocks, m * num_blocks)
+    """
+    nnz = n * m * num_blocks
+
+    block_rows, block_cols = np.mgrid[0:n, 0:m]
+    block_rows = block_rows.ravel()
+    block_cols = block_cols.ravel()
+
+    k = np.repeat(np.arange(num_blocks), n * m)
+    rows = k * n + np.tile(block_rows, num_blocks)
+    cols = k * m + np.tile(block_cols, num_blocks)
+    data = np.ones(nnz, dtype=np.float64)
+
+    shape = (n * num_blocks, m * num_blocks)
+    return csr_array((data, (rows, cols)), shape=shape)
+
+def all_pairings(*lists):
+    """
+    Convinience function for Fortran ordered product of lists
+    """
+    return [t[::-1] for t in itertools.product(*reversed(copy(lists)))]
 
 def h_tform(points: np.ndarray, transform:np.ndarray, fill=1) -> np.ndarray:
     """

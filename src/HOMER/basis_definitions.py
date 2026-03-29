@@ -56,8 +56,10 @@ class AbstractBasis:
     weights: Optional[list[str]] = None
     deriv:Optional[list[Callable]] = None
     order:Optional[int] = None
+    node_locs: Optional[list[float]] = None
 
-BasisGroup = tuple[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]]
+BasisGroup = tuple[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]] | list[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]]
+
 
 def N2_weights(w0, w1, bp_inds) -> jnp.ndarray:
     # BPInd = [[0, 0], [1, 0], [0, 1], [1, 1],
@@ -313,6 +315,7 @@ class H3Basis(AbstractBasis):
     weights = ['x0', 'dx0', 'x1', 'dx1'] #then this records the derivatives
     deriv = [H3, H3d1, H3d1d1]
     order = 3
+    node_locs = [0, 1]
     
 @dataclass
 class L1Basis(AbstractBasis):
@@ -320,6 +323,7 @@ class L1Basis(AbstractBasis):
     weights = ['x0', 'x1']
     deriv = [L1, L1d1, L1d1d1]
     order = 1
+    node_locs = [0, 1]
 
 @dataclass
 class L2Basis(AbstractBasis):
@@ -327,6 +331,7 @@ class L2Basis(AbstractBasis):
     weights = ['x0', 'x1', 'x2']
     deriv =[L2, L2d1]
     order = 2
+    node_locs = [0, 1/2, 2/2]
 
 @dataclass
 class L3Basis(AbstractBasis):
@@ -334,6 +339,7 @@ class L3Basis(AbstractBasis):
     weights = ['x0', 'x1', 'x2', 'x3']
     deriv = [L3, L3d1]
     order = 3
+    node_locs = [0/3, 1/3, 2/3, 3/3]
     
 @dataclass
 class L4Basis(AbstractBasis):
@@ -341,3 +347,4 @@ class L4Basis(AbstractBasis):
     weights = ['x0', 'x1', 'x2', 'x3', 'x4']
     deriv = [L4, L4d1]
     order = 4
+    node_locs = [0/4, 1/4, 2/4, 3/4, 4/4]
