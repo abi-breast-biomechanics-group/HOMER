@@ -34,17 +34,17 @@ point1 = MeshNode(loc=np.array([0,0,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np
 point2 = MeshNode(loc=np.array([0,1,1]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 point3 = MeshNode(loc=np.array([0,1,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 
-point0.fix_parameter(['loc'], inds=[2], values=np.array([0]))
-point0.fix_parameter(['loc'], inds=[0], values=np.array([1]))
+# point0.fix_parameter(['loc'], inds=[2], values=np.array([0]))
+# point0.fix_parameter(['loc'], inds=[0], values=np.array([1]))
 
 print(point0.fixed_params)
-# point0.fix_parameter('loc')
-point1.fix_parameter(['loc', 'du', 'dv'])
-point2.fix_parameter(['loc', 'du', 'dv', 'dudv'])
-point3.fix_parameter(['loc', 'du', 'dv'])
-# point1.fix_parameter('loc')
-# point2.fix_parameter('loc')
-# point3.fix_parameter('loc')
+point0.fix_parameter('loc')
+# point1.fix_parameter(['loc', 'du', 'dv'])
+# point2.fix_parameter(['loc', 'du', 'dv', 'dudv'])
+# point3.fix_parameter(['loc', 'du', 'dv'])
+point1.fix_parameter('loc')
+point2.fix_parameter('loc')
+point3.fix_parameter('loc')
 
 element0 = MeshElement(node_indexes=[0,1,2,3], basis_functions=(H3Basis, H3Basis))
 fitting_mesh = Mesh(nodes = [point0, point1, point2, point3], elements = element0)
@@ -65,5 +65,5 @@ optim = least_squares(fitting_fn, init_params, jac=jacobian, verbose=2)
 
 ################## visualise the fit
 fitting_mesh.update_from_params(optim.x)
-fitting_mesh.plot(mesh_opacity=0.5)
+fitting_mesh.plot(mesh_opacity=0.1)
 

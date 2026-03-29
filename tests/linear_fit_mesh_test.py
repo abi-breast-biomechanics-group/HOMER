@@ -24,6 +24,8 @@ element0 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7,8], basis_functions=(L2Basi
 target_mesh = Mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3, point2, point2_3, point3], elements = element0, jax_compile=True)
 target_mesh.refine(2)
 
+# target_mesh.plot()
+
 
 ################## CONSTRUCT THE FITTING MESH
 point0 = MeshNode(loc=np.array([0,0,1]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
@@ -42,12 +44,13 @@ grid = np.tile(grid, (4,1))
 elems = np.repeat([0,1,2,3], res**2)
 
 target_points = target_mesh.evaluate_ele_xi_pair_embeddings(elems, grid)
+print(target_points)
 
 ################## Show the initial fit
 s = pv.Plotter()
 target_mesh.plot(scene=s)
 fitting_mesh.plot(scene=s, mesh_opacity=0.5)
-s.add_mesh(np.asarray(target_points), render_points_as_spheres=True, color='g')
+s.add_mesh(pv.PolyData(np.asarray(target_points)), render_points_as_spheres=True, color='g')
 s.show()
 
 wmat = fitting_mesh.get_xi_weight_mat(elems, grid)

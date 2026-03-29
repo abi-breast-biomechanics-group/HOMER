@@ -13,7 +13,7 @@ point2_3 = MeshNode(loc=[0,1,0.5])
 point3 = MeshNode(loc=[0,1,0])
 point0_2 = MeshNode(loc=[0,0.5,1])
 point1_3 = MeshNode(loc=[0,0.5,0])
-point_middle = MeshNode(loc=[0.25, 0.5, 0.5])
+point_middle = MeshNode(loc=[0.5, 0.5, 0.5])
 
 # element0 = MeshElement(nodes=[0,1,2,3], basis_functions=(L1Basis, L1Basis))
 # objMesh = mesh(nodes=[point0, point1, point2, point3], elements = element0)
