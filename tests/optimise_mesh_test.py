@@ -38,7 +38,7 @@ point3 = MeshNode(loc=np.array([0,1,0]), du=np.zeros(3), dv=np.zeros(3), dudv=np
 # point0.fix_parameter(['loc'], inds=[0], values=np.array([1]))
 
 print(point0.fixed_params)
-point0.fix_parameter('loc')
+# point0.fix_parameter('loc')
 # point1.fix_parameter(['loc', 'du', 'dv'])
 # point2.fix_parameter(['loc', 'du', 'dv', 'dudv'])
 # point3.fix_parameter(['loc', 'du', 'dv'])
@@ -64,6 +64,10 @@ init_params = fitting_mesh.optimisable_param_array.copy()
 optim = least_squares(fitting_fn, init_params, jac=jacobian, verbose=2)
 
 ################## visualise the fit
+s = pv.Plotter()
+surf_pts = pv.PolyData(np.array(surface_to_fit))
+s.add_mesh(surf_pts)
 fitting_mesh.update_from_params(optim.x)
-fitting_mesh.plot(mesh_opacity=0.1)
+fitting_mesh.plot(s, mesh_opacity=0.1)
+s.show()
 

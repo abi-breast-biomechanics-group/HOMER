@@ -4,6 +4,20 @@ import pyvista as pv
 import itertools
 from copy import copy
 from scipy.sparse import csr_array
+import jax
+import functools
+
+
+@functools.partial(jax.jit, static_argnames=["k"])
+def jax_aknn(d0, d1, k):
+    """
+    Jax implementation of approximate nearest neighbours. 
+    Trust in jax that it's actualy not as inefficient as it appears!
+    """
+    test_data = jax.numpy.linalg.norm(d0[:, None] - d1[None, :], axis=-1)
+    # print(test_data.shape)
+    p0, p1 = jax.lax.approx_min_k(test_data, reduction_dimension=1, k=k)
+    return p0, p1
 
 def block_diagonal_jacobian(n: int, m: int, num_blocks: int) -> csr_array:
     """

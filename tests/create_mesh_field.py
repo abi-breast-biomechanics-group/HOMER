@@ -1,4 +1,4 @@
-from HOMER import Mesh, MeshNode, MeshElement, H3Basis, L1Basis, L3Basis, L2Basis, MeshField
+from HOMER import Mesh, MeshNode, MeshElement, H3Basis, L4Basis, L1Basis, L3Basis, L2Basis, MeshField
 import numpy as np
 import pyvista as pv
 import math
@@ -35,13 +35,12 @@ normal_field = normal_field/np.linalg.norm(normal_field, axis=-1, keepdims=True)
 z2field = data[:,-1]
 # z2field = np.ones_like(z2field)
 
-# mesh.refine(2)
+mesh.refine(2)
 # get point locations by embedding in the mesh.
 
 mesh.new_field('vec_dir', field_dimension=3, field_locs=data, field_values=normal_field, new_basis=[H3Basis]*3)
 mesh.new_field('vec_mag', field_dimension=1, field_locs=data, field_values=z2field, new_basis=[L1Basis]*3)
 
-# mesh['vec_dir'].plot()
 
 s = pv.Plotter()
 
@@ -55,3 +54,5 @@ s.add_arrows(data, normal_field, mag=0.1)
 # s.add_arrows(data, z2field)
 # s.add_mesh(datum, render_points_as_spheres=True, point_size=50)
 s.show()
+
+mesh['vec_dir'].plot()

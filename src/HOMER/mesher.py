@@ -21,8 +21,8 @@ from scipy.sparse import coo_array
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import jacobian
-from HOMER.utils import vol_hexahedron, make_tiling, h_tform, all_pairings, block_diagonal_jacobian
-
+from HOMER.utils import vol_hexahedron, make_tiling, h_tform, all_pairings, block_diagonal_jacobian, jax_aknn
+from HOMER.mesh_decorators import expand_wide_evals, wide_eval
 
 class MeshNode(dict):
     def __init__(self, loc, id=None, **kwargs):
@@ -210,55 +210,6 @@ class MeshElement:
         return [i for i,  _ in indexed_keys]
 
 
-def wide_eval(fn):
-    fn._is_derived = True
-    return fn
-
-def depreciation(fn):
-    def new_fn(*a, **kw):
-        DeprecationWarning("This old naming order is depreciated, and may be removed in a future update")
-        return(fn(*a, **kw))
-    return new_fn
-
-def make_iee(name):
-    def iee(self: 'MeshField', xis, *a, fit_params=None, **kw): 
-        """Evaluates the base function in every element of the mesh"""
-        if fit_params is None:
-            fit_params = self.optimisable_param_array
-        new_fn = getattr(self, name)
-        mapped = jax.vmap(
-            lambda e: new_fn(e, xis, *a, fit_params=fit_params, **kw)
-        )(jnp.arange(len(self.elements)))
-        return mapped.reshape(-1, *mapped.shape[2:])
-    return iee
-
-def make_ele_xi_pair(name):  
-    def ele_xi_pair(self:'MeshField', eles, xis, *a, fit_params=None, **kw):
-        """
-        Evaluates the base function in pairs of ele_xi_lists
-        """
-        if fit_params is None:
-            fit_params = self.optimisable_param_array
-        new_fn = getattr(self, name)
-        out_sorted = jax.vmap( #vmap original over every (element, xi) pair in sorted order
-            lambda e, xi: new_fn(e, xi, *a, fit_params=fit_params, **kw)
-        )(jnp.atleast_1d(eles), jnp.atleast_2d(xis)).squeeze()
-        return out_sorted
-
-    return ele_xi_pair
-
-def expand_wide_evals(cls:"type[MeshField]"):
-    """Iterates through the class definition, defining a range of methods to evaluate functions."""
-    for name, val in list(vars(cls).items()):
-        if callable(val) and getattr(val, '_is_derived', False):
-            setattr(cls, f"{name}_in_every_element", make_iee(name))
-            setattr(cls, f"{name}_ele_xi_pair", make_ele_xi_pair(name))
-
-    # backwards compatibility for naming.
-    cls.evaluate_ele_xi_pair_deriv_embeddings = depreciation(cls.evaluate_deriv_embeddings_ele_xi_pair)
-    cls.evaluate_ele_xi_pair_embeddings = depreciation(cls.evaluate_embeddings_ele_xi_pair)
-    cls.evaluate_ele_xi_pair_normals = depreciation(cls.evaluate_normals_ele_xi_pair)
-    return cls
 
 @expand_wide_evals
 class MeshField:
@@ -348,6 +299,9 @@ class MeshField:
         """ 
         Evaluates the jacobian at a set of xis within an element
         """
+        if fit_params is None:
+            fit_params = self.optimisable_param_array
+
         if self.ndim == 2:
             du = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
             dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
@@ -357,6 +311,7 @@ class MeshField:
             dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
             dw = self.evaluate_deriv_embeddings(element_ids, xis, [0, 0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
             jmats = jnp.concatenate((du, dv, dw), axis=1)
+
         return jmats
 
     ################################## CONVENIENCE
@@ -424,6 +379,7 @@ class MeshField:
         :params ng: the number of gauss points to evaluate, either in 1D or a grid of gauss points.
         :returns X, W: The location and weighting of the gauss points for the function order.
         """
+
         if isinstance(ng, int):
             return GAUSS[ng]
         elif isinstance(ng, list):
@@ -921,7 +877,7 @@ class MeshField:
         self.generate_weight_matrix = make_weight_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
     ################################# useful utils.
 
-    def embed_points(self, points, verbose=0, init_elexi=None):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False):
         """
         Given an mx3 array of points, returns the embedded xi locations which best match these points.
         Minimises the squared distance between the embedded locations and the given points, as a non linear least squares.
@@ -930,35 +886,128 @@ class MeshField:
         :param verbose: Level of information printed by the least squares fitting process
         :param init_elexi: Initial locations of the points, just so skip straigh to optimising
         """
+        if fit_params is None:
+            fit_params = self.optimisable_param_array
 
-        points = np.asarray(points).reshape(-1,self.fdim) #ensure correct shape and type
+        points = jnp.atleast_2d(points) #ensure correct shape and type
         
         if init_elexi is None: #do a coarse embedding
             if self.elements[0].ndim == 2:
-                res = 200
+                res = 40
                 xis = self.xi_grid(res, 2, boundary_points=False)
                 ndim = 2
             else:
-                res = 100
+                res = 20
                 xis = self.xi_grid(res, 3, boundary_points=False)
                 ndim = 3
-            tree = KDTree(self.evaluate_embeddings_in_every_element(xis))
-            _, i = tree.query(points, k=1, workers=-1)
-            elem_num = np.array(i) // xis.shape[0]
-            xi_ind = np.array(i) % xis.shape[0]
-            init_xi = xis[xi_ind].flatten()
+            coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
+            # _, i = tree.query(points, k=1, workers=-1)
+            i = jax_aknn(points, coarse_pts, k=1)[1][:, 0]
+            elem_num = i // xis.shape[0]
+            xi_ind = i % xis.shape[0]
+            init_xi = xis[xi_ind]
         else:
             elem_num, init_xi = init_elexi
-            init_xi = np.array(init_xi).flatten()
+            init_xi = np.array(init_xi)
             ndim = self.elements[0].ndim
 
-        # unique_elem, inv = np.unique_inverse(elem_num)
+        def _pseudoinverse_matvec(J: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+            # J = J.T # A convention clash
+            n, d = J.shape
+            Jt_v = J.T @ v          # (d,) — project v onto tangent space
+            if d == n: #determined system.
+                return jnp.linalg.solve(J, v)
+            else: # Overdetermined: solve normal equations (JᵀJ) dxi = Jᵀv
+                JtJ = J.T @ J        # (d, d) Gram matrix
+                return jnp.linalg.solve(JtJ, Jt_v)
+        
+        n_steps = 1
+        def xis_to_points(elem, xi0, x_target):
+            xi = xi0.copy()
+            # The total driving vector is fixed: the full residual at the start.
+            # We parametrise by t in [0,1], with the RHS = J†(xi) @ r0.
+            r0 = (x_target - self.evaluate_embeddings(elem, xi0, fit_params=fit_params))[0]
+            dt = 1.0 / n_steps
+            d = xi0.shape[0]
+            lo = jnp.zeros(d) 
+            hi = jnp.ones(d) 
+
+            def rhs(xi: jnp.ndarray, dt: float) -> jnp.ndarray:
+                """
+                dxi/dt with active-constraint-aware pseudoinverse.
+                
+                Dimensions on a bound are excluded from the solve — J is reduced to
+                its free columns, the update is solved in that subspace, and bound
+                dimensions get zero velocity. Per-element alpha then scales each
+                free dimension to respect its bounds.
+                """
+                J = self.evaluate_jacobians(elem, xi, fit_params=fit_params)[0].T # (n, d)
+        
+                # Determine which dimensions are on a bound (active constraints)
+                on_lo = xi <= lo + 1e-12
+                on_hi = xi >= hi - 1e-12
+                free_idx = jnp.where(~(on_lo|on_hi), size=d)[0]     # JAX-compatible free indices
+
+                # Solve only in the free subspace
+                J_free = J[:, free_idx]                  # (n, d_free)
+                dxi_free = _pseudoinverse_matvec(J_free, r0)  # (d_free,)
+
+                # Scatter back into full dxi, bound dims remain zero
+                dxi = jnp.zeros_like(xi)
+                dxi = dxi.at[free_idx].set(dxi_free)
+
+                # Per-element alpha: scale each free dim to respect its bound
+                step = dt * dxi
+                alpha_hi = jnp.where(step > 0, (hi - xi) / (step + 1e-300), 1.0)
+                alpha_lo = jnp.where(step < 0, (lo - xi) / (step - 1e-300), 1.0)
+                alpha = jnp.clip(jnp.minimum(alpha_hi, alpha_lo), 0.0, 1.0)
+
+                return dxi * alpha
+
+            for _ in range(n_steps):
+                k1 = rhs(xi, dt)
+                k2 = rhs(xi + 0.5 * dt * k1, dt)
+                k3 = rhs(xi + 0.5 * dt * k2, dt)
+                k4 = rhs(xi +       dt * k3, dt)
+                xi = xi + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+                xi = jnp.clip(xi, lo, hi)
+
+            residual = self.evaluate_embeddings(elem, xi, fit_params=fit_params) - x_target
+            return xi, residual
+
+        embedded, res = jax.vmap(xis_to_points)(elem_num, init_xi, points) 
+        # embedded = init_xi
+
+        # if verbose >= 2:
+        #     final_mean_dist = np.mean(np.linalg.norm(res, axis=-1))
+        #     final_max_dist = np.max(np.linalg.norm(res, axis=-1))
+        #     print(f"final mean error of {final_mean_dist} units, max error of {final_max_dist}")
+
+        if verbose == 3:
+            locs = self.evaluate_embeddings_ele_xi_pair(elem_num, embedded)
+            vec_errors = points - locs
+            errors = np.linalg.norm(vec_errors, axis=-1)
+
+            line_segs = np.concatenate(
+                (np.atleast_2d(locs)[:, None], np.atleast_2d(points)[:, None]), axis=1
+            ).reshape(-1, self.fdim)
+            s = pv.Plotter()
+            self.plot(s)
+            data = pv.PolyData(np.asarray(locs))
+            data['err'] = errors
+            s.add_mesh(pv.line_segments_from_points(line_segs), color='k')
+            s.add_mesh(data, render_points_as_spheres=True, point_size=20)
+            s.show()
+        if return_residual:
+            return (elem_num, embedded), res 
+
+        return elem_num, embedded
+
         def optim_embed(params):
             xi_data = params.reshape(-1,ndim)
             return (self.evaluate_embeddings_ele_xi_pair(elem_num, xi_data) - points).ravel()
 
         spm = block_diagonal_jacobian(self.fdim, self.ndim, points.shape[0])
-
         def jac(params):
             xi_data = params.reshape(-1,ndim)
             data = jnp.swapaxes(self.evaluate_jacobians_ele_xi_pair(elem_num, xi_data), -1,-2)
@@ -967,7 +1016,7 @@ class MeshField:
 
         bounds = (np.zeros_like(init_xi), np.ones_like(init_xi))
         if verbose == 2: 
-            print("Beginninng embedding")
+            print("Beginning embedding")
         result = least_squares(optim_embed, init_xi, jac=jac, bounds=bounds, verbose=min(verbose,2))
 
         final_mean_dist = np.mean(np.linalg.norm(result.fun.reshape(-1, self.fdim), axis=-1))
@@ -978,16 +1027,13 @@ class MeshField:
         if verbose == 3:
             locs = self.evaluate_ele_xi_pair_embeddings(elem_num, result.x.reshape(-1, ndim))
             vec_errors = points - locs
-            # errors = np.linalg.norm(result.fun.reshape(-1, 3), axis=-1)
             errors = np.linalg.norm(vec_errors, axis=-1)
             s = pv.Plotter()
             self.plot(s)
             data = pv.PolyData(points)
             data['err'] = np.log(errors + 1e-16)
             s.add_mesh(data, render_points_as_spheres=True, point_size=20)
-            # data.plot()
             s.show()
-            # raise ValueError()
 
         return elem_num, result.x.reshape(-1,ndim)
 
@@ -1033,43 +1079,25 @@ class MeshField:
         dets = jnp.linalg.det(Jmats).reshape(len(self.elements), -1)
         vols = dets * weights[None]
         return jnp.sum(vols)
-
-    def strain_tensor(self, othr: "Mesh", eles, xis, coord_function: Optional[Callable] = None, return_F=False):
+    
+    def strain_tensor(self, othr: "Mesh", eles, xis, coord_function: Optional[Callable] = None, return_F=False, fit_params=None):
         """
         Assesses the strain in a deformed state at a set of given locations.
-
         :param othr: A second mesh object with the same topology to assess strain against.
         :param eles: The elements to asses strain in.
         :param xis: The xi locations to evaluate strain in.
         :param coord_function: A function with input Mesh, eles, xis, tensors -> remapped_tensors. Used to evaluate strains in relevant coordinate schemes.
         """
 
-        n_ele = len(eles)
-        if self.ndim == 2:
-            if coord_function is None:
-                raise ValueError("Strain tensor on manifold mesh requires a coord function to provide a meaninful basis")
-            def_self = jnp.concatenate([ 
-                self.evaluate_deriv_embeddings(eles, xis, [1, 0]).reshape(n_ele, -1, 3, 1),
-                self.evaluate_deriv_embeddings(eles, xis, [0, 1]).reshape(n_ele, -1, 3, 1),
-            ], axis=-1)
+        if self.ndim == 2 and coord_function is None:
+            raise ValueError("Strain tensor on manifold mesh requires a coord function to provide a meaninful basis")
+
+        def_self = self.evaluate_jacobians_ele_xi_pair(eles, xis, fit_params=fit_params)
+        def_othr = othr.evaluate_jacobians_ele_xi_pair(eles, xis, fit_params=fit_params)
+
+        if coord_function is not None:
             def_self = coord_function(self, eles, xis, def_self)
-
-            def_othr = jnp.concatenate([ 
-                othr.evaluate_deriv_embeddings(eles, xis, [1, 0]).reshape(n_ele, -1, 3, 1),
-                othr.evaluate_deriv_embeddings(eles, xis, [0, 1]).reshape(n_ele, -1, 3, 1),
-            ], axis=-1)
             def_othr = coord_function(othr, eles, xis, def_othr)
-            
-        elif self.ndim == 3:
-
-            def_self = self.evaluate_jacobians_ele_xi_pairs(eles, xis)
-            def_other = othr.evaluate_jacobians_ele_xi_pairs(eles, xis)
-
-            if coord_function is not None:
-                def_self = coord_function(self, eles, xis, def_self)
-                def_othr = coord_function(othr, eles, xis, def_othr)
-        else:
-            raise NotImplementedError
         
         str_tensor = jnp.linalg.inv(def_self) @ def_othr
         F = str_tensor.reshape(-1, self.ndim, self.ndim)
@@ -1078,28 +1106,6 @@ class MeshField:
   
         strain = (F.transpose(0,2,1) @ F - np.eye(self.ndim)[None])/2
         return strain.reshape(-1, self.ndim, self.ndim)
-
-    def strain_tensor_iee(self, othr, xis, coord_function=None):
-        """
-        A convinience function to assess strain tensors (i)n (e)very (e)lement
-        """
-        eles = list(range(len(self.elements)))
-        return self.strain_tensor(othr, eles, xis, coord_function)
-
-    def strain_tensor_in_ele_xi_pairs(self, othr, eles, xis, coord_function=None):
-        """
-        A convinience fucntion for assessing strain tensors in pairs of element and xi locations.
-        """
-        unique_elem, inv = jnp.unique_inverse(eles)
-        out_array = jnp.zeros((xis.shape[0], self.ndim, self.ndim))
-        for ide, e in enumerate(unique_elem):
-            mask = ide == inv
-            strain_tens = self.strain_tensor(othr, [e], xis[mask], coord_function)
-            out_array = out_array.at[mask].set(strain_tens)
-        return out_array
-
-
-
 
     ################################# FASTFITTING
 
@@ -1362,7 +1368,7 @@ class MeshField:
         el = (np.ones((1, res**self.ndim)) * np.arange(len(self.elements))[:, None]).flatten().astype(int)
         xi = np.tile(egrid.reshape(-1, self.ndim), (len(self.elements), 1))
         w_mat = new_mesh.get_xi_weight_mat(el, xi)
-        locs = self.evaluate_ele_xi_pair_embeddings(el, xi)
+        locs = self.evaluate_embeddings_ele_xi_pair(el, xi)
         new_mesh.linear_fit(weight_mat=w_mat, targets=locs)
         new_mesh.generate_mesh()
 
@@ -1425,8 +1431,6 @@ class Mesh(MeshField):
 
         f_locs = self.evaluate_embeddings_in_every_element(field_xi)
 
-        f_jacs = np.linalg.det(self.strain_tensor_iee(xis=field_xi))
-        breakpoint()
         f_values = self[field_to_draw].evaluate_embeddings_in_every_element(field_xi)
 
         if field_artist is None:

@@ -1,9 +1,11 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 from functools import partial
 
+if TYPE_CHECKING:
+    from HOMER.mesher import Mesh
 
 import scipy
 
@@ -88,7 +90,4 @@ def jax_comp_kdtree_normal_distance_query(fit_data, normals, kdtree_args=None):
         return primal_comp, co_tangent.flatten()
     
     return distances
-
-
-
 
