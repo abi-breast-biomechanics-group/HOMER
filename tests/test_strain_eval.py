@@ -26,14 +26,15 @@ point7 = MeshNode(loc=([1,1,0]), du=[0,0,0], dv=[0,0,0], dw = ([1,0.5,-0.5]), du
 element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=(H3Basis, H3Basis, H3Basis))
 mesh1 = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1)
 mesh1.refine(2)
-mesh1.plot()
 
 res = 5
 grid = mesh0.xi_grid(res, boundary_points=False)
 grid = np.tile(grid, (8,1))
 elems = np.repeat([0,1,2,3,4,5,6,7], res**3)
-strains = mesh0.strain_tensor(mesh1, elems, grid)
+print(elems.shape, grid.shape)
+print('evaluating embeddings')
 locs = mesh0.evaluate_embeddings_ele_xi_pair(elems, grid)
+strains = mesh0.evaluate_strain_ele_xi_pair(elems, grid, mesh1)
 
 s = pv.Plotter()
 mesh0.plot(s)

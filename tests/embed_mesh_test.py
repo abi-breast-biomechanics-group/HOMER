@@ -24,20 +24,9 @@ element0 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7,8], basis_functions=(L2Basi
 mesh = Mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3, point2, point2_3, point3], elements = element0, jax_compile=True)
 
 
-ele, xi = mesh.embed_points(np.array([0.5, 0.5, 0.5]),
-                            # init_elexi=([0], [(0.25,0.25)]), 
-                            verbose=3,
-                            )
-
-
-
 pts = np.random.rand(1000, 3)
 pts[:, 0] = 0.6
 ele, xi = mesh.embed_points(pts, verbose=3)
-
-
-
-
 
 
 point0 = MeshNode(loc=([0,0,1]), du=[0,0,0], dv=[0,0,0], dw = ([2,-0.5,0.5]), dudv=[0,0,0], dudw=[0,0,0], dvdw=[0,0,0], dudvdw=[0,0,0], id=1)

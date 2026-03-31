@@ -307,6 +307,7 @@ class MeshField:
             dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
             jmats = jnp.concatenate((du, dv), axis=1)
         if self.ndim == 3:
+
             du = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
             dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
             dw = self.evaluate_deriv_embeddings(element_ids, xis, [0, 0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
@@ -835,9 +836,11 @@ class MeshField:
         def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
             element_ids = jnp.atleast_1d(element_ids)
             xis = jnp.atleast_2d(xis)
+
             param_data = jnp.asarray(self.true_param_array)
             if not len(fit_params) == len(param_data):
                 fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
+
             map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
             params = jnp.asarray(fit_params)[map]
             p_array = params[jnp.asarray(element_ids).astype(int)]
@@ -857,6 +860,7 @@ class MeshField:
             element_ids = jnp.atleast_1d(element_ids)
             xis = jnp.atleast_2d(xis)
             param_data = jnp.asarray(self.true_param_array)
+
             if not len(fit_params) == len(param_data):
                 fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
 
@@ -894,11 +898,11 @@ class MeshField:
         if init_elexi is None: #do a coarse embedding
             if self.elements[0].ndim == 2:
                 res = 40
-                xis = self.xi_grid(res, 2, boundary_points=False)
+                xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
                 ndim = 2
             else:
                 res = 20
-                xis = self.xi_grid(res, 3, boundary_points=False)
+                xis = jnp.asarray(self.xi_grid(res, 3, boundary_points=False))
                 ndim = 3
             coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
             # _, i = tree.query(points, k=1, workers=-1)
@@ -1080,24 +1084,25 @@ class MeshField:
         vols = dets * weights[None]
         return jnp.sum(vols)
     
-    def strain_tensor(self, othr: "Mesh", eles, xis, coord_function: Optional[Callable] = None, return_F=False, fit_params=None):
+    @wide_eval
+    def evaluate_strain(self, element_ids, xis, othr: "Mesh", coord_function: Optional[Callable] = None, return_F=False, fit_params=None):
         """
         Assesses the strain in a deformed state at a set of given locations.
-        :param othr: A second mesh object with the same topology to assess strain against.
-        :param eles: The elements to asses strain in.
+        :param element_ids: The elements to asses strain in.
         :param xis: The xi locations to evaluate strain in.
+        :param othr: A second mesh object with the same topology to assess strain against.
         :param coord_function: A function with input Mesh, eles, xis, tensors -> remapped_tensors. Used to evaluate strains in relevant coordinate schemes.
         """
 
         if self.ndim == 2 and coord_function is None:
             raise ValueError("Strain tensor on manifold mesh requires a coord function to provide a meaninful basis")
 
-        def_self = self.evaluate_jacobians_ele_xi_pair(eles, xis, fit_params=fit_params)
-        def_othr = othr.evaluate_jacobians_ele_xi_pair(eles, xis, fit_params=fit_params)
+        def_self = self.evaluate_jacobians(element_ids, xis, fit_params=fit_params)
+        def_othr = othr.evaluate_jacobians(element_ids, xis, fit_params=None)
 
         if coord_function is not None:
-            def_self = coord_function(self, eles, xis, def_self)
-            def_othr = coord_function(othr, eles, xis, def_othr)
+            def_self = coord_function(self, element_ids, xis, def_self)
+            def_othr = coord_function(othr, element_ids, xis, def_othr)
         
         str_tensor = jnp.linalg.inv(def_self) @ def_othr
         F = str_tensor.reshape(-1, self.ndim, self.ndim)
@@ -1493,6 +1498,22 @@ class Mesh(MeshField):
         w_mat = self[field_name].get_xi_weight_mat(*locs)
         self[field_name].linear_fit(weight_mat=w_mat, targets=field_values)
         return
+
+    
+    def save(self, loc: PathLike):
+        """
+        Saves the mesh to a .json formated file in the given location
+        """
+        from HOMER.io import save_mesh #avoid the circular import here
+        save_mesh(self, loc)
+
+    def dump_to_dict(self):
+        """
+        Returns a dict structure representing the mesh object, for ease of saving
+        """
+        all_dicts = {f:self[f].dump_to_dict() for f in self.fields.keys()}
+        all_dicts['main'] = self.super().dump_to_dict()
+        return all_dicts
 
 
 

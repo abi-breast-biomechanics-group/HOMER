@@ -25,7 +25,7 @@ def make_iee(name):
             fit_params = self.optimisable_param_array
         new_fn = getattr(self, name)
         mapped = jax.vmap(
-            lambda e: new_fn(e, *a, fit_params=fit_params, **kw)
+            lambda e: new_fn(e, *a, fit_params=fit_params, **kw), in_axes=0
         )(jnp.arange(len(self.elements)))
         return mapped.reshape(-1, *mapped.shape[2:])
     return iee
@@ -38,9 +38,11 @@ def make_ele_xi_pair(name):
         if fit_params is None:
             fit_params = self.optimisable_param_array
         new_fn = getattr(self, name)
+        eval_e = jnp.atleast_1d(eles)
+        eval_xi = jnp.atleast_2d(xis)
         out_sorted = jax.vmap( #vmap original over every (element, xi) pair in sorted order
-            lambda e, xi: new_fn(e, xi, *a, fit_params=fit_params, **kw)
-        )(jnp.atleast_1d(eles), jnp.atleast_2d(xis)).squeeze()
+            lambda single_e, single_xi: new_fn(single_e, single_xi, *a, fit_params=fit_params, **kw), (0, 0)
+        )(eval_e, eval_xi).squeeze()
         return out_sorted
 
     return ele_xi_pair
