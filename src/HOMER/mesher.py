@@ -313,7 +313,7 @@ class MeshField:
             dw = self.evaluate_deriv_embeddings(element_ids, xis, [0, 0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
             jmats = jnp.concatenate((du, dv, dw), axis=1)
 
-        return jmats
+        return jnp.swapaxes(jmats, -1,-2) #differing jacobin implementation.
 
     ################################## CONVENIENCE
     def xi_grid(self, res: int, dim=None, surface=False, boundary_points=True, lattice=None) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
@@ -945,7 +945,7 @@ class MeshField:
                 dimensions get zero velocity. Per-element alpha then scales each
                 free dimension to respect its bounds.
                 """
-                J = self.evaluate_jacobians(elem, xi, fit_params=fit_params)[0].T # (n, d)
+                J = self.evaluate_jacobians(elem, xi, fit_params=fit_params)[0] # (n, d)
         
                 # Determine which dimensions are on a bound (active constraints)
                 on_lo = xi <= lo + 1e-12
