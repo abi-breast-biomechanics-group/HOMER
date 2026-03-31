@@ -1136,7 +1136,7 @@ class MeshField:
         if targets.ndim > 1:
             target_mask = np.any(targets != target_empty, axis=-1)
         else:
-            target_mask =  targets != target_empty
+            target_mask = targets != target_empty
         A = weight_mat[target_mask]
         b = targets[target_mask]
 
