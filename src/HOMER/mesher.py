@@ -953,8 +953,8 @@ class MeshField:
                 free_idx = jnp.where(~(on_lo|on_hi), size=d)[0]     # JAX-compatible free indices
 
                 # Solve only in the free subspace
-                J_free = J[:, free_idx]                  # (n, d_free)
-                dxi_free = _pseudoinverse_matvec(J_free, r0)  # (d_free,)
+                # J_free = J[:, free_idx]                  # (n, d_free)
+                dxi_free = _pseudoinverse_matvec(J, r0)  # (d_free,)
 
                 # Scatter back into full dxi, bound dims remain zero
                 dxi = jnp.zeros_like(xi)
@@ -965,6 +965,7 @@ class MeshField:
                 alpha_hi = jnp.where(step > 0, (hi - xi) / (step + 1e-300), 1.0)
                 alpha_lo = jnp.where(step < 0, (lo - xi) / (step - 1e-300), 1.0)
                 alpha = jnp.clip(jnp.minimum(alpha_hi, alpha_lo), 0.0, 1.0)
+                return step
 
                 return dxi * alpha
 
