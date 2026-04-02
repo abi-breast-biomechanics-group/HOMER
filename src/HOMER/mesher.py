@@ -237,6 +237,8 @@ class MeshField:
 
         self.generate_weight_matrix: Optional[Callable] = None
 
+        self.faces = None
+
         ######### optimisation
         self.true_param_array: Optional[np.ndarray] = None
         self.optimisable_param_array: Optional[np.ndarray] = None
@@ -312,7 +314,7 @@ class MeshField:
             dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
             dw = self.evaluate_deriv_embeddings(element_ids, xis, [0, 0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
             jmats = jnp.concatenate((du, dv, dw), axis=1)
-
+        # return jmats
         return jnp.swapaxes(jmats, -1,-2) #differing jacobin implementation.
 
     ################################## CONVENIENCE
@@ -711,6 +713,9 @@ class MeshField:
         By definition, A manifold is a face, indicated as (elem_id, -1, -1).
         Faces are determined by spatial hashing of the face center i.e (0.5,0.5, {0,1})
         """
+        if self.faces is not None:
+            return self.faces
+
         hash_space = {}
 
         elem_eval = np.array([
@@ -731,7 +736,9 @@ class MeshField:
                 space = hash_space.setdefault(tp, [])
                 space.append((ide,) + tested)
 
-        return faces + [k[0] for k in hash_space.values() if len(k) == 1]
+        calc_face = faces + [k[0] for k in hash_space.values() if len(k) == 1]
+        self.faces = calc_face
+        return self.faces
 
     def plot(self, scene:Optional[pv.Plotter] = None,
              node_colour='r', node_size=10,
@@ -881,7 +888,7 @@ class MeshField:
         self.generate_weight_matrix = make_weight_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
     ################################# useful utils.
 
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False):
         """
         Given an mx3 array of points, returns the embedded xi locations which best match these points.
         Minimises the squared distance between the embedded locations and the given points, as a non linear least squares.
@@ -889,10 +896,10 @@ class MeshField:
         :param points: The points to embed
         :param verbose: Level of information printed by the least squares fitting process
         :param init_elexi: Initial locations of the points, just so skip straigh to optimising
+        :param surface_embed: Whether to specifically embed the points into the surface
         """
         if fit_params is None:
             fit_params = self.optimisable_param_array
-
         points = jnp.atleast_2d(points) #ensure correct shape and type
         
         if init_elexi is None: #do a coarse embedding
@@ -900,32 +907,60 @@ class MeshField:
                 res = 40
                 xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
                 ndim = 2
+                coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
             else:
                 res = 20
-                xis = jnp.asarray(self.xi_grid(res, 3, boundary_points=False))
-                ndim = 3
-            coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-            # _, i = tree.query(points, k=1, workers=-1)
-            i = jax_aknn(points, coarse_pts, k=1)[1][:, 0]
-            elem_num = i // xis.shape[0]
+                if not surface_embed:
+                    xis = jnp.asarray(self.xi_grid(res, 3, boundary_points=False))
+                    ndim = 3
+                    coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
+                else:
+                    faces = self.get_faces()
+                    face_pts = []
+                    elem_pts = []
+                    xi_pts = []
+                    xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
+
+                    for face in faces:
+                        grid_def = xi3grid[face[1], face[2]]
+                        elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
+                        xi_pts.append(grid_def)
+                        face_pts.append(self.evaluate_embeddings(jnp.array([face[0]]),grid_def))
+                    coarse_pts = jnp.concatenate(face_pts, axis=0)
+                    elems = jnp.concatenate(elem_pts, axis=0)
+                    xis = jnp.concatenate(xi_pts, axis=0)
+            
+            test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+            i = i_data[:, 0]
+            if not surface_embed:
+                elem_num = i // xis.shape[0]
+            else:
+                elem_num = elems[i]
+
             xi_ind = i % xis.shape[0]
-            init_xi = xis[xi_ind]
+            if not surface_embed:
+                init_xi = xis[xi_ind]
+            else:
+                init_xi = xis[i]
         else:
             elem_num, init_xi = init_elexi
-            init_xi = np.array(init_xi)
+            elem_num = jnp.atleast_1d(elem_num)
+            init_xi = jnp.atleast_2d(init_xi)
             ndim = self.elements[0].ndim
 
         def _pseudoinverse_matvec(J: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
             # J = J.T # A convention clash
             n, d = J.shape
             Jt_v = J.T @ v          # (d,) — project v onto tangent space
-            if d == n: #determined system.
-                return jnp.linalg.solve(J, v)
-            else: # Overdetermined: solve normal equations (JᵀJ) dxi = Jᵀv
-                JtJ = J.T @ J        # (d, d) Gram matrix
-                return jnp.linalg.solve(JtJ, Jt_v)
+            # if d == n: #determined system.
+            #     return jnp.linalg.solve(J, v)
+            # else: # Overdetermined: solve normal equations (JᵀJ) dxi = Jᵀv
+            JtJ = J.T @ J        # (d, d) Gram matrix
+            # return jnp.linalg.solve(JtJ, Jt_v)
+            dxi, _, _, _ = jnp.linalg.lstsq(JtJ, Jt_v, rcond=None)
+            return dxi
         
-        n_steps = 1
+        n_steps = 15
         def xis_to_points(elem, xi0, x_target):
             xi = xi0.copy()
             # The total driving vector is fixed: the full residual at the start.
@@ -946,42 +981,44 @@ class MeshField:
                 free dimension to respect its bounds.
                 """
                 J = self.evaluate_jacobians(elem, xi, fit_params=fit_params)[0] # (n, d)
-        
                 # Determine which dimensions are on a bound (active constraints)
                 on_lo = xi <= lo + 1e-12
                 on_hi = xi >= hi - 1e-12
-                free_idx = jnp.where(~(on_lo|on_hi), size=d)[0]     # JAX-compatible free indices
 
+                # free_idx = jnp.where(~(on_lo|on_hi), d=d)[0]     # JAX-compatible free indices
+                bound = on_lo | on_hi
+                J_free = J * jnp.where(bound, 0.0, 1.0)     # (n, d), broadcast over rows
+                dxi = jnp.where(bound, jnp.zeros(d), _pseudoinverse_matvec(J_free, r0))
                 # Solve only in the free subspace
-                # J_free = J[:, free_idx]                  # (n, d_free)
-                dxi_free = _pseudoinverse_matvec(J, r0)  # (d_free,)
-
                 # Scatter back into full dxi, bound dims remain zero
-                dxi = jnp.zeros_like(xi)
-                dxi = dxi.at[free_idx].set(dxi_free)
-
+                # dxi = jnp.zeros_like(xi)
+                # dxi = dxi.at[free_idx].set(dxi_free)
                 # Per-element alpha: scale each free dim to respect its bound
-                step = dt * dxi
-                alpha_hi = jnp.where(step > 0, (hi - xi) / (step + 1e-300), 1.0)
-                alpha_lo = jnp.where(step < 0, (lo - xi) / (step - 1e-300), 1.0)
-                alpha = jnp.clip(jnp.minimum(alpha_hi, alpha_lo), 0.0, 1.0)
+                step = dxi * dt
                 return step
+                # alpha_hi = jnp.where(step > 0, (hi - xi) / (step + 1e-300), 1.0)
+                # alpha_lo = jnp.where(step < 0, (lo - xi) / (step - 1e-300), 1.0)
+                # alpha = jnp.clip(jnp.minimum(alpha_hi, alpha_lo), 0.0, 1.0)
+                # if jnp.any(jnp.isnan(step)):
+                #     breakpoint()
+                return alpha
 
                 return dxi * alpha
 
             for _ in range(n_steps):
                 k1 = rhs(xi, dt)
-                k2 = rhs(xi + 0.5 * dt * k1, dt)
-                k3 = rhs(xi + 0.5 * dt * k2, dt)
-                k4 = rhs(xi +       dt * k3, dt)
-                xi = xi + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+                # k2 = rhs(xi + 0.5 * dt * k1, dt)
+                # k3 = rhs(xi + 0.5 * dt * k2, dt)
+                # k4 = rhs(xi +       dt * k3, dt)
+                xi = xi + k1 #(dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
                 xi = jnp.clip(xi, lo, hi)
 
             residual = self.evaluate_embeddings(elem, xi, fit_params=fit_params) - x_target
             return xi, residual
-
+        # for e, x, p in zip(elem_num, init_xi, points):
+        #     xis_to_points(e, x, p)
         embedded, res = jax.vmap(xis_to_points)(elem_num, init_xi, points) 
-        # embedded = init_xi
+        # embedded, res = init_xi, test_res 
 
         # if verbose >= 2:
         #     final_mean_dist = np.mean(np.linalg.norm(res, axis=-1))
@@ -1098,15 +1135,16 @@ class MeshField:
         if self.ndim == 2 and coord_function is None:
             raise ValueError("Strain tensor on manifold mesh requires a coord function to provide a meaninful basis")
 
-        def_self = self.evaluate_jacobians(element_ids, xis, fit_params=fit_params)
-        def_othr = othr.evaluate_jacobians(element_ids, xis, fit_params=None)
+        deriv_self = self.evaluate_jacobians(element_ids, xis, fit_params=fit_params)
+        deriv_othr = othr.evaluate_jacobians(element_ids, xis, fit_params=None)
 
         if coord_function is not None:
-            def_self = coord_function(self, element_ids, xis, def_self)
-            def_othr = coord_function(othr, element_ids, xis, def_othr)
+            deriv_self = coord_function(self, element_ids, xis, deriv_self)
+            deriv_othr = coord_function(othr, element_ids, xis, deriv_othr)
         
-        str_tensor = jnp.linalg.inv(def_self) @ def_othr
-        F = str_tensor.reshape(-1, self.ndim, self.ndim)
+        # str_tensor = jnp.linalg.inv(deriv_self) @ deriv_othr
+        F = jnp.linalg.solve(deriv_self, deriv_othr)
+        # F = str_tensor.reshape(-1, self.ndim, self.ndim)
         if return_F:
             return F
   
