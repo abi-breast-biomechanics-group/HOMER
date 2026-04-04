@@ -1,6 +1,7 @@
 import logging
 from copy import copy
 import itertools
+import functools
 
 from os import PathLike
 from typing import Optional, Callable
@@ -237,6 +238,8 @@ class MeshField:
 
         self.generate_weight_matrix: Optional[Callable] = None
 
+        self.faces = None
+
         ######### optimisation
         self.true_param_array: Optional[np.ndarray] = None
         self.optimisable_param_array: Optional[np.ndarray] = None
@@ -312,7 +315,7 @@ class MeshField:
             dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
             dw = self.evaluate_deriv_embeddings(element_ids, xis, [0, 0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
             jmats = jnp.concatenate((du, dv, dw), axis=1)
-
+        # return jmats
         return jnp.swapaxes(jmats, -1,-2) #differing jacobin implementation.
 
     ################################## CONVENIENCE
@@ -500,6 +503,7 @@ class MeshField:
         self._generate_eval_function()
         self._generate_deriv_function()
         self._generate_weight_function()
+        self._explore_topology()
 
     def add_node(self, node:MeshNode) -> None:
         """
@@ -704,6 +708,58 @@ class MeshField:
 
         return mesh
 
+    def _explore_topology(self, rounding_res=10):
+        """
+        Explores the mesh topology, finding how neighbouring points connet to each other"""
+        if self.ndim == 2:
+            xi_l = np.array([
+                [0, 0.5], [1, 0.5],
+                [0.5, 0], [0.5, 1],
+            ])
+            tzip = ((0,0), (0,1), (1, 0), (1,1))
+        else:
+            xi_l = np.array([
+                [0, 0.5, 0.5], [1, 0.5, 0.5],
+                [0.5, 0, 0.5], [0.5, 1, 0.5],
+                [0.5, 0.5, 0], [0.5, 0.5, 1],
+            ])
+            tzip = ((0,0), (0,1), (1, 0), (1,1), (2, 0), (2, 1))
+        locs = self.evaluate_embeddings_in_every_element(xi_l)
+        l_jacs = self.evaluate_jacobians_in_every_element(xi_l)
+        n_ele = len(self.elements)
+        n_test = len(xi_l)
+
+        locs = np.round(locs, rounding_res)
+        _, idx, inv, cnt = np.unique(
+            locs, axis=0,
+            return_index=True,
+            return_inverse=True,
+            return_counts=True
+        )
+        faces = []
+        bmap = {}
+
+        for idu, cn in enumerate(cnt): #undefined behaviour here, what even is a face for a 2D object
+            if cn == 1 and self.ndim == 3: #this region appeared once, so it's a "face"
+                ele = idx[idu]//n_test
+                test_n = idx[idu]%n_test
+                faces.append((int(ele),) + tzip[test_n])
+            if cn == 2: #this point appeared multiple times, and defines a transition boundary.
+                inds = np.where(inv == idu)[0]
+                ele = inds//n_test
+                test_n = inds%n_test
+                tested = [tzip[t] for t in test_n]
+                rel_jac = [l_jacs[t] for t in inds]
+                rel_dirs = np.sum(rel_jac[0]*rel_jac[1], axis=0) > 0
+                bmap[(ele[0],) + tested[0]] = [(ele[1],) + tested[1], rel_dirs]
+                bmap[(ele[1],) + tested[1]] = [(ele[0],) + tested[0], rel_dirs]
+            elif cn > 2:
+                raise ValueError("Mesh had multiple elements intersecting at a single point")
+        #face if once, 
+        # test_faces = self.get_faces()
+        self.faces = faces
+        self.bmap = bmap
+
     def get_faces(self, rounding_res = 10) -> list[tuple[int]]:
         """
         Returns all external faces of the current mesh.
@@ -711,6 +767,9 @@ class MeshField:
         By definition, A manifold is a face, indicated as (elem_id, -1, -1).
         Faces are determined by spatial hashing of the face center i.e (0.5,0.5, {0,1})
         """
+        if self.faces is not None:
+            return self.faces
+
         hash_space = {}
 
         elem_eval = np.array([
@@ -731,7 +790,10 @@ class MeshField:
                 space = hash_space.setdefault(tp, [])
                 space.append((ide,) + tested)
 
-        return faces + [k[0] for k in hash_space.values() if len(k) == 1]
+        calc_face = faces + [k[0] for k in hash_space.values() if len(k) == 1]
+        # self.shared_boundaries = [k[0] for k in hash_space.values() if len(k) > 1]
+        self.faces = calc_face
+        return self.faces
 
     def plot(self, scene:Optional[pv.Plotter] = None,
              node_colour='r', node_size=10,
@@ -881,7 +943,7 @@ class MeshField:
         self.generate_weight_matrix = make_weight_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
     ################################# useful utils.
 
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False):
         """
         Given an mx3 array of points, returns the embedded xi locations which best match these points.
         Minimises the squared distance between the embedded locations and the given points, as a non linear least squares.
@@ -889,10 +951,10 @@ class MeshField:
         :param points: The points to embed
         :param verbose: Level of information printed by the least squares fitting process
         :param init_elexi: Initial locations of the points, just so skip straigh to optimising
+        :param surface_embed: Whether to specifically embed the points into the surface
         """
         if fit_params is None:
             fit_params = self.optimisable_param_array
-
         points = jnp.atleast_2d(points) #ensure correct shape and type
         
         if init_elexi is None: #do a coarse embedding
@@ -900,88 +962,94 @@ class MeshField:
                 res = 40
                 xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
                 ndim = 2
+                coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
             else:
                 res = 20
-                xis = jnp.asarray(self.xi_grid(res, 3, boundary_points=False))
-                ndim = 3
-            coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-            # _, i = tree.query(points, k=1, workers=-1)
-            i = jax_aknn(points, coarse_pts, k=1)[1][:, 0]
-            elem_num = i // xis.shape[0]
+                if not surface_embed:
+                    #evaluate surface points,
+
+                    #evaluate shared boundaries.
+
+                    #evaluate an internal grid.
+
+                    #find the closest point
+                    #if its a surface point, confirm positive residual along surface xi coodinate
+                    #and if not, bump inwards a fraction.
+                    #if its a shared boundary, note the embedding ambiguity (optimise both possible positions.
+                    #otherwise, it's a normal object.
+
+
+                    xis = jnp.asarray(self.xi_grid(res, 3, boundary_points=False))
+                    ndim = 3
+                    coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
+                else:
+                    faces = self.faces
+                    face_pts = []
+                    elem_pts = []
+                    xi_pts = []
+                    xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
+                    for face in faces:
+                        grid_def = xi3grid[face[1], face[2]]
+                        elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
+                        xi_pts.append(grid_def)
+                        face_pts.append(self.evaluate_embeddings(jnp.array([face[0]]),grid_def))
+                    coarse_pts = jnp.concatenate(face_pts, axis=0)
+                    elems = jnp.concatenate(elem_pts, axis=0)
+                    xis = jnp.concatenate(xi_pts, axis=0)
+            
+            test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+            i = i_data[:, 0]
+            if not surface_embed:
+                elem_num = i // xis.shape[0]
+            else:
+                elem_num = elems[i]
+
             xi_ind = i % xis.shape[0]
-            init_xi = xis[xi_ind]
+            if not surface_embed:
+                init_xi = xis[xi_ind]
+            else:
+                init_xi = xis[i]
         else:
             elem_num, init_xi = init_elexi
-            init_xi = np.array(init_xi)
+            elem_num = jnp.atleast_1d(elem_num)
+            init_xi = jnp.atleast_2d(init_xi)
             ndim = self.elements[0].ndim
 
         def _pseudoinverse_matvec(J: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-            # J = J.T # A convention clash
-            n, d = J.shape
             Jt_v = J.T @ v          # (d,) — project v onto tangent space
-            if d == n: #determined system.
-                return jnp.linalg.solve(J, v)
-            else: # Overdetermined: solve normal equations (JᵀJ) dxi = Jᵀv
-                JtJ = J.T @ J        # (d, d) Gram matrix
-                return jnp.linalg.solve(JtJ, Jt_v)
+            JtJ = J.T @ J        # (d, d) Gram matrix 
+            dxi, _, _, _ = jnp.linalg.lstsq(JtJ, Jt_v, rcond=None)
+            return dxi
         
-        n_steps = 1
+        n_steps = 5
+        @jax.jit
         def xis_to_points(elem, xi0, x_target):
             xi = xi0.copy()
-            # The total driving vector is fixed: the full residual at the start.
-            # We parametrise by t in [0,1], with the RHS = J†(xi) @ r0.
-            r0 = (x_target - self.evaluate_embeddings(elem, xi0, fit_params=fit_params))[0]
-            dt = 1.0 / n_steps
             d = xi0.shape[0]
             lo = jnp.zeros(d) 
             hi = jnp.ones(d) 
-
-            def rhs(xi: jnp.ndarray, dt: float) -> jnp.ndarray:
-                """
-                dxi/dt with active-constraint-aware pseudoinverse.
-                
-                Dimensions on a bound are excluded from the solve — J is reduced to
-                its free columns, the update is solved in that subspace, and bound
-                dimensions get zero velocity. Per-element alpha then scales each
-                free dimension to respect its bounds.
-                """
+            
+            # Step size / relaxation factor
+            dt = 1.5 / n_steps 
+            for _ in range(n_steps):
+                current_x = self.evaluate_embeddings(elem, xi, fit_params=fit_params)[0]
+                r0 = x_target - current_x
                 J = self.evaluate_jacobians(elem, xi, fit_params=fit_params)[0] # (n, d)
-        
-                # Determine which dimensions are on a bound (active constraints)
                 on_lo = xi <= lo + 1e-12
                 on_hi = xi >= hi - 1e-12
-                free_idx = jnp.where(~(on_lo|on_hi), size=d)[0]     # JAX-compatible free indices
-
-                # Solve only in the free subspace
-                # J_free = J[:, free_idx]                  # (n, d_free)
-                dxi_free = _pseudoinverse_matvec(J, r0)  # (d_free,)
-
-                # Scatter back into full dxi, bound dims remain zero
-                dxi = jnp.zeros_like(xi)
-                dxi = dxi.at[free_idx].set(dxi_free)
-
-                # Per-element alpha: scale each free dim to respect its bound
-                step = dt * dxi
-                alpha_hi = jnp.where(step > 0, (hi - xi) / (step + 1e-300), 1.0)
-                alpha_lo = jnp.where(step < 0, (lo - xi) / (step - 1e-300), 1.0)
-                alpha = jnp.clip(jnp.minimum(alpha_hi, alpha_lo), 0.0, 1.0)
-                return step
-
-                return dxi * alpha
-
-            for _ in range(n_steps):
-                k1 = rhs(xi, dt)
-                k2 = rhs(xi + 0.5 * dt * k1, dt)
-                k3 = rhs(xi + 0.5 * dt * k2, dt)
-                k4 = rhs(xi +       dt * k3, dt)
-                xi = xi + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+                bound = on_lo | on_hi                        # (d,)
+                J_free = J * jnp.where(bound, 0.0, 1.0)
+                dxi = jnp.where(jnp.all(bound), 0, _pseudoinverse_matvec(J_free, r0))
+                xi = xi + dxi* jnp.where(jnp.any(bound),dt, 1) #step sizing should be adaptive for interior and exterior points.
                 xi = jnp.clip(xi, lo, hi)
 
             residual = self.evaluate_embeddings(elem, xi, fit_params=fit_params) - x_target
             return xi, residual
 
+        # for e, x, p in zip(elem_num, init_xi, points):
+        #     embedded, res = xis_to_points(e, x, p)
         embedded, res = jax.vmap(xis_to_points)(elem_num, init_xi, points) 
-        # embedded = init_xi
+        # embedded, res = init_xi, test_res 
 
         # if verbose >= 2:
         #     final_mean_dist = np.mean(np.linalg.norm(res, axis=-1))
@@ -1098,15 +1166,16 @@ class MeshField:
         if self.ndim == 2 and coord_function is None:
             raise ValueError("Strain tensor on manifold mesh requires a coord function to provide a meaninful basis")
 
-        def_self = self.evaluate_jacobians(element_ids, xis, fit_params=fit_params)
-        def_othr = othr.evaluate_jacobians(element_ids, xis, fit_params=None)
+        deriv_self = self.evaluate_jacobians(element_ids, xis, fit_params=fit_params)
+        deriv_othr = othr.evaluate_jacobians(element_ids, xis, fit_params=None)
 
         if coord_function is not None:
-            def_self = coord_function(self, element_ids, xis, def_self)
-            def_othr = coord_function(othr, element_ids, xis, def_othr)
+            deriv_self = coord_function(self, element_ids, xis, deriv_self)
+            deriv_othr = coord_function(othr, element_ids, xis, deriv_othr)
         
-        str_tensor = jnp.linalg.inv(def_self) @ def_othr
-        F = str_tensor.reshape(-1, self.ndim, self.ndim)
+        # str_tensor = jnp.linalg.inv(deriv_self) @ deriv_othr
+        F = jnp.linalg.solve(deriv_self, deriv_othr)
+        # F = str_tensor.reshape(-1, self.ndim, self.ndim)
         if return_F:
             return F
   
