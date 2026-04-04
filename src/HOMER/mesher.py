@@ -1,6 +1,7 @@
 import logging
 from copy import copy
 import itertools
+import functools
 
 from os import PathLike
 from typing import Optional, Callable
@@ -502,6 +503,7 @@ class MeshField:
         self._generate_eval_function()
         self._generate_deriv_function()
         self._generate_weight_function()
+        self._explore_topology()
 
     def add_node(self, node:MeshNode) -> None:
         """
@@ -706,6 +708,58 @@ class MeshField:
 
         return mesh
 
+    def _explore_topology(self, rounding_res=10):
+        """
+        Explores the mesh topology, finding how neighbouring points connet to each other"""
+        if self.ndim == 2:
+            xi_l = np.array([
+                [0, 0.5], [1, 0.5],
+                [0.5, 0], [0.5, 1],
+            ])
+            tzip = ((0,0), (0,1), (1, 0), (1,1))
+        else:
+            xi_l = np.array([
+                [0, 0.5, 0.5], [1, 0.5, 0.5],
+                [0.5, 0, 0.5], [0.5, 1, 0.5],
+                [0.5, 0.5, 0], [0.5, 0.5, 1],
+            ])
+            tzip = ((0,0), (0,1), (1, 0), (1,1), (2, 0), (2, 1))
+        locs = self.evaluate_embeddings_in_every_element(xi_l)
+        l_jacs = self.evaluate_jacobians_in_every_element(xi_l)
+        n_ele = len(self.elements)
+        n_test = len(xi_l)
+
+        locs = np.round(locs, rounding_res)
+        _, idx, inv, cnt = np.unique(
+            locs, axis=0,
+            return_index=True,
+            return_inverse=True,
+            return_counts=True
+        )
+        faces = []
+        bmap = {}
+
+        for idu, cn in enumerate(cnt): #undefined behaviour here, what even is a face for a 2D object
+            if cn == 1 and self.ndim == 3: #this region appeared once, so it's a "face"
+                ele = idx[idu]//n_test
+                test_n = idx[idu]%n_test
+                faces.append((int(ele),) + tzip[test_n])
+            if cn == 2: #this point appeared multiple times, and defines a transition boundary.
+                inds = np.where(inv == idu)[0]
+                ele = inds//n_test
+                test_n = inds%n_test
+                tested = [tzip[t] for t in test_n]
+                rel_jac = [l_jacs[t] for t in inds]
+                rel_dirs = np.sum(rel_jac[0]*rel_jac[1], axis=0) > 0
+                bmap[(ele[0],) + tested[0]] = [(ele[1],) + tested[1], rel_dirs]
+                bmap[(ele[1],) + tested[1]] = [(ele[0],) + tested[0], rel_dirs]
+            elif cn > 2:
+                raise ValueError("Mesh had multiple elements intersecting at a single point")
+        #face if once, 
+        # test_faces = self.get_faces()
+        self.faces = faces
+        self.bmap = bmap
+
     def get_faces(self, rounding_res = 10) -> list[tuple[int]]:
         """
         Returns all external faces of the current mesh.
@@ -737,6 +791,7 @@ class MeshField:
                 space.append((ide,) + tested)
 
         calc_face = faces + [k[0] for k in hash_space.values() if len(k) == 1]
+        # self.shared_boundaries = [k[0] for k in hash_space.values() if len(k) > 1]
         self.faces = calc_face
         return self.faces
 
@@ -911,16 +966,28 @@ class MeshField:
             else:
                 res = 20
                 if not surface_embed:
+                    #evaluate surface points,
+
+                    #evaluate shared boundaries.
+
+                    #evaluate an internal grid.
+
+                    #find the closest point
+                    #if its a surface point, confirm positive residual along surface xi coodinate
+                    #and if not, bump inwards a fraction.
+                    #if its a shared boundary, note the embedding ambiguity (optimise both possible positions.
+                    #otherwise, it's a normal object.
+
+
                     xis = jnp.asarray(self.xi_grid(res, 3, boundary_points=False))
                     ndim = 3
                     coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
                 else:
-                    faces = self.get_faces()
+                    faces = self.faces
                     face_pts = []
                     elem_pts = []
                     xi_pts = []
                     xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
-
                     for face in faces:
                         grid_def = xi3grid[face[1], face[2]]
                         elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
@@ -949,74 +1016,38 @@ class MeshField:
             ndim = self.elements[0].ndim
 
         def _pseudoinverse_matvec(J: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-            # J = J.T # A convention clash
-            n, d = J.shape
             Jt_v = J.T @ v          # (d,) — project v onto tangent space
-            # if d == n: #determined system.
-            #     return jnp.linalg.solve(J, v)
-            # else: # Overdetermined: solve normal equations (JᵀJ) dxi = Jᵀv
-            JtJ = J.T @ J        # (d, d) Gram matrix
-            # return jnp.linalg.solve(JtJ, Jt_v)
+            JtJ = J.T @ J        # (d, d) Gram matrix 
             dxi, _, _, _ = jnp.linalg.lstsq(JtJ, Jt_v, rcond=None)
             return dxi
         
-        n_steps = 15
+        n_steps = 5
+        @jax.jit
         def xis_to_points(elem, xi0, x_target):
             xi = xi0.copy()
-            # The total driving vector is fixed: the full residual at the start.
-            # We parametrise by t in [0,1], with the RHS = J†(xi) @ r0.
-            r0 = (x_target - self.evaluate_embeddings(elem, xi0, fit_params=fit_params))[0]
-            dt = 1.0 / n_steps
             d = xi0.shape[0]
             lo = jnp.zeros(d) 
             hi = jnp.ones(d) 
-
-            def rhs(xi: jnp.ndarray, dt: float) -> jnp.ndarray:
-                """
-                dxi/dt with active-constraint-aware pseudoinverse.
-                
-                Dimensions on a bound are excluded from the solve — J is reduced to
-                its free columns, the update is solved in that subspace, and bound
-                dimensions get zero velocity. Per-element alpha then scales each
-                free dimension to respect its bounds.
-                """
+            
+            # Step size / relaxation factor
+            dt = 1.5 / n_steps 
+            for _ in range(n_steps):
+                current_x = self.evaluate_embeddings(elem, xi, fit_params=fit_params)[0]
+                r0 = x_target - current_x
                 J = self.evaluate_jacobians(elem, xi, fit_params=fit_params)[0] # (n, d)
-                # Determine which dimensions are on a bound (active constraints)
                 on_lo = xi <= lo + 1e-12
                 on_hi = xi >= hi - 1e-12
-
-                # free_idx = jnp.where(~(on_lo|on_hi), d=d)[0]     # JAX-compatible free indices
-                bound = on_lo | on_hi
-                J_free = J * jnp.where(bound, 0.0, 1.0)     # (n, d), broadcast over rows
-                dxi = jnp.where(bound, jnp.zeros(d), _pseudoinverse_matvec(J_free, r0))
-                # Solve only in the free subspace
-                # Scatter back into full dxi, bound dims remain zero
-                # dxi = jnp.zeros_like(xi)
-                # dxi = dxi.at[free_idx].set(dxi_free)
-                # Per-element alpha: scale each free dim to respect its bound
-                step = dxi * dt
-                return step
-                # alpha_hi = jnp.where(step > 0, (hi - xi) / (step + 1e-300), 1.0)
-                # alpha_lo = jnp.where(step < 0, (lo - xi) / (step - 1e-300), 1.0)
-                # alpha = jnp.clip(jnp.minimum(alpha_hi, alpha_lo), 0.0, 1.0)
-                # if jnp.any(jnp.isnan(step)):
-                #     breakpoint()
-                return alpha
-
-                return dxi * alpha
-
-            for _ in range(n_steps):
-                k1 = rhs(xi, dt)
-                # k2 = rhs(xi + 0.5 * dt * k1, dt)
-                # k3 = rhs(xi + 0.5 * dt * k2, dt)
-                # k4 = rhs(xi +       dt * k3, dt)
-                xi = xi + k1 #(dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+                bound = on_lo | on_hi                        # (d,)
+                J_free = J * jnp.where(bound, 0.0, 1.0)
+                dxi = jnp.where(jnp.all(bound), 0, _pseudoinverse_matvec(J_free, r0))
+                xi = xi + dxi* jnp.where(jnp.any(bound),dt, 1) #step sizing should be adaptive for interior and exterior points.
                 xi = jnp.clip(xi, lo, hi)
 
             residual = self.evaluate_embeddings(elem, xi, fit_params=fit_params) - x_target
             return xi, residual
+
         # for e, x, p in zip(elem_num, init_xi, points):
-        #     xis_to_points(e, x, p)
+        #     embedded, res = xis_to_points(e, x, p)
         embedded, res = jax.vmap(xis_to_points)(elem_num, init_xi, points) 
         # embedded, res = init_xi, test_res 
 
