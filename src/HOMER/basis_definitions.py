@@ -61,29 +61,37 @@ class AbstractBasis:
 BasisGroup = tuple[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]] | list[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]]
 
 
-def N2_weights(w0, w1, bp_inds) -> jnp.ndarray:
-    """
-    w0: (n_pts, n0), w1: (n_pts, n1)
-    bp_inds: (n_basis, 2) integer index table
-    returns: (n_basis, n_pts)
-    """
-    bp_inds = jnp.asarray(bp_inds, dtype=jnp.int32)
-    i0 = bp_inds[:, 0]
-    i1 = bp_inds[:, 1]
-    return (w0[:, i0] * w1[:, i1]).T
+@jax.jit
+def N2_weights(w0, w1, bp_inds):
+    bp_inds = jnp.asarray(bp_inds, dtype=jnp.int32)  # (B, 2)
+    def one_pair(ind):
+        i, j = ind[0], ind[1]
+        return w0[:, i] * w1[:, j]   # (n_pts,)
+    return jax.vmap(one_pair, in_axes=0)(bp_inds)
 
+@jax.jit
+def N3_weights(w0, w1, w2, bp_inds):
+    bp_inds = jnp.asarray(bp_inds, dtype=jnp.int32)  # (B, 3)
+    def one_triplet(ind):
+        i, j, k = ind[0], ind[1], ind[2]
+        return w0[:, i] * w1[:, j] * w2[:, k]  # (n_pts,)
+    return jax.vmap(one_triplet, in_axes=0)(bp_inds)
 
-def N3_weights(w0, w1, w2, bp_inds) -> jnp.ndarray:
-    """
-    w0: (n_pts, n0), w1: (n_pts, n1), w2: (n_pts, n2)
-    bp_inds: (n_basis, 3)
-    returns: (n_basis, n_pts)
-    """
-    bp_inds = jnp.asarray(bp_inds, dtype=jnp.int32)
-    i0 = bp_inds[:, 0]
-    i1 = bp_inds[:, 1]
-    i2 = bp_inds[:, 2]
-    return (w0[:, i0] * w1[:, i1] * w2[:, i2]).T
+# def N2_weights(w0, w1, bp_inds) -> jnp.ndarray:
+#     # BPInd = [[0, 0], [1, 0], [0, 1], [1, 1],
+#     #          [2, 0], [3, 0], [2, 1], [3, 1],
+#     #          [0, 2], [1, 2], [0, 3], [1, 3],
+#     #          [2, 2], [3, 2], [2, 3], [3, 3]]
+#     BPInd = bp_inds
+#     w_list = [w0[:, ii[0]] * w1[:, ii[1]] for ii in BPInd]
+#     weights = jnp.vstack(w_list)
+#     return weights
+#
+# def N3_weights(w0, w1, w2, bp_inds) -> jnp.ndarray:
+#     BPInd = bp_inds
+#     w_list = [w0[:, ii[0]] * w1[:, ii[1]] * w2[:, ii[2]] for ii in BPInd]
+#     weights = jnp.vstack(w_list)
+#     return weights
 
 ######################################## BASIS FUNCS
 
