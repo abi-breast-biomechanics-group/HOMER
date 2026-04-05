@@ -1,3 +1,27 @@
+"""
+mesher.py – Core mesh data structures and operations for HOMER.
+
+This module defines the four primary classes that make up every HOMER mesh:
+
+* :class:`MeshNode` – a single mesh node storing a physical location and any
+  Hermite derivative vectors required by the chosen basis functions.
+* :class:`MeshElement` – connects a set of :class:`MeshNode` objects through a
+  product of 1-D basis functions (one per parametric dimension).
+* :class:`MeshField` – a collection of :class:`MeshNode` and
+  :class:`MeshElement` objects that can evaluate and optimise any
+  vector-valued field over the mesh topology.  The primary geometry field
+  (world-space XYZ coordinates) is always a :class:`MeshField`.
+* :class:`Mesh` – extends :class:`MeshField` and owns a dictionary of named
+  secondary :class:`MeshField` objects (accessible via ``mesh['name']``).
+  Secondary fields can represent fibre directions, velocities, stresses, or
+  any other spatially varying quantity.
+
+Typical import::
+
+    from HOMER import Mesh, MeshNode, MeshElement
+    from HOMER.basis_definitions import H3Basis, L1Basis
+"""
+
 import logging
 from copy import copy
 import itertools
@@ -28,9 +52,75 @@ from HOMER.mesh_decorators import expand_wide_evals, wide_eval
 pv.global_theme.allow_empty_mesh = True
 
 class MeshNode(dict):
+    """A mesh node that stores a physical location and associated derivative data.
+
+    :class:`MeshNode` subclasses :class:`dict` so that derivative quantities
+    (``du``, ``dv``, ``dw``, ``dudv``, …) required by higher-order basis
+    functions can be stored as named entries.  All values must be
+    :class:`numpy.ndarray` objects of the same length as ``loc``.
+
+    For a 2-D manifold mesh with cubic-Hermite basis in both directions
+    (``H3Basis``, ``H3Basis``), each node must carry ``du``, ``dv``, and
+    ``dudv`` derivatives::
+
+        node = MeshNode(
+            loc=np.array([0.0, 0.0, 1.0]),
+            du=np.zeros(3),
+            dv=np.zeros(3),
+            dudv=np.zeros(3),
+        )
+
+    For a 3-D volume mesh with ``H3Basis`` in all three directions, the
+    additional derivatives ``dw``, ``dudw``, ``dvdw``, and ``dudvdw`` are
+    also required::
+
+        node = MeshNode(
+            loc=np.array([0.0, 0.0, 1.0]),
+            du=np.zeros(3), dv=np.zeros(3), dw=np.zeros(3),
+            dudv=np.zeros(3), dudw=np.zeros(3), dvdw=np.zeros(3),
+            dudvdw=np.zeros(3),
+        )
+
+    Parameters
+    ----------
+    loc:
+        Physical-space coordinates of the node, shape ``(fdim,)``.
+    id:
+        Optional unique identifier.  When provided, nodes can be referenced
+        by ID rather than list index in a :class:`MeshElement`.
+    **kwargs:
+        Named derivative arrays, e.g. ``du``, ``dv``, ``dw``, ``dudv``, …
+        All values must be ``numpy.ndarray`` (or list / JAX array, which
+        are automatically converted).
+
+    Attributes
+    ----------
+    loc : numpy.ndarray
+        Physical-space coordinates, shape ``(fdim,)``.
+    id :
+        The node identifier (or ``None``).
+    fixed_params : dict
+        Maps parameter name → array of fixed component indices.  Populated
+        by :meth:`fix_parameter`.
+    """
+
     def __init__(self, loc, id=None, **kwargs):
-        """
-        The base node class, handling arbitrary properties over the mesh surface.
+        """Initialise a :class:`MeshNode`.
+
+        Parameters
+        ----------
+        loc:
+            Physical-space coordinates, shape ``(fdim,)``.
+        id:
+            Optional unique identifier.
+        **kwargs:
+            Named derivative arrays (``du``, ``dv``, ``dw``, …).
+            Each value must be an array of the same length as ``loc``.
+
+        Raises
+        ------
+        ValueError
+            If any keyword-argument value is not an array-like type.
         """
         self.loc = np.asarray(loc)
         self.id = id
@@ -48,11 +138,25 @@ class MeshNode(dict):
                 self[key] = np.array(value).copy()
 
     def fix_parameter(self, param_names: list | str, values: Optional[list[np.ndarray]|np.ndarray]=None, inds: Optional[list[int]] = None) -> None:
-        """
-        Given the node parameter strings, identifies the nodes as fixed nodes, which are not part of the default optimisable parameters of a mesh.
+        """Mark one or more node parameters as fixed (non-optimisable).
 
-        :param param_names: The parameter name to fix
-        :param values: The optional value of the parameter to be fixed too.
+        Fixed parameters are excluded from the optimisable parameter vector
+        exposed by :class:`MeshField`.  Optionally, the parameter can also be
+        set to a specified value at the same time.
+
+        Parameters
+        ----------
+        param_names:
+            Name or list of names of the parameters to fix, e.g.
+            ``'loc'``, ``'du'``, ``['loc', 'dv']``.
+        values:
+            Optional value(s) to assign at the time of fixing.  Must match
+            the shape implied by ``inds`` (or the full parameter dimension
+            when ``inds`` is ``None``).
+        inds:
+            Component indices to fix within the parameter array (e.g.
+            ``[0, 2]`` to fix the *x* and *z* components of ``loc``).
+            When ``None``, all components are fixed.
         """
         l_dim = self.loc.shape[0]
 
@@ -117,12 +221,76 @@ class MeshNode(dict):
 
 
 class MeshElement:
+    """A single high-order mesh element linking nodes through tensor-product basis functions.
+
+    A :class:`MeshElement` combines a list of :class:`MeshNode` references with
+    a *group* of 1-D basis functions (one per parametric direction) to define a
+    2-D manifold surface element or a 3-D volume element.
+
+    The number of nodes required per element equals the product of the numbers
+    of 1-D basis nodes:
+
+    * H3Basis × H3Basis → 2 × 2 = 4 nodes (2-D)
+    * H3Basis × H3Basis × H3Basis → 2 × 2 × 2 = 8 nodes (3-D)
+    * L2Basis × L2Basis → 3 × 3 = 9 nodes (2-D)
+
+    Parameters
+    ----------
+    basis_functions:
+        A sequence of 1-D basis classes (length 2 or 3) defining the
+        parametric-direction interpolation.  E.g.
+        ``(H3Basis, H3Basis)`` for a 2-D cubic-Hermite element.
+    node_indexes:
+        Zero-based integer indices into the parent mesh's ``nodes`` list.
+        Exactly one of *node_indexes* or *node_ids* must be given.
+    node_ids:
+        User-supplied node identifiers (alternative to *node_indexes*).
+    BP_inds:
+        Pre-computed basis-product index pairs.  Computed automatically
+        when ``None``; supply a cached value to skip recomputation.
+    id:
+        Optional element identifier.
+
+    Attributes
+    ----------
+    ndim : int
+        Parametric dimensionality (2 or 3).
+    nodes : list
+        The ordered node references (indexes or ids).
+    basis_functions : BasisGroup
+        The sequence of 1-D basis classes.
+    used_node_fields : list[str]
+        Derivative field names (``'du'``, ``'dv'``, …) that each node must
+        carry for this element's basis.
+    BasisProductInds : list[tuple[int, ...]]
+        Ordered index pairs/triplets defining the tensor-product weight
+        computation.
+    num_nodes : int
+        Total number of nodes in this element.
+    """
+
     def __init__(self, basis_functions: BasisGroup, node_indexes: Optional[list[int]] = None, 
                  node_ids: Optional[list] = None, BP_inds: Optional = None, id=None):
-        """
-            A high order mesh element. This element is constructed from a series of basis functions.
-            These can be 2D, manifold meshes, or 3D, volume meshes.
+        """Initialise a :class:`MeshElement`.
 
+        Parameters
+        ----------
+        basis_functions:
+            A sequence of 1-D basis classes (length 2 or 3).
+        node_indexes:
+            Zero-based indices into the parent mesh's node list.
+        node_ids:
+            User-supplied node identifiers.
+        BP_inds:
+            Pre-computed basis-product index pairs (optional optimisation).
+        id:
+            Optional element identifier.
+
+        Raises
+        ------
+        ValueError
+            If neither *node_indexes* nor *node_ids* is provided, or if
+            both are provided.
         """
         if node_ids is None and node_indexes is None:
             raise ValueError("An element must be associated with a list of nodes, either by index or node id")
@@ -216,15 +384,70 @@ class MeshElement:
 
 @expand_wide_evals
 class MeshField:
-    def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False) -> None:
-        """
-        Defines a collection of homogenous elements, which link a collection of nodes.
-        A mesh fits a collection of vector valued fields. The fundamental field is the world space embedding.
-        It is this value that is used to initially define the mesh. 
-        The goal of this implementation is to allow the fit field to be optimised at the same time as the mesh topology.
+    """A collection of :class:`MeshNode` and :class:`MeshElement` objects representing a single field.
 
-        :param nodes: The nodes of the Mesh
-        :param elements: The elements of the Mesh.
+    :class:`MeshField` is the base class for both the primary geometry of a
+    :class:`Mesh` and for any secondary fields (fibre directions, stresses,
+    velocities, etc.) created with :meth:`Mesh.new_field`.
+
+    A :class:`MeshField` owns:
+
+    * A **node list** storing the field's degrees of freedom (parameter values
+      and, for Hermite bases, derivative vectors).
+    * An **element list** defining how nodes are connected and which basis
+      functions to use for interpolation.
+    * **Compiled JAX functions** (built by :meth:`generate_mesh`) for fast
+      evaluation, differentiation, and optimisation.
+
+    The ``@expand_wide_evals`` decorator automatically adds
+    ``*_in_every_element`` and ``*_ele_xi_pair`` variants for every method
+    decorated with ``@wide_eval``.
+
+    Parameters
+    ----------
+    nodes:
+        List of :class:`MeshNode` objects.  May be ``None`` when building a
+        mesh incrementally with :meth:`add_node`.
+    elements:
+        List (or single instance) of :class:`MeshElement` objects.
+    jax_compile:
+        When ``True``, JIT-compiles evaluation functions at construction time
+        (recommended for iterative fitting loops).
+
+    Attributes
+    ----------
+    nodes : list[MeshNode]
+        All nodes belonging to this field.
+    elements : list[MeshElement]
+        All elements belonging to this field.
+    fdim : int
+        Physical dimensionality of the field values (e.g. 3 for XYZ).
+    ndim : int
+        Parametric dimensionality (2 or 3).
+    true_param_array : numpy.ndarray
+        Flat vector of *all* nodal parameters (free and fixed).
+    optimisable_param_array : numpy.ndarray
+        Subset of *true_param_array* that is not fixed.
+    optimisable_param_bool : numpy.ndarray
+        Boolean mask selecting optimisable parameters from
+        *true_param_array*.
+    ele_map : numpy.ndarray
+        ``(n_elements, n_params_per_element)`` index array mapping element
+        slots to positions in *true_param_array*.
+    """
+
+    def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False) -> None:
+        """Initialise a :class:`MeshField`.
+
+        Parameters
+        ----------
+        nodes:
+            Node list (or ``None`` for incremental construction).
+        elements:
+            Element or list of elements (or ``None``).
+        jax_compile:
+            If ``True``, JIT-compile internal evaluation functions
+            immediately after construction.
         """
         
         ######### topology of the mesh
@@ -259,22 +482,91 @@ class MeshField:
     ################################## MAIN FUNCTIONS
     @wide_eval
     def evaluate_embeddings(self, *a, **kw): #placeholder for later func definition
+        """Evaluate the field at parametric coordinates within one or more elements.
+
+        This is a placeholder that is replaced by a compiled JAX function when
+        :meth:`generate_mesh` is called.  The full signature after
+        initialisation is::
+
+            evaluate_embeddings(element_ids, xis, fit_params=None) -> jnp.ndarray
+
+        Parameters
+        ----------
+        element_ids:
+            1-D array of integer element indices, shape ``(n_pts,)``.
+        xis:
+            Parametric coordinates, shape ``(n_pts, ndim)``.
+        fit_params:
+            Override of the current :attr:`optimisable_param_array`.
+            When ``None`` the stored parameter values are used.
+
+        Returns
+        -------
+        jnp.ndarray
+            Field values at the requested locations, shape ``(n_pts, fdim)``.
+
+        Notes
+        -----
+        The ``@expand_wide_evals`` class decorator automatically creates two
+        additional variants:
+
+        * ``evaluate_embeddings_in_every_element(xis)`` – evaluates the same
+          grid of xi points in *every* element and stacks the results.
+        * ``evaluate_embeddings_ele_xi_pair(element_ids, xis)`` – evaluates
+          each ``(element, xi)`` pair independently (equivalent signature to
+          the base function but without batching).
+        """
         if not typing:
             raise RuntimeError('Called evaluate_embeddings before initialisation')
         return
 
     @wide_eval
     def evaluate_deriv_embeddings(self, *a, **kw): #placeholder for later func definition
+        """Evaluate a specified partial derivative of the field.
+
+        This is a placeholder replaced at :meth:`generate_mesh` time.  The
+        full signature is::
+
+            evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params=None)
+                -> jnp.ndarray
+
+        Parameters
+        ----------
+        element_ids:
+            1-D integer array, shape ``(n_pts,)``.
+        xis:
+            Parametric coordinates, shape ``(n_pts, ndim)``.
+        derivs:
+            Derivative order per parametric direction, e.g. ``[1, 0]`` for
+            ∂/∂u in a 2-D element or ``[0, 0, 1]`` for ∂/∂w in a 3-D one.
+        fit_params:
+            Optional override of :attr:`optimisable_param_array`.
+
+        Returns
+        -------
+        jnp.ndarray
+            Derivative field values, shape ``(n_pts, fdim)``.
+        """
         if not typing:
             raise RuntimeError('Called evaluate_deriv_embeddings before initialisation')
         return
 
     def evaluate_element_embeddings(self, element_id, xis, fit_params=None):
-        """
-        Given an element id, evaluates the embedding.
-        
-        :param element_id: The element id to evaluate the xi location in
-        :param xis: The xis to evaluate.
+        """Evaluate the embedding for a single element identified by its ID.
+
+        Parameters
+        ----------
+        element_id:
+            The user-assigned element ID (not the list index).
+        xis:
+            Parametric coordinates, shape ``(n_pts, ndim)``.
+        fit_params:
+            Optional parameter override.
+
+        Returns
+        -------
+        jnp.ndarray
+            Field values, shape ``(n_pts, fdim)``.
         """
         if fit_params is None:
             fit_params = self.optimisable_param_array
@@ -282,12 +574,29 @@ class MeshField:
      
     @wide_eval
     def evaluate_normals(self, element_ids: np.ndarray, xis: np.ndarray, fit_params=None) -> np.ndarray:
-        """
-        Returns the normal at the element surface.
-        Only valid for manifold meshes.
-        :params elemend_ids: The elements to evaluate
-        :params xis: the locations to evaluate.
-        :returns normals: unit vector directions associated with the mesh surface.
+        """Return the surface normal vectors at parametric coordinates.
+
+        Only valid for 2-D manifold meshes (``ndim == 2``).  The normal is
+        computed as the cross product of the two surface tangent vectors.
+
+        Parameters
+        ----------
+        element_ids:
+            1-D integer array of element indices, shape ``(n_pts,)``.
+        xis:
+            Parametric coordinates, shape ``(n_pts, 2)``.
+        fit_params:
+            Optional override of :attr:`optimisable_param_array`.
+
+        Returns
+        -------
+        jnp.ndarray
+            Normal vectors (not normalised), shape ``(n_pts, 3)``.
+
+        Raises
+        ------
+        ValueError
+            If called on a 3-D volume mesh.
         """
 
         if self.ndim == 3: 
@@ -329,8 +638,25 @@ class MeshField:
 
     @wide_eval
     def evaluate_jacobians(self, element_ids, xis, fit_params=None):
-        """ 
-        Evaluates the jacobian at a set of xis within an element
+        """Evaluate the Jacobian matrix of the embedding at parametric coordinates.
+
+        Returns ∂x/∂ξ, the matrix mapping parametric-space tangent vectors to
+        physical-space tangent vectors.  Rows correspond to physical directions
+        (x, y, z) and columns to parametric directions (u, v[, w]).
+
+        Parameters
+        ----------
+        element_ids:
+            1-D integer array, shape ``(n_pts,)``.
+        xis:
+            Parametric coordinates, shape ``(n_pts, ndim)``.
+        fit_params:
+            Optional override of :attr:`optimisable_param_array`.
+
+        Returns
+        -------
+        jnp.ndarray
+            Jacobian matrices, shape ``(n_pts, fdim, ndim)``.
         """
         if fit_params is None:
             fit_params = self.optimisable_param_array
@@ -350,18 +676,37 @@ class MeshField:
 
     ################################## CONVENIENCE
     def xi_grid(self, res: int, dim=None, surface=False, boundary_points=True, lattice=None) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        """Return a regular grid of parametric (xi) coordinates.
 
-        """
-        Convinience function for defining grids of xi points over elements on the surface of the mesh.
-        Returns a grid of xi points at the requested resolution.
+        Creates a uniform Cartesian grid of xi points for use with
+        :meth:`evaluate_embeddings_in_every_element` or for passing to
+        :meth:`get_xi_weight_mat`.
 
-        :param res: the mxm resolution.
-        :param dim: the dimension of the grid, i.e. 2 or 3.
-        :param surface: for a 3D grid, only return grid points on the element boundary.
-        :param boundary_points: whether to include 0, 1 in the grid of points. Prevents doubly selecting points on mesh boundarys.
+        Parameters
+        ----------
+        res:
+            Number of grid points along each parametric direction.  The
+            total number of points is ``res ** ndim`` (or ``res ** 2`` when
+            returning surface faces of a volume mesh).
+        dim:
+            Dimensionality of the grid (2 or 3).  Defaults to
+            :attr:`ndim`.
+        surface:
+            For a 3-D mesh, return only points on the six element faces
+            rather than the full interior grid.
+        boundary_points:
+            When ``False``, exclude xi = 0 and xi = 1 from the grid (useful
+            to avoid double-counting shared element boundaries).
+        lattice:
+            Optional ``(xn, yn)`` tiling definition for hexagonal surface
+            patterns.
 
-        :returns xi_grid: a np array containing grid points.
-
+        Returns
+        -------
+        numpy.ndarray
+            Grid points, shape ``(res**ndim, ndim)`` (or, when *lattice* is
+            provided and *surface* is ``True``, a ``(pts, connectivity)``
+            tuple).
         """
         dim = self.ndim if dim is None else dim
 
@@ -408,10 +753,27 @@ class MeshField:
                 return np.concatenate(arrays), connectivity
 
     def gauss_grid(self, ng):
-        """
-        returns a grid of gauss points
-        :params ng: the number of gauss points to evaluate, either in 1D or a grid of gauss points.
-        :returns X, W: The location and weighting of the gauss points for the function order.
+        """Return a tensor-product Gauss quadrature grid.
+
+        Parameters
+        ----------
+        ng:
+            * **int** – return 1-D Gauss points for a single direction.
+            * **list[int]** – tensor-product grid; e.g. ``[3, 3]`` for a
+              2-D surface integration or ``[3, 3, 3]`` for a 3-D volume.
+
+        Returns
+        -------
+        Xi : numpy.ndarray
+            Gauss point locations, shape ``(n_gauss, ndim)`` or ``(n_gauss,)``
+            for the 1-D case.
+        W : numpy.ndarray
+            Corresponding quadrature weights, shape ``(n_gauss,)``.
+
+        Raises
+        ------
+        ValueError
+            If ``ng`` has more than 3 entries or is of an unsupported type.
         """
 
         if isinstance(ng, int):
@@ -1141,14 +1503,45 @@ class MeshField:
     #     return (elem_f, xi_f), residual
 
     def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=3):
-        """
-        Given an mx3 array of points, returns the embedded xi locations which best match these points.
-        Minimises the squared distance between the embedded locations and the given points, as a non linear least squares.
+        """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
-        :param points: The points to embed
-        :param verbose: Level of information printed by the least squares fitting process
-        :param init_elexi: Initial locations of the points, just so skip straigh to optimising
-        :param surface_embed: Whether to specifically embed the points into the surface
+        Uses an approximate nearest-neighbour search on a coarse xi grid to
+        obtain initial estimates, then refines with a JAX-accelerated RK4
+        fixed-iteration descent (see :meth:`_xis_to_points`).  Topology
+        mapping (:meth:`topomap`) is applied at each iteration so that points
+        near element boundaries are correctly assigned to neighbouring
+        elements.
+
+        Parameters
+        ----------
+        points:
+            Physical-space query points, shape ``(n_pts, fdim)``.
+        verbose:
+            Verbosity level.  ``0`` → silent; ``2`` → print mean/max
+            residual; ``3`` → also render an error visualisation with
+            PyVista.
+        init_elexi:
+            Pre-computed initial ``(elem_num, xis)`` tuple.  When supplied,
+            the coarse nearest-neighbour search is skipped.
+        fit_params:
+            Optional parameter override for the mesh geometry.
+        return_residual:
+            When ``True``, returns a ``((elem_num, embedded), residual)``
+            tuple instead of just ``(elem_num, embedded)``.
+        surface_embed:
+            Restrict the coarse search to the surface faces of a 3-D mesh.
+        iterations:
+            Number of RK4 refinement iterations.
+
+        Returns
+        -------
+        elem_num : jnp.ndarray
+            Element index for each query point, shape ``(n_pts,)``.
+        embedded : jnp.ndarray
+            Parametric coordinates, shape ``(n_pts, ndim)``.
+        residual : jnp.ndarray
+            (Only when *return_residual* is ``True``) Embedding error
+            vectors, shape ``(n_pts, fdim)``.
         """
         if fit_params is None:
             fit_params = self.optimisable_param_array
@@ -1343,12 +1736,43 @@ class MeshField:
     
     @wide_eval
     def evaluate_strain(self, element_ids, xis, othr: "Mesh", coord_function: Optional[Callable] = None, return_F=False, fit_params=None):
-        """
-        Assesses the strain in a deformed state at a set of given locations.
-        :param element_ids: The elements to asses strain in.
-        :param xis: The xi locations to evaluate strain in.
-        :param othr: A second mesh object with the same topology to assess strain against.
-        :param coord_function: A function with input Mesh, eles, xis, tensors -> remapped_tensors. Used to evaluate strains in relevant coordinate schemes.
+        """Evaluate the Green-Lagrange strain tensor between two mesh states.
+
+        Computes the deformation gradient **F** = J_ref⁻¹ · J_def where J_ref
+        is the Jacobian of *self* (reference configuration) and J_def is the
+        Jacobian of *othr* (deformed configuration), then returns the strain
+        tensor **E** = (Fᵀ F − I) / 2.
+
+        Parameters
+        ----------
+        element_ids:
+            1-D integer array, shape ``(n_pts,)``.
+        xis:
+            Parametric coordinates, shape ``(n_pts, ndim)``.
+        othr:
+            A :class:`MeshField` representing the *deformed* configuration of
+            the same topology.
+        coord_function:
+            Optional callable ``(mesh, eles, xis, Jmats) → Jmats`` that
+            re-maps the Jacobian into a local coordinate frame (required for
+            2-D manifold meshes).
+        return_F:
+            When ``True``, return the deformation gradient **F** instead of
+            the strain tensor **E**.
+        fit_params:
+            Optional parameter override for *self*.
+
+        Returns
+        -------
+        jnp.ndarray
+            Green-Lagrange strain tensor ``E``, shape
+            ``(n_pts, ndim, ndim)``, or the deformation gradient **F** if
+            *return_F* is ``True``.
+
+        Raises
+        ------
+        ValueError
+            If called on a 2-D manifold mesh without supplying *coord_function*.
         """
 
         if self.ndim == 2 and coord_function is None:
@@ -1373,8 +1797,28 @@ class MeshField:
     ################################# FASTFITTING
 
     def get_xi_weight_mat(self, eles, xis):
-        """
-        Given an input set of poinst ele, yi, evaluates the meta-weight matrix that can be inverted to solve the least squares shape update.
+        """Build the linear weight matrix for least-squares fitting.
+
+        For each query point ``(eles[i], xis[i])``, evaluates the basis
+        function values and places them in the appropriate column positions of
+        a global weight matrix **W**, where ``W[i, j]`` is the contribution
+        of the *j*-th nodal degree of freedom to the *i*-th query point.
+
+        This matrix is used by :meth:`linear_fit`::
+
+            W * node_params = target_values   (solved in a least-squares sense)
+
+        Parameters
+        ----------
+        eles:
+            1-D integer array of element indices, shape ``(n_pts,)``.
+        xis:
+            Parametric coordinates, shape ``(n_pts, ndim)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Weight matrix, shape ``(n_pts, n_nodes)``.
         """
         out_weight = np.zeros((len(eles), len(self.true_param_array)//self.fdim)) #
         unique_elem, inv = jnp.unique_inverse(eles)
@@ -1386,9 +1830,31 @@ class MeshField:
         return out_weight
 
     def linear_fit(self, targets, weight_mat, target_empty=-1):
-        """
-        Performs a linear fit between the target using the current weight matrix.
-        Does not currently respect fixed parameters (maybe an Ax + c = b situation)
+        """Fit nodal parameters by solving a linear least-squares problem.
+
+        Solves ``weight_mat @ params ≈ targets`` via :func:`numpy.linalg.lstsq`
+        and updates the mesh's nodal parameters with the solution.  This is
+        the fastest fitting approach when the xi embeddings are fixed (i.e. the
+        mesh topology does not change during fitting).
+
+        Parameters
+        ----------
+        targets:
+            Target field values, shape ``(n_pts,)`` or ``(n_pts, fdim)``.
+            Rows equal to *target_empty* (default ``-1``) are excluded from
+            the fit.
+        weight_mat:
+            Weight matrix from :meth:`get_xi_weight_mat`,
+            shape ``(n_pts, n_nodes)``.
+        target_empty:
+            Sentinel value used to mask out unused target rows.
+
+        Notes
+        -----
+        Fixed parameters (set via :meth:`MeshNode.fix_parameter`) are
+        currently **not** respected by this method.  Use the nonlinear
+        optimisation pathway (``fitting.point_cloud_fit``) if constraints
+        are required.
         """
         if targets.ndim > 1:
             target_mask = np.any(targets != target_empty, axis=-1)
@@ -1413,11 +1879,35 @@ class MeshField:
     ################################# REFINEMENT
     def refine(self, refinement_factor: Optional[int]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
                clean_nodes = True):
-        """
-            This code refines a mesh, increasing the resolution of every element.
-            A refinement factor can be provided, or alternatively a tuple of xi_locations to refine the nodes at can be provided.
-        :param refinement_factor: an integer factor to increase the resolution by.
-        :param by_xi_refinement: an ndtuple of monotonically increasing points to sample the new nodes at.
+        """Subdivide every element, increasing the mesh resolution.
+
+        Each existing element is replaced by ``refinement_factor ** ndim``
+        (or the equivalent for *by_xi_refinement*) smaller elements sharing
+        intermediate nodes.  Derivative values at the new nodes are obtained
+        by evaluating the current basis functions.
+
+        Exactly one of *refinement_factor* or *by_xi_refinement* must be
+        provided.
+
+        Parameters
+        ----------
+        refinement_factor:
+            Integer ≥ 2 that subdivides each parametric direction uniformly.
+            For example, ``refinement_factor=2`` splits a single element into
+            8 sub-elements in 3-D (2 × 2 × 2).
+        by_xi_refinement:
+            Tuple of 1-D arrays, one per parametric direction, specifying the
+            xi values at which to place the new element boundaries.  Each
+            array must start with 0 and end with 1.
+        clean_nodes:
+            When ``True`` (default), remove unreferenced nodes after
+            refinement.
+
+        Raises
+        ------
+        AssertionError
+            If both *refinement_factor* and *by_xi_refinement* are given, or
+            if *refinement_factor* < 2.
         """
         assert not(refinement_factor is not None and by_xi_refinement is not None), "Refinement factor and refining by defined xi are mutually exclusive."
 
@@ -1596,9 +2086,36 @@ class MeshField:
 
 
     def rebase(self, new_basis: BasisGroup, in_place=False, res=10) -> 'MeshField':
-        """
-        Rebases a mesh by (1) determining any new node locations, (2) sampling a xi grid in the old basis, and then
-        (3) linearly fitting the parameters from the xi embedding.
+        """Convert the mesh to a different set of basis functions.
+
+        Constructs a new :class:`MeshField` with *new_basis*, sampling the
+        current mesh on a dense xi grid and linearly fitting the new nodal
+        parameters to match the sampled geometry.  This allows, for example,
+        converting a trilinear (``L1Basis``) mesh into a cubic-Hermite
+        (``H3Basis``) mesh without losing the shape.
+
+        The three-step algorithm is:
+
+        1. Determine the new node locations by evaluating the current mesh at
+           the basis node positions of *new_basis*.
+        2. Sample a fine xi grid in the current basis to get dense geometry
+           samples.
+        3. Linearly fit the new nodal parameters to these samples.
+
+        Parameters
+        ----------
+        new_basis:
+            Sequence of new 1-D basis classes, one per parametric direction.
+        in_place:
+            Currently unused (future: modify *self* rather than returning a
+            new object).
+        res:
+            Number of xi grid points per direction used for the linear fit.
+
+        Returns
+        -------
+        MeshField
+            New mesh with the requested basis functions.
         """
         new_mesh = deepcopy(self)
 
@@ -1641,16 +2158,51 @@ class MeshField:
             return new_mesh
 
 class Mesh(MeshField):
-    """ 
-    A mesh is a collection of fields, with a shared topology and coordinate system.
-    By default, a mesh has one spatial feild, but this is not necessary.
+    """A coordinate mesh that can also carry named secondary fields.
 
+    :class:`Mesh` extends :class:`MeshField` by adding a dictionary
+    ``fields`` that stores secondary :class:`MeshField` objects.  The
+    primary geometry (XYZ world-space coordinates) is stored in the parent
+    :class:`MeshField`, while any secondary quantities such as fibre
+    directions, velocities, or material properties are stored as named
+    entries in ``fields``.
+
+    Secondary fields are created with :meth:`new_field` and accessed via
+    dictionary-style indexing::
+
+        mesh = Mesh(nodes=[...], elements=[...])
+        mesh.new_field('fibre', field_dimension=3,
+                       field_locs=data_pts, field_values=fibre_vectors,
+                       new_basis=[H3Basis]*3)
+        fibre_field = mesh['fibre']   # MeshField
+
+    Parameters
+    ----------
+    nodes:
+        Nodes defining the primary geometry.
+    elements:
+        Elements of the mesh.
+    jax_compile:
+        Pre-compile JAX functions at construction time.
+
+    Attributes
+    ----------
+    fields : dict[str, MeshField]
+        Named secondary fields.
     """
 
     def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False) -> None:
-        #first, define the XYZ mesh_field
-        super().__init__(nodes, elements, jax_compile)
-        self.fields = {}
+        """Initialise a :class:`Mesh`.
+
+        Parameters
+        ----------
+        nodes:
+            Node list (may be ``None`` for incremental construction).
+        elements:
+            Element or element list.
+        jax_compile:
+            If ``True``, JIT-compile internal functions at construction.
+        """
 
     def __getitem__(self, input: str) -> MeshField:
         return self.fields[input]
@@ -1661,6 +2213,20 @@ class Mesh(MeshField):
         self.fields[key] = value
 
     def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True):
+        """Refine the primary geometry *and* all secondary fields simultaneously.
+
+        Calls :meth:`MeshField.refine` on the coordinate mesh and on every
+        field in :attr:`fields`.
+
+        Parameters
+        ----------
+        refinement_factor:
+            Uniform refinement multiplier (≥ 2).
+        by_xi_refinement:
+            Per-direction xi breakpoint arrays.
+        clean_nodes:
+            Remove unreferenced nodes after refinement.
+        """
         super().refine(refinement_factor, by_xi_refinement, clean_nodes)
         for field in self.fields.values():
             field.refine(refinement_factor, by_xi_refinement, clean_nodes)
@@ -1671,7 +2237,60 @@ class Mesh(MeshField):
              elem_labels=False, render_name: Optional[str] = None, 
              field_to_draw = None, field_xi = None, draw_xyz_field = True, field_artist: Optional[Callable[[pv.Plotter, np.ndarray, np.ndarray], None]] = None,
              default_field_point_size=25, default_xi_res=4):
+        """Draw the mesh and optionally overlay a secondary field.
 
+        Parameters
+        ----------
+        scene:
+            Existing :class:`pyvista.Plotter`.  When ``None``, a new plotter
+            is created and shown.
+        node_colour:
+            Colour for node spheres.
+        node_size:
+            Node sphere size.
+        labels:
+            When ``True``, add node index labels (forces *node_size* = 0).
+        tiling:
+            ``(xn, yn)`` tiling for the hexagonal surface overlay.
+        mesh_colour:
+            Surface mesh colour.  Pass a :class:`numpy.ndarray` to colour-map
+            by scalar values.
+        mesh_opacity:
+            Surface opacity (0–1).
+        mesh_width:
+            Line width for the hex wireframe.
+        mesh_col_scalar_name:
+            Scalar array name used when *mesh_colour* is an array.
+        line_colour:
+            Colour for the structural edge lines.
+        line_opacity:
+            Edge line opacity.
+        line_width:
+            Edge line width.
+        line_col_scalar_name:
+            Scalar name for colour-mapped edges.
+        elem_labels:
+            When ``True``, label element centres.
+        render_name:
+            Prefix for named actors (allows individual actor replacement in
+            an interactive scene).
+        field_to_draw:
+            Name of a secondary field to visualise.  When ``None`` only the
+            geometry is drawn.
+        field_xi:
+            Custom xi grid at which to evaluate the secondary field.
+            Defaults to a uniform grid at *default_xi_res*.
+        draw_xyz_field:
+            When ``False``, suppress drawing of the primary geometry.
+        field_artist:
+            Custom callable ``(plotter, locs, values) → None`` for rendering
+            the secondary field.  Defaults to line segments for 3-D fields
+            and coloured spheres for 1-D scalar fields.
+        default_field_point_size:
+            Point size used by the default scalar field artist.
+        default_xi_res:
+            Xi grid resolution for the secondary field visualisation.
+        """
         s_flag = False
         if scene is None:
             scene = pv.Plotter()
@@ -1718,11 +2337,72 @@ class Mesh(MeshField):
         return
 
     def new_field(self, field_name: str, field_dimension: int, new_basis: BasisGroup, field_locs: Optional[np.ndarray]=None, field_values: Optional[np.ndarray]=None, res=10) -> None:
-        """
-        Defines a new field over the previous mesh topology using the same methodology used for rebasing.
-        Creates a field by (1) determining any new node locations and topologies.
-        If field locations and values are fo(2) 
-        (3) linearly fitting the parameters from the xi embedding.
+        """Create a secondary field and optionally fit it to sample data.
+
+        A secondary field is a :class:`MeshField` with its own basis
+        functions and node topology that is *co-located* with the primary
+        coordinate mesh.  It can represent any spatially varying quantity
+        – fibre directions, velocity vectors, pressures, stresses, etc.
+
+        The three-step construction algorithm is:
+
+        1. Determine the new field node locations by evaluating the primary
+           mesh at the node positions of *new_basis*.
+        2. If *field_locs* and *field_values* are provided, embed the sample
+           points into the mesh with :meth:`embed_points`.
+        3. Build the linear weight matrix and solve for nodal parameters with
+           :meth:`linear_fit`.
+
+        After this call, the field is accessible as ``mesh[field_name]``.
+
+        Parameters
+        ----------
+        field_name:
+            Key used to store and retrieve the new field, e.g.
+            ``'fibre_direction'``.
+        field_dimension:
+            Dimensionality of the field values:
+
+            * ``1`` – scalar field (e.g. pressure, temperature, Z-coordinate)
+            * ``3`` – 3-D vector field (e.g. fibre direction, velocity)
+        new_basis:
+            Sequence of 1-D basis classes for the new field, one per
+            parametric direction.  May differ from the primary mesh basis.
+            For example, use ``[H3Basis]*3`` for a smooth vector field or
+            ``[L1Basis]*3`` for a piecewise-linear scalar field.
+        field_locs:
+            Physical-space sample locations where field values are known,
+            shape ``(n_samples, fdim)``.  When ``None``, an empty field is
+            created without fitting.
+        field_values:
+            Target field values at *field_locs*, shape
+            ``(n_samples,)`` for scalars or ``(n_samples, field_dimension)``
+            for vectors.  Required if *field_locs* is provided.
+        res:
+            Unused (reserved for future use).
+
+        Examples
+        --------
+        Fit a unit-normal vector field and a scalar height field::
+
+            mesh.new_field(
+                'normals',
+                field_dimension=3,
+                field_locs=sample_pts,       # shape (N, 3)
+                field_values=normal_vectors, # shape (N, 3)
+                new_basis=[H3Basis, H3Basis, H3Basis],
+            )
+            mesh.new_field(
+                'height',
+                field_dimension=1,
+                field_locs=sample_pts,       # shape (N, 3)
+                field_values=sample_pts[:, 2],  # scalar Z values
+                new_basis=[L1Basis, L1Basis, L1Basis],
+            )
+
+            # Retrieve and evaluate
+            normal_field = mesh['normals']
+            values_at_xis = normal_field.evaluate_embeddings(elem_ids, xis)
         """
 
         list_locs = [b.node_locs for b in new_basis]

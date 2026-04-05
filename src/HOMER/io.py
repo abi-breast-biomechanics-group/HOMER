@@ -1,3 +1,26 @@
+"""
+io.py – JSON-based serialisation for HOMER :class:`~HOMER.mesher.Mesh` objects.
+
+Meshes are stored as structured JSON files that capture all node locations,
+derivative fields, element node-lists, and basis function types.  The JSON
+format is human-readable and version-independent as long as the basis class
+names remain stable.
+
+Main public API:
+
+* :func:`save_mesh` – write a mesh to a ``.json`` file.
+* :func:`load_mesh` – read a mesh from a ``.json`` file.
+* :func:`dump_mesh_to_dict` – serialise to a plain Python dict.
+* :func:`parse_mesh_from_dict` – deserialise from a plain Python dict.
+
+Example round-trip::
+
+    from HOMER.io import save_mesh, load_mesh
+
+    save_mesh(mesh, 'my_mesh.json')
+    mesh2 = load_mesh('my_mesh.json')
+"""
+
 from os import PathLike
 from HOMER.mesher import Mesh, MeshNode, MeshElement
 from HOMER.basis_definitions import L1Basis, L2Basis, L3Basis, L4Basis, H3Basis
@@ -10,8 +33,25 @@ import numpy as np
 STR_LOOKUP = {str(k.__name__):k for k in [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis]}
 
 def dump_mesh_to_dict(obj_mesh:Mesh):
-    """
-    Takes an input mesh, and returns a dict structure representing the information about that mesh object.
+    """Serialise a :class:`~HOMER.mesher.Mesh` to a plain Python dictionary.
+
+    The resulting dict has two top-level keys:
+
+    * ``'nodes'`` – ordered dict of node definitions, each with ``'loc'``
+      and any derivative arrays (``'du'``, ``'dv'``, …).
+    * ``'elements'`` – ordered dict of element definitions, each with
+      ``'nodes'`` (list of node indexes/ids), ``'basis'`` (list of basis
+      class name strings), and ``'used_index'`` (bool).
+
+    Parameters
+    ----------
+    obj_mesh:
+        The mesh to serialise.
+
+    Returns
+    -------
+    dict
+        JSON-serialisable dictionary representation of the mesh.
     """
     dict_rep = {}
     nodes = {}
@@ -34,8 +74,21 @@ def dump_mesh_to_dict(obj_mesh:Mesh):
     return dict_rep
 
 def parse_mesh_from_dict(dict_rep:dict) -> Mesh:
-    """
-    Parses a dict representing a mesh to a new mesh object
+    """Deserialise a :class:`~HOMER.mesher.Mesh` from a plain Python dictionary.
+
+    Reconstructs nodes (with all derivative arrays), elements (looking up
+    basis classes by name), and calls :meth:`~HOMER.mesher.MeshField.generate_mesh`
+    before returning.
+
+    Parameters
+    ----------
+    dict_rep:
+        Dictionary in the format produced by :func:`dump_mesh_to_dict`.
+
+    Returns
+    -------
+    Mesh
+        A fully initialised :class:`~HOMER.mesher.Mesh` object.
     """
     obj_mesh = Mesh()
 
@@ -62,8 +115,14 @@ def parse_mesh_from_dict(dict_rep:dict) -> Mesh:
     return obj_mesh
 
 def save_mesh(obj_mesh:Mesh, file_location: PathLike):
-    """
-    Writes a given mesh to a .json file.
+    """Serialise a mesh to a JSON file.
+
+    Parameters
+    ----------
+    obj_mesh:
+        The :class:`~HOMER.mesher.Mesh` to save.
+    file_location:
+        Destination path.  A ``.json`` extension is recommended.
     """
     if not isinstance(file_location, Path):
         file_location = Path(file_location)
@@ -74,8 +133,17 @@ def save_mesh(obj_mesh:Mesh, file_location: PathLike):
     return
 
 def load_mesh(file_location:PathLike) -> Mesh:
-    """
-    loads a mesh from a given .json structured file.
+    """Load a mesh from a JSON file produced by :func:`save_mesh`.
+
+    Parameters
+    ----------
+    file_location:
+        Path to the ``.json`` mesh file.
+
+    Returns
+    -------
+    Mesh
+        A fully initialised :class:`~HOMER.mesher.Mesh` object.
     """
     if not isinstance(file_location, Path):
         file_location = Path(file_location)

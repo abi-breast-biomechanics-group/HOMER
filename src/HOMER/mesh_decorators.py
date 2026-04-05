@@ -1,3 +1,21 @@
+"""
+mesh_decorators.py – Class and method decorators for HOMER mesh evaluation.
+
+Provides:
+
+* :func:`wide_eval` – marks a method as "wide-evaluatable".
+* :func:`expand_wide_evals` – class decorator that automatically generates
+  ``*_in_every_element`` and ``*_ele_xi_pair`` variants for every
+  ``@wide_eval`` method, plus backwards-compatibility aliases.
+* :func:`depreciation` – wraps a function to emit a deprecation warning on
+  call.
+* Helper functions for generating and caching ``.pyi`` stub files alongside
+  the decorated class (``_get_class_hash``, ``_write_pyi``, etc.).
+
+The ``@expand_wide_evals`` decorator is applied to :class:`~HOMER.mesher.MeshField`
+to automatically extend its API without boilerplate.
+"""
+
 import ast
 import jax
 import jax.numpy as jnp
