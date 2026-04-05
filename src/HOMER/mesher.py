@@ -759,6 +759,10 @@ class MeshField:
         n_ele = len(self.elements)
         n_test = len(xi_l)
 
+
+
+        pv.Plotter
+
         locs = np.round(locs, rounding_res)
         _, idx, inv, cnt = np.unique(
             locs, axis=0,
@@ -789,6 +793,7 @@ class MeshField:
 
                 #bmap is extra
                 lookup_arr[ele[0], tested[0][0], tested[0][1]] = ele[1]
+                # print(ele, tested)
                 lookup_arr[ele[1], tested[1][0], tested[1][1]] = ele[0]
 
 
@@ -799,6 +804,8 @@ class MeshField:
         # test_faces = self.get_faces()
         self.faces = faces
         self.bmap = bmap
+        # print('.')
+        # raise ValueError
 
         @jax.jit
         def topomap(ele, xi):
@@ -808,11 +815,13 @@ class MeshField:
             """
             xi = jnp.asarray(xi)
             ele = jnp.asarray(ele, dtype=jnp.int32)
+            # return ele, xi, False
             xi_clipped = jnp.clip(xi, 0.0, 1.0)
-            b_lo, b_hi = xi < 0.0, xi > 1.0
+            b_lo, b_hi = xi < 0, xi > 1.0
             crossed = b_lo | b_hi
             map_valid = jnp.sum(crossed.astype(jnp.int32)) == 1 # Only one bound transition allowed
             where_bound = jnp.argmax(crossed.astype(jnp.int32)).astype(jnp.int32)
+            # jax.debug.print("elem {elem}, xi {xi}, maps {maps}, valid {valid}, where {where}", elem=ele, xi=xi, maps=crossed, valid=map_valid, where=where_bound)
             side = jnp.where(b_hi[where_bound], 1, 0).astype(jnp.int32)
             new_ele = lookup_arr[ele, where_bound, side]
             map_valid = map_valid & (new_ele != -1)
@@ -1006,40 +1015,130 @@ class MeshField:
         self.generate_weight_matrix = make_weight_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
     ################################# useful utils.
 
-    def _solve_RHS(self, el, xi, r, lbound, fit_params=None):
+    def _solve_RHS(self, el, xi, r, stepsize, lbound, fit_params=None):
         J = self.evaluate_jacobians(el, xi, fit_params=fit_params)[0]  # (fdim, ndim)
         J_free = J * jnp.where(lbound, 0.0, 1.0)
-        return jnp.where(lbound, jnp.zeros(xi.shape[0]), _pseudoinverse_matvec(J_free, r))
+        return jnp.where(lbound, jnp.zeros(xi.shape[0]), _pseudoinverse_matvec(J_free, r)) * stepsize
 
     @partial(jax.jit, static_argnames=("self", "iterations"))
-    def _xis_to_points(self, elem, xi0, x_target, lbound, iterations, fit_params=None):
+    def _xis_to_points(self, elem, xi0, x_target, init_err, lbound, iterations, fit_params=None):
         """
         RK4-like fixed-iteration update in xi-space, JAX-optimized for jit/vmap.
+        Uses a basic descent check to garuntee convergence.
         Returns: ((elem, xi), residual)
         """
 
         def body(_, state):
-            elem, xi = state
+            elem_prev, xi_prev, elem, xi, r_mag, stepsize = state
+            # jax.debug.print("elem {elem}, xi {xi}, stepsize {stp}", elem=elem, xi=xi, stp=stepsize)
             current_x = self.evaluate_embeddings(elem, xi, fit_params=fit_params)[0]
             r = x_target - current_x
+            r_dist = jnp.linalg.norm(r)
+            # check if it was actually lowered, if not, just decrease stepsize
+            lowered = r_dist < r_mag
+            
+            # if not lowered, switch on the bound
+            
+            elem = jnp.where(lowered, elem, elem_prev)
+            xi = jnp.where(lowered, xi, xi_prev)
+            stepsize = jnp.where(lowered, stepsize, stepsize/2)
+            r_mag = jnp.where(lowered, r_dist, r_mag)
 
             # RK4 stages
-            k1 = self._solve_RHS(elem, xi, r, lbound, fit_params=fit_params)
-            k2 = self._solve_RHS(elem, xi + 0.5 * k1, r, lbound, fit_params=fit_params)
-            k3 = self._solve_RHS(elem, xi + 0.5 * k2, r, lbound, fit_params=fit_params)
-            k4 = self._solve_RHS(elem, xi + k3, r, lbound, fit_params=fit_params)
+            k1 = self._solve_RHS(elem, xi, r, stepsize, lbound, fit_params=fit_params)
+            k2 = self._solve_RHS(elem, xi + 0.5 * k1, r, stepsize, lbound, fit_params=fit_params)
+            k3 = self._solve_RHS(elem, xi + 0.5 * k2, r, stepsize, lbound, fit_params=fit_params)
+            k4 = self._solve_RHS(elem, xi + k3, r, stepsize, lbound, fit_params=fit_params)
 
             xi_new = xi + (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
             elem_new, xi_mapped, _ = self.topomap(elem, xi_new)
 
-            return (elem_new, xi_mapped)
 
-        elem_f, xi_f = jax.lax.fori_loop(
-            0, iterations, body, (elem, xi0)
+            return (elem, xi, elem_new, xi_mapped, r_mag, stepsize)
+
+        _, _, elem_f, xi_f, _, _ = jax.lax.fori_loop(
+            0, iterations, body, (elem.astype(int), xi0, elem.astype(int), xi0, init_err, 1)
         )
 
         residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
         return (elem_f, xi_f), residual
+    # @partial(jax.jit, static_argnames=("self", "iterations", "ls_max_steps"))
+    # def _xis_to_points(
+    #     self,
+    #     elem,
+    #     xi0,
+    #     x_target,
+    #     lbound,
+    #     iterations,
+    #     fit_params=None,
+    #     alpha0=1.0,
+    #     c=1e-4,              # sufficient decrease factor
+    #     tau=0.5,             # backtracking shrink
+    #     alpha_min=1e-6,
+    #     ls_max_steps=10,
+    # ):
+    #     """
+    #     Iterative solve with JAX-compatible backtracking line search.
+    #     Returns: ((elem, xi), residual)
+    #     """
+    #
+    #     def phi(elem_i, xi_i):
+    #         # Objective = 1/2 ||F(xi)-x_target||^2
+    #         res = self.evaluate_embeddings(elem_i, xi_i, fit_params=fit_params)[0] - x_target
+    #         return 0.5 * jnp.vdot(res, res), res
+    #
+    #     def outer_body(_, state):
+    #         elem_i, xi_i = state
+    #
+    #         f0, r = phi(elem_i, xi_i)
+    #         p = self._solve_RHS(elem_i, xi_i, r, lbound, fit_params=fit_params)
+    #
+    #         # directional derivative surrogate: grad approx via p; if unavailable, use conservative test only
+    #         # Armijo-like target using ||p||^2 as proxy descent measure
+    #         p_norm_sq = jnp.vdot(p, p)
+    #
+    #         def ls_cond(ls_state):
+    #             k, alpha, best_elem, best_xi, accepted = ls_state
+    #             return (k < ls_max_steps) & (~accepted) & (alpha >= alpha_min)
+    #
+    #         def ls_body(ls_state):
+    #             k, alpha, _, _, _ = ls_state
+    #             xi_trial = xi_i + alpha * p
+    #             elem_t, xi_t, _ = self.topomap(elem_i, xi_trial)
+    #             f_t, _ = phi(elem_t, xi_t)
+    #             # Armijo-like sufficient decrease
+    #             accept = f_t <= (f0 - c * alpha * p_norm_sq)
+    #
+    #             alpha_next = jnp.where(accept, alpha, alpha * tau)
+    #             best_elem = jnp.where(accept, elem_t, elem_i)
+    #             best_xi = jnp.where(accept, xi_t, xi_i)
+    #
+    #             return (k + 1, alpha_next, best_elem, best_xi, accept)
+    #
+    #         init_ls = (jnp.array(0), jnp.asarray(alpha0, xi_i.dtype), elem_i, xi_i, jnp.array(False))
+    #         _, alpha_fin, elem_acc, xi_acc, accepted = jax.lax.while_loop(ls_cond, ls_body, init_ls)
+    #
+    #         # Fallback small step if never accepted
+    #         def fallback_step(_):
+    #             xi_trial = xi_i + jnp.maximum(alpha_fin, alpha_min) * p
+    #             elem_t, xi_t, _ = self.topomap(elem_i, xi_trial)
+    #             return elem_t, xi_t
+    #
+    #         elem_next, xi_next = jax.lax.cond(
+    #             accepted,
+    #             lambda _: (elem_acc, xi_acc),
+    #             fallback_step,
+    #             operand=None
+    #         )
+    #
+    #         return (elem_next, xi_next)
+    #
+    #     elem_f, xi_f = jax.lax.fori_loop(
+    #         0, iterations, outer_body, (elem.astype(jnp.int32), xi0)
+    #     )
+    #
+    #     residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
+    #     return (elem_f, xi_f), residual
 
     def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=3):
         """
@@ -1128,13 +1227,17 @@ class MeshField:
             init_xi = jnp.atleast_2d(init_xi)
             ndim = self.elements[0].ndim
 
+            test_res = points - self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi)
+
             at_lo = init_xi < 1e-6
             at_hi = init_xi > 1 - 1e-6
             mf_pt = at_lo | at_hi
 
         (elem_num, embedded), res = jax.vmap(
-            lambda elem, xi, target, lbound : self._xis_to_points(elem, xi, target, lbound, iterations=iterations, fit_params=fit_params)
-        )(elem_num, init_xi, points, mf_pt)
+            lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
+        )(elem_num, init_xi, points, mf_pt, jnp.linalg.norm(test_res, axis=-1))
+
+        # elem_num, embedded, res = elem_num, init_xi, test_res
 
         if verbose >= 2:
             final_mean_dist = np.mean(np.linalg.norm(np.asarray(res), axis=-1))
