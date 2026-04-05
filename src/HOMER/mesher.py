@@ -1797,7 +1797,6 @@ class MeshField:
     ################################# FASTFITTING
 
     def get_xi_weight_mat(self, eles, xis):
-    def get_xi_weight_mat(self, eles, xis):
         """Build the linear weight matrix for least-squares fitting.
 
         For each query point ``(eles[i], xis[i])``, evaluates the basis
@@ -2292,6 +2291,7 @@ class Mesh(MeshField):
         default_xi_res:
             Xi grid resolution for the secondary field visualisation.
         """
+        s_flag = False
         if scene is None:
             scene = pv.Plotter()
             s_flag = True
