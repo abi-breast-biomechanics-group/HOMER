@@ -984,7 +984,7 @@ class MeshField:
                     face_pts_list, face_elem_list, face_xi_list = [], [], []
                     face_dim_list, face_val_list = [], []
                     for face in self.faces:
-                        if face[1] == -1:   # skip 2-D manifold pseudo-faces
+                        if face[1] == -1:   # skip 2-D manifold pseudo-faces (no valid surface boundary)
                             continue
                         grid_def = xi3grid_surf[face[1], face[2]]
                         n_f = grid_def.shape[0]
@@ -1011,8 +1011,9 @@ class MeshField:
                     n_pts = points.shape[0]
                     is_surf = i >= n_int_total
 
-                    # Safe indices: clamp to valid range for each pool so that
-                    # jnp.where can select the correct value without OOB reads.
+                    # Safe indices: clamp to valid range for the interior and surface
+                    # candidate pools so that jnp.where can select the correct value
+                    # without triggering out-of-bounds reads on either branch.
                     int_i_safe = jnp.where(is_surf, 0, i)
                     elem_from_int = int_i_safe // n_int_pts
                     xi_from_int   = xis_int[int_i_safe % n_int_pts]
@@ -1087,7 +1088,8 @@ class MeshField:
             bmap_nv     = np.zeros((_n_elems, 6), dtype=np.int32)
             bmap_rd     = np.zeros((_n_elems, 6, 3), dtype=bool)
             for (e, d, v), [(ne, nd, nv), rd] in self.bmap.items():
-                fi = d * 2 + v          # face index: dim*2 + val  (0..5)
+                fi = d * 2 + v  # face index for hex element: (dim,val)→dim*2+val
+                                # maps (0,0)→0 (0,1)→1 (1,0)→2 (1,1)→3 (2,0)→4 (2,1)→5
                 bmap_has_nb[e, fi] = True
                 bmap_ne[e, fi]     = ne
                 bmap_nd[e, fi]     = nd
@@ -1122,8 +1124,11 @@ class MeshField:
                 return jnp.where(jnp.all(bound), jnp.zeros(d), _pseudoinverse_matvec(J_free, r))
 
             # Single RK4 step (dt = 1) replaces the fixed-iteration Newton loop.
-            # Intermediate xi values are clipped to [0,1] to keep evaluations valid;
-            # out-of-bounds crossings are resolved by the bmap step below.
+            # Intermediate xi values are clipped to [0,1] to keep embedding
+            # evaluations valid (elements are only defined over [0,1]^d).  Clipping
+            # is safe here because any true boundary overshoot is corrected by the
+            # bmap element-transfer step below; it does not suppress the velocity
+            # for the next RK4 stage because each stage re-evaluates bound independently.
             k1 = velocity(xi0)
             k2 = velocity(jnp.clip(xi0 + 0.5 * k1, lo, hi))
             k3 = velocity(jnp.clip(xi0 + 0.5 * k2, lo, hi))
