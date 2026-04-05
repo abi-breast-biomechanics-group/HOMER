@@ -963,26 +963,91 @@ class MeshField:
                 xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
                 ndim = 2
                 coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
+                test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+                i = i_data[:, 0]
+                elem_num = i // xis.shape[0]
+                init_xi = xis[i % xis.shape[0]]
             else:
                 res = 20
+                ndim = 3
                 if not surface_embed:
-                    #evaluate surface points,
+                    # Build interior grid
+                    xis_int = jnp.asarray(self.xi_grid(res, 3, boundary_points=False))
+                    n_int_pts = xis_int.shape[0]          # grid points per element
+                    n_elems = len(self.elements)
+                    coarse_pts_int = self.evaluate_embeddings_in_every_element(xis_int, fit_params=fit_params)
+                    n_int_total = coarse_pts_int.shape[0]  # n_elems * n_int_pts
 
-                    #evaluate shared boundaries.
+                    # B1: Augment coarse candidates with external surface face grid so that
+                    # points near mesh boundaries are correctly initialised.
+                    xi3grid_surf = self.xi_grid(res=res, dim=3, surface=True).reshape(3, 2, -1, 3)
+                    face_pts_list, face_elem_list, face_xi_list = [], [], []
+                    face_dim_list, face_val_list = [], []
+                    for face in self.faces:
+                        if face[1] == -1:   # skip 2-D manifold pseudo-faces
+                            continue
+                        grid_def = xi3grid_surf[face[1], face[2]]
+                        n_f = grid_def.shape[0]
+                        face_pts_list.append(self.evaluate_embeddings(jnp.array([face[0]]), grid_def))
+                        face_elem_list.append(np.full(n_f, face[0], dtype=np.int32))
+                        face_xi_list.append(grid_def)
+                        face_dim_list.append(np.full(n_f, face[1], dtype=np.int32))
+                        face_val_list.append(np.full(n_f, face[2], dtype=np.int32))
 
-                    #evaluate an internal grid.
+                    if face_pts_list:
+                        coarse_pts_surf = jnp.concatenate(face_pts_list, axis=0)
+                        elems_surf_j  = jnp.array(np.concatenate(face_elem_list))
+                        xis_surf_j    = jnp.array(np.concatenate(face_xi_list))
+                        face_dims_j   = jnp.array(np.concatenate(face_dim_list))
+                        face_vals_j   = jnp.array(np.concatenate(face_val_list))
+                        coarse_pts    = jnp.concatenate([coarse_pts_int, coarse_pts_surf], axis=0)
+                        n_surf_total  = coarse_pts_surf.shape[0]
+                    else:
+                        coarse_pts   = coarse_pts_int
+                        n_surf_total = 0
 
-                    #find the closest point
-                    #if its a surface point, confirm positive residual along surface xi coodinate
-                    #and if not, bump inwards a fraction.
-                    #if its a shared boundary, note the embedding ambiguity (optimise both possible positions.
-                    #otherwise, it's a normal object.
+                    test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+                    i     = i_data[:, 0]
+                    n_pts = points.shape[0]
+                    is_surf = i >= n_int_total
 
+                    # Safe indices: clamp to valid range for each pool so that
+                    # jnp.where can select the correct value without OOB reads.
+                    int_i_safe = jnp.where(is_surf, 0, i)
+                    elem_from_int = int_i_safe // n_int_pts
+                    xi_from_int   = xis_int[int_i_safe % n_int_pts]
 
-                    xis = jnp.asarray(self.xi_grid(res, 3, boundary_points=False))
-                    ndim = 3
-                    coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
+                    if n_surf_total > 0:
+                        surf_i_safe      = jnp.where(is_surf, i - n_int_total, 0).astype(jnp.int32)
+                        elem_from_surf   = elems_surf_j[surf_i_safe]
+                        xi_from_surf     = xis_surf_j[surf_i_safe]
+                        face_dim_assigned = face_dims_j[surf_i_safe]
+                        face_val_assigned = face_vals_j[surf_i_safe]
+
+                        elem_num = jnp.where(is_surf, elem_from_surf, elem_from_int)
+                        init_xi  = jnp.where(is_surf[:, None], xi_from_surf, xi_from_int)
+
+                        # B3: For surface-assigned candidates, bump the initial xi inward only
+                        # when the residual projects *negatively* onto the outward face normal
+                        # (i.e. the target point lies inside the mesh volume).  External points
+                        # with a positive projection are left on the surface so that the solver
+                        # can converge to the nearest surface location.
+                        J_init = self.evaluate_jacobians_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
+                        # J_init shape: (n_pts, fdim, ndim); column face_dim is the outward tangent
+                        J_face_col = J_init[jnp.arange(n_pts), :, face_dim_assigned]  # (n_pts, fdim)
+                        outward_normal = J_face_col * jnp.where(face_val_assigned == 0, -1.0, 1.0)[:, None]
+                        coarse_residual = points - coarse_pts[i]   # (n_pts, fdim)
+                        proj = jnp.sum(coarse_residual * outward_normal, axis=-1)  # (n_pts,)
+
+                        should_bump  = is_surf & (proj < 0)
+                        bump_dir     = jnp.where(face_val_assigned == 0, 1.0, -1.0)
+                        bump_amount  = jnp.where(should_bump, bump_dir * 1e-3, 0.0)
+                        init_xi = init_xi.at[jnp.arange(n_pts), face_dim_assigned].add(bump_amount)
+                    else:
+                        elem_num = elem_from_int
+                        init_xi  = xi_from_int
                 else:
+                    # surface_embed=True: embed on mesh surface faces only (unchanged)
                     faces = self.faces
                     face_pts = []
                     elem_pts = []
@@ -996,65 +1061,116 @@ class MeshField:
                     coarse_pts = jnp.concatenate(face_pts, axis=0)
                     elems = jnp.concatenate(elem_pts, axis=0)
                     xis = jnp.concatenate(xi_pts, axis=0)
-            
-            test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-            i = i_data[:, 0]
-            if not surface_embed:
-                elem_num = i // xis.shape[0]
-            else:
-                elem_num = elems[i]
-
-            xi_ind = i % xis.shape[0]
-            if not surface_embed:
-                init_xi = xis[xi_ind]
-            else:
-                init_xi = xis[i]
+                    test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+                    i = i_data[:, 0]
+                    elem_num = elems[i]
+                    init_xi  = xis[i]
         else:
             elem_num, init_xi = init_elexi
             elem_num = jnp.atleast_1d(elem_num)
             init_xi = jnp.atleast_2d(init_xi)
             ndim = self.elements[0].ndim
 
+        # B2: Pre-build JAX-compatible lookup tables from self.bmap so that the RK4
+        # solver can transfer out-of-bounds xi coordinates into the correct neighbouring
+        # element.  Only used for 3-D interior embedding where shared boundaries exist.
+        have_bmap = (
+            not surface_embed
+            and self.elements[0].ndim == 3
+            and hasattr(self, 'bmap') and bool(self.bmap)
+        )
+        if have_bmap:
+            _n_elems = len(self.elements)
+            bmap_has_nb = np.zeros((_n_elems, 6), dtype=bool)
+            bmap_ne     = np.zeros((_n_elems, 6), dtype=np.int32)
+            bmap_nd     = np.zeros((_n_elems, 6), dtype=np.int32)
+            bmap_nv     = np.zeros((_n_elems, 6), dtype=np.int32)
+            bmap_rd     = np.zeros((_n_elems, 6, 3), dtype=bool)
+            for (e, d, v), [(ne, nd, nv), rd] in self.bmap.items():
+                fi = d * 2 + v          # face index: dim*2 + val  (0..5)
+                bmap_has_nb[e, fi] = True
+                bmap_ne[e, fi]     = ne
+                bmap_nd[e, fi]     = nd
+                bmap_nv[e, fi]     = nv
+                bmap_rd[e, fi]     = rd
+            bmap_has_nb_j = jnp.array(bmap_has_nb)
+            bmap_ne_j     = jnp.array(bmap_ne)
+            bmap_nd_j     = jnp.array(bmap_nd)
+            bmap_nv_j     = jnp.array(bmap_nv)
+            bmap_rd_j     = jnp.array(bmap_rd)
+
         def _pseudoinverse_matvec(J: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
             Jt_v = J.T @ v          # (d,) — project v onto tangent space
-            JtJ = J.T @ J        # (d, d) Gram matrix 
+            JtJ = J.T @ J           # (d, d) Gram matrix
             dxi, _, _, _ = jnp.linalg.lstsq(JtJ, Jt_v, rcond=None)
             return dxi
-        
-        n_steps = 5
+
         @jax.jit
         def xis_to_points(elem, xi0, x_target):
-            xi = xi0.copy()
-            d = xi0.shape[0]
-            lo = jnp.zeros(d) 
-            hi = jnp.ones(d) 
-            
-            # Step size / relaxation factor
-            dt = 1.5 / n_steps 
-            for _ in range(n_steps):
-                current_x = self.evaluate_embeddings(elem, xi, fit_params=fit_params)[0]
-                r0 = x_target - current_x
-                J = self.evaluate_jacobians(elem, xi, fit_params=fit_params)[0] # (n, d)
+            d  = xi0.shape[0]
+            lo = jnp.zeros(d)
+            hi = jnp.ones(d)
+
+            def velocity(xi):
                 on_lo = xi <= lo + 1e-12
                 on_hi = xi >= hi - 1e-12
-                bound = on_lo | on_hi                        # (d,)
+                bound = on_lo | on_hi
+                current_x = self.evaluate_embeddings(elem, xi, fit_params=fit_params)[0]
+                r = x_target - current_x
+                J = self.evaluate_jacobians(elem, xi, fit_params=fit_params)[0]  # (fdim, ndim)
                 J_free = J * jnp.where(bound, 0.0, 1.0)
-                dxi = jnp.where(jnp.all(bound), 0, _pseudoinverse_matvec(J_free, r0))
-                xi = xi + dxi* jnp.where(jnp.any(bound),dt, 1) #step sizing should be adaptive for interior and exterior points.
-                xi = jnp.clip(xi, lo, hi)
+                return jnp.where(jnp.all(bound), jnp.zeros(d), _pseudoinverse_matvec(J_free, r))
 
-            residual = self.evaluate_embeddings(elem, xi, fit_params=fit_params) - x_target
-            return xi, residual
+            # Single RK4 step (dt = 1) replaces the fixed-iteration Newton loop.
+            # Intermediate xi values are clipped to [0,1] to keep evaluations valid;
+            # out-of-bounds crossings are resolved by the bmap step below.
+            k1 = velocity(xi0)
+            k2 = velocity(jnp.clip(xi0 + 0.5 * k1, lo, hi))
+            k3 = velocity(jnp.clip(xi0 + 0.5 * k2, lo, hi))
+            k4 = velocity(jnp.clip(xi0 + k3,        lo, hi))
+            xi_rk4 = xi0 + (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
 
-        # for e, x, p in zip(elem_num, init_xi, points):
-        #     embedded, res = xis_to_points(e, x, p)
-        embedded, res = jax.vmap(xis_to_points)(elem_num, init_xi, points) 
-        # embedded, res = init_xi, test_res 
+            # B2: Scan over all 6 faces and, for any dimension where xi_rk4 has
+            # overshot a shared boundary, remap (elem, xi) to the neighbour element.
+            # Assumes dim_A == dim_B for well-formed hex meshes (validated by bmap
+            # construction).  External faces with no neighbour are clamped below.
+            if have_bmap:
+                face_scan = jnp.array([[0,0],[0,1],[1,0],[1,1],[2,0],[2,1]], dtype=jnp.int32)
 
-        # if verbose >= 2:
-        #     final_mean_dist = np.mean(np.linalg.norm(res, axis=-1))
-        #     final_max_dist = np.max(np.linalg.norm(res, axis=-1))
-        #     print(f"final mean error of {final_mean_dist} units, max error of {final_max_dist}")
+                def apply_face(carry, face_info):
+                    e, x = carry
+                    face_dim = face_info[0]
+                    face_val = face_info[1]
+                    face_idx = face_dim * 2 + face_val
+                    overflow = jnp.where(face_val == 0, x[face_dim] < 0.0, x[face_dim] > 1.0)
+                    has_nb   = bmap_has_nb_j[e, face_idx]
+                    should   = overflow & has_nb
+                    ne = bmap_ne_j[e, face_idx]
+                    nd = bmap_nd_j[e, face_idx]
+                    nv = bmap_nv_j[e, face_idx]
+                    rd = bmap_rd_j[e, face_idx]           # (3,) bool: aligned directions
+                    overshoot    = jnp.where(face_val == 0, -x[face_dim], x[face_dim] - 1.0)
+                    new_xi_free  = jnp.where(rd, x, 1.0 - x)
+                    entry        = jnp.where(nv == 0, overshoot, 1.0 - overshoot)
+                    new_xi_t     = new_xi_free.at[nd].set(entry)
+                    new_e = jnp.where(should, ne, e)
+                    new_x = jnp.where(should, new_xi_t, x)
+                    return (new_e, new_x), None
+
+                (elem_out, xi_out), _ = jax.lax.scan(apply_face, (elem, xi_rk4), face_scan)
+            else:
+                elem_out, xi_out = elem, xi_rk4
+
+            xi_final = jnp.clip(xi_out, lo, hi)
+            residual = self.evaluate_embeddings(elem_out, xi_final, fit_params=fit_params) - x_target
+            return (elem_out, xi_final), residual
+
+        (elem_num, embedded), res = jax.vmap(xis_to_points)(elem_num, init_xi, points)
+
+        if verbose >= 2:
+            final_mean_dist = np.mean(np.linalg.norm(np.asarray(res), axis=-1))
+            final_max_dist  = np.max(np.linalg.norm(np.asarray(res), axis=-1))
+            print(f"final mean error of {final_mean_dist} units, max error of {final_max_dist}")
 
         if verbose == 3:
             locs = self.evaluate_embeddings_ele_xi_pair(elem_num, embedded)
@@ -1072,7 +1188,7 @@ class MeshField:
             s.add_mesh(data, render_points_as_spheres=True, point_size=20)
             s.show()
         if return_residual:
-            return (elem_num, embedded), res 
+            return (elem_num, embedded), res
 
         return elem_num, embedded
 
