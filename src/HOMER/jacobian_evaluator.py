@@ -1,3 +1,22 @@
+"""
+jacobian_evaluator.py – Sparse-Jacobian helper for JAX cost functions.
+
+Provides :func:`jacobian`, which wraps an arbitrary JAX-compatible cost
+function and returns:
+
+1. A JIT-compiled version of the cost function.
+2. A sparse Jacobian function based on :mod:`sparsejac` (forward-mode AD
+   with sparsity exploitation), or a dense Jacobian for small problems.
+
+Used by :func:`~HOMER.fitting.point_cloud_fit` and can be called directly
+when building custom fitting problems::
+
+    from HOMER.jacobian_evaluator import jacobian
+
+    fitting_fn, jac_fn = jacobian(my_cost_function,
+                                  init_estimate=mesh.optimisable_param_array)
+"""
+
 from functools import partial
 from typing import Callable, Optional
 from tqdm import tqdm

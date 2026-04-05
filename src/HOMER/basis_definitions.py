@@ -1,3 +1,42 @@
+"""
+basis_definitions.py – 1-D basis function definitions for HOMER mesh elements.
+
+This module provides the building blocks for constructing high-order mesh
+elements.  Every mesh element in HOMER is defined by a *tensor product* of
+1-D basis functions – one per parametric direction.
+
+Available 1-D basis classes (all subclass :class:`AbstractBasis`):
+
+* :class:`H3Basis` – cubic Hermite (C¹ continuity, 2 nodes per direction)
+* :class:`L1Basis` – linear Lagrange (2 nodes per direction)
+* :class:`L2Basis` – quadratic Lagrange (3 nodes per direction)
+* :class:`L3Basis` – cubic Lagrange (4 nodes per direction)
+* :class:`L4Basis` – quartic Lagrange (5 nodes per direction)
+
+Each basis class is a frozen :class:`dataclasses.dataclass` with the following
+class attributes:
+
+* ``fn`` – the basis evaluation function ``fn(x) -> (n_pts, n_basis)``
+* ``deriv`` – list of derivative functions ``[fn, d1_fn, d2_fn, …]``
+* ``weights`` – ordered weight names, e.g. ``['x0', 'dx0', 'x1', 'dx1']``
+* ``order`` – polynomial order
+* ``node_locs`` – canonical node positions in [0, 1]
+* ``node_fields`` – a :class:`DerivativeField` instance describing which
+  derivative quantities each node must carry (``None`` for Lagrange bases)
+
+Typical usage::
+
+    from HOMER.basis_definitions import H3Basis, L1Basis
+
+    # 2-D cubic-Hermite surface element
+    from HOMER.mesher import MeshElement
+    elem = MeshElement(node_indexes=[0,1,2,3], basis_functions=(H3Basis, H3Basis))
+
+    # 3-D trilinear volume element
+    elem3d = MeshElement(node_indexes=[0,1,2,3,4,5,6,7],
+                         basis_functions=(L1Basis, L1Basis, L1Basis))
+"""
+
 from typing import Callable, Optional
 import jax.numpy as jnp
 import jax
@@ -31,6 +70,12 @@ EVAL_PATTERN = {
 
 @dataclass
 class AbstractField:
+    """Base class for node-field descriptors.
+
+    Tracks how many derivative *fields* a node must carry and maps that count
+    to a tuple of required field names via ``_field_scaling``.
+    """
+
     n_field: int
     _field_scaling: tuple[tuple[str]]
 
@@ -42,15 +87,50 @@ class AbstractField:
         return new_class
     
     def get_needed_fields(self):
+        """Return the tuple of required field names for the current count."""
         return self._field_scaling[self.n_field]
 
 @dataclass
-class DerivativeField(AbstractField): 
+class DerivativeField(AbstractField):
+    """Descriptor for Hermite-style derivative fields on a node.
+
+    When a mesh element uses :class:`H3Basis` in *n* parametric directions,
+    each node needs an increasing set of mixed-derivative vectors:
+
+    * 1 Hermite direction → ``('du',)``
+    * 2 Hermite directions → ``('du', 'dv', 'dudv')``
+    * 3 Hermite directions → ``('du', 'dv', 'dw', 'dudv', 'dudw', 'dvdw', 'dudvdw')``
+    """
+
     n_field:int = field(default=1)
     _field_scaling:tuple[tuple[str]] = field(default=deriv_fields)
 
 @dataclass
 class AbstractBasis:
+    """Abstract base class for all 1-D basis function definitions.
+
+    Concrete subclasses (e.g. :class:`H3Basis`, :class:`L2Basis`) are frozen
+    dataclasses that define the class attributes below.  They are passed as
+    classes (not instances) to :class:`~HOMER.mesher.MeshElement`.
+
+    Attributes
+    ----------
+    fn : Callable
+        Basis evaluation function ``fn(x) -> ndarray (n_pts, n_basis)``.
+    node_fields : AbstractField or None
+        Describes the derivative quantities each node must carry.
+        ``None`` for pure Lagrange bases.
+    weights : list[str]
+        Ordered weight names, e.g. ``['x0', 'dx0', 'x1', 'dx1']``.
+        Names starting with ``'dx'`` indicate derivative entries.
+    deriv : list[Callable]
+        Derivative evaluation functions: ``[fn, d1_fn, d2_fn, …]``.
+    order : int
+        Polynomial order of the basis.
+    node_locs : list[float]
+        Canonical node positions in [0, 1].
+    """
+
     fn:Optional[Callable] = None
     node_fields: Optional[type[AbstractField]] = None
     weights: Optional[list[str]] = None
@@ -326,6 +406,17 @@ def L4d1(x):
 
 @dataclass
 class H3Basis(AbstractBasis):
+    """Cubic Hermite basis (C¹ continuity, 2 nodes, 4 weights per direction).
+
+    Each node contributes a *position* and a *tangent derivative*:
+    ``['x0', 'dx0', 'x1', 'dx1']``.  Requires each :class:`~HOMER.mesher.MeshNode`
+    to carry Hermite derivative fields (``du``, ``dv``, … depending on the
+    element dimensionality).
+
+    Best choice for smooth geometry where derivative continuity across element
+    boundaries is important.
+    """
+
     fn = H3
     node_fields = DerivativeField()
     weights = ['x0', 'dx0', 'x1', 'dx1'] #then this records the derivatives
@@ -335,6 +426,15 @@ class H3Basis(AbstractBasis):
     
 @dataclass
 class L1Basis(AbstractBasis):
+    """Linear Lagrange basis (C⁰ continuity, 2 nodes per direction).
+
+    Each node contributes only a *position* weight.  No derivative fields are
+    required on the associated :class:`~HOMER.mesher.MeshNode` objects.
+
+    Useful for coarse linear meshes that are subsequently :meth:`~HOMER.mesher.MeshField.rebase`-d
+    to a higher-order basis.
+    """
+
     fn = L1
     weights = ['x0', 'x1']
     deriv = [L1, L1d1, L1d1d1]
@@ -343,6 +443,12 @@ class L1Basis(AbstractBasis):
 
 @dataclass
 class L2Basis(AbstractBasis):
+    """Quadratic Lagrange basis (C⁰ continuity, 3 nodes per direction).
+
+    Provides second-order accuracy with 3 nodes per direction and no
+    derivative fields on nodes.
+    """
+
     fn = L2
     weights = ['x0', 'x1', 'x2']
     deriv =[L2, L2d1]
@@ -351,6 +457,12 @@ class L2Basis(AbstractBasis):
 
 @dataclass
 class L3Basis(AbstractBasis):
+    """Cubic Lagrange basis (C⁰ continuity, 4 nodes per direction).
+
+    Third-order accuracy with uniformly-spaced node positions at
+    0, 1/3, 2/3, 1.  No derivative fields required on nodes.
+    """
+
     fn = L3
     weights = ['x0', 'x1', 'x2', 'x3']
     deriv = [L3, L3d1]
@@ -359,6 +471,12 @@ class L3Basis(AbstractBasis):
     
 @dataclass
 class L4Basis(AbstractBasis):
+    """Quartic Lagrange basis (C⁰ continuity, 5 nodes per direction).
+
+    Fourth-order accuracy with uniformly-spaced node positions at
+    0, 1/4, 2/4, 3/4, 1.  No derivative fields required on nodes.
+    """
+
     fn = L4
     weights = ['x0', 'x1', 'x2', 'x3', 'x4']
     deriv = [L4, L4d1]

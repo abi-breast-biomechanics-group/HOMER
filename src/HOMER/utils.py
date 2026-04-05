@@ -1,3 +1,16 @@
+"""
+utils.py – Miscellaneous utility functions for HOMER.
+
+Provides small helper functions used internally across the library:
+
+* :func:`jax_aknn` – JAX approximate k-nearest-neighbour search.
+* :func:`block_diagonal_jacobian` – construct a block-diagonal sparse matrix.
+* :func:`all_pairings` – Fortran-ordered Cartesian product of lists.
+* :func:`h_tform` – homogeneous 4 × 4 rigid-body transform for point arrays.
+* :func:`vol_tet`, :func:`vol_hexahedron` – geometric volume computations.
+* :func:`make_tiling` – generate a hexagonal tiling for surface visualisation.
+"""
+
 import jax.numpy as jnp
 import numpy as np
 import pyvista as pv

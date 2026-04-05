@@ -1,8 +1,40 @@
+"""
+bspline.py – B-spline surface evaluation and utilities.
+
+Provides :class:`jax_spline_not_a_knot`, a JAX-compatible bicubic B-spline
+interpolant with not-a-knot boundary conditions.  This is a standalone
+utility class used for smooth surface interpolation tasks.
+"""
+
 import numpy as np
 import jax 
 import jax.numpy as jnp
 
 class jax_spline_not_a_knot:
+    """JAX-compatible bicubic B-spline interpolant with not-a-knot boundary conditions.
+
+    Fits a 2-D cubic B-spline surface to an ``m × n`` grid of control points
+    and exposes JAX-JIT-compatible evaluation and derivative methods.
+
+    Parameters
+    ----------
+    m:
+        Number of control points in the first parametric direction.
+    n:
+        Number of control points in the second parametric direction.
+
+    Attributes
+    ----------
+    phi : numpy.ndarray
+        Interpolation / boundary condition matrix.
+    phi_inv : numpy.ndarray
+        Inverse of ``phi`` (pre-computed at construction time).
+    m : int
+        Grid size in direction 0.
+    n : int
+        Grid size in direction 1.
+    """
+
     def __init__(self, m, n):
         # passing matrix
         phi=np.zeros(((n+2)*(m+2),(m+2)*(n+2)))

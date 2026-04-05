@@ -1,3 +1,19 @@
+"""
+optim.py – JAX-compatible optimisation helper functions.
+
+Provides:
+
+* :func:`jax_comp_kdtree_distance_query` – wraps a SciPy KD-tree inside a
+  JAX custom JVP callback, enabling gradient-based optimisation against an
+  arbitrary reference point cloud.
+* :func:`jax_comp_kdtree_normal_distance_query` – the same, but projects the
+  distance along the reference surface normals (useful when fitting oriented
+  point clouds).
+
+These functions are consumed by :func:`~HOMER.fitting.point_cloud_fit` and
+can be used directly when building custom fitting pipelines.
+"""
+
 import numpy as np
 import jax
 import jax.numpy as jnp
