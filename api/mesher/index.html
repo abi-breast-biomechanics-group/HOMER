@@ -1,0 +1,5623 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High Order Mesh Embeddings and Refinement">
+      
+      
+      
+      
+        <link rel="prev" href="../../how-to/node-indexing/">
+      
+      
+        <link rel="next" href="../basis_definitions/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>mesher - HOMER</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#api-mesher" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="HOMER" class="md-header__button md-logo" aria-label="HOMER" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HOMER
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              mesher
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/abi-breast-biomechanics-group/HOMER" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../how-to/3d-meshes/" class="md-tabs__link">
+          
+  
+  
+  How-To Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="HOMER" class="md-nav__button md-logo" aria-label="HOMER" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    HOMER
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/abi-breast-biomechanics-group/HOMER" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-To Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-To Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/3d-meshes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with 3D meshes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/mixed-basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mixed basis functions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/refinement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mesh refinement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/rebase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Basis conversion (rebase)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/embedding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Embedding points
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/fitting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mesh fitting / optimisation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/secondary-fields/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secondary fields
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/strain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strain evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/topology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topology mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/node-indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node indexing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mesher
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mesher
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshNode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MeshNode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MeshNode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshNode.fix_parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fix_parameter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshNode.get_optimisability_arr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_optimisability_arr
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshNode.plot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        plot
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshElement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MeshElement
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MeshElement">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshElement.get_used_fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_used_fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshElement.argsort_derivs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        argsort_derivs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MeshField
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MeshField">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.evaluate_embeddings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        evaluate_embeddings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.evaluate_deriv_embeddings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        evaluate_deriv_embeddings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.evaluate_element_embeddings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        evaluate_element_embeddings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.evaluate_normals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        evaluate_normals
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.eval_numeric_jac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        eval_numeric_jac
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.evaluate_jacobians" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        evaluate_jacobians
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.xi_grid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        xi_grid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.gauss_grid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gauss_grid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_element_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_element_params
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.update_from_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_from_params
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.generate_mesh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        generate_mesh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.add_node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        add_node
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.add_element" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        add_element
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_element" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_element
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.associated_node_index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        associated_node_index
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.unfix_mesh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unfix_mesh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_hex_surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_hex_surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_triangle_surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_triangle_surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_lines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_faces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_faces
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.plot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        plot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.embed_points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        embed_points
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.evaluate_sobolev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        evaluate_sobolev
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_volume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_volume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.evaluate_strain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        evaluate_strain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.get_xi_weight_mat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_xi_weight_mat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.linear_fit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        linear_fit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.refine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        refine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.save" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        save
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.dump_to_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dump_to_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.__deepcopy__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __deepcopy__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.MeshField.rebase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rebase
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#HOMER.mesher.Mesh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mesh
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mesh">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.Mesh.refine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        refine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.Mesh.plot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        plot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.Mesh.new_field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        new_field
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.Mesh.save" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        save
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#HOMER.mesher.Mesh.dump_to_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dump_to_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../basis_definitions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    basis_definitions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fitting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    fitting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../io/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    io
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../geometry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    geometry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jacobian_evaluator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    jacobian_evaluator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="api-mesher">API – mesher<a class="headerlink" href="#api-mesher" title="Permanent link">&para;</a></h1>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="HOMER.mesher.MeshNode" class="doc doc-heading">
+              <code class="highlight language-python"><span class="n">HOMER</span><span class="o">.</span><span class="n">mesher</span><span class="o">.</span><span class="n">MeshNode</span><span class="p">(</span><span class="n">loc</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshNode" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="dict">dict</span></code></p>
+
+
+
+        <p>A mesh node that stores a physical location and associated derivative data.</p>
+<p>:class:<code>MeshNode</code> subclasses :class:<code>dict</code> so that derivative quantities
+(<code>du</code>, <code>dv</code>, <code>dw</code>, <code>dudv</code>, …) required by higher-order basis
+functions can be stored as named entries.  All values must be
+:class:<code>numpy.ndarray</code> objects of the same length as <code>loc</code>.</p>
+<p>For a 2-D manifold mesh with cubic-Hermite basis in both directions
+(<code>H3Basis</code>, <code>H3Basis</code>), each node must carry <code>du</code>, <code>dv</code>, and
+<code>dudv</code> derivatives::</p>
+<div class="highlight"><pre><span></span><code>node = MeshNode(
+    loc=np.array([0.0, 0.0, 1.0]),
+    du=np.zeros(3),
+    dv=np.zeros(3),
+    dudv=np.zeros(3),
+)
+</code></pre></div>
+<p>For a 3-D volume mesh with <code>H3Basis</code> in all three directions, the
+additional derivatives <code>dw</code>, <code>dudw</code>, <code>dvdw</code>, and <code>dudvdw</code> are
+also required::</p>
+<div class="highlight"><pre><span></span><code>node = MeshNode(
+    loc=np.array([0.0, 0.0, 1.0]),
+    du=np.zeros(3), dv=np.zeros(3), dw=np.zeros(3),
+    dudv=np.zeros(3), dudw=np.zeros(3), dvdw=np.zeros(3),
+    dudvdw=np.zeros(3),
+)
+</code></pre></div>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>loc</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Physical-space coordinates of the node, shape <code>(fdim,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>id</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional unique identifier.  When provided, nodes can be referenced
+by ID rather than list index in a :class:<code>MeshElement</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>**kwargs</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Named derivative arrays, e.g. <code>du</code>, <code>dv</code>, <code>dw</code>, <code>dudv</code>, …
+All values must be <code>numpy.ndarray</code> (or list / JAX array, which
+are automatically converted).</p>
+              </div>
+            </td>
+            <td>
+                  <code>{}</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshNode.loc">loc</span></code></td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Physical-space coordinates, shape <code>(fdim,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshNode.id">id</span></code></td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The node identifier (or <code>None</code>).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshNode.fixed_params">fixed_params</span></code></td>
+            <td>
+                  <code><span title="dict">dict</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Maps parameter name → array of fixed component indices.  Populated
+by :meth:<code>fix_parameter</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+        <p>Initialise a :class:<code>MeshNode</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>loc</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Physical-space coordinates, shape <code>(fdim,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>id</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional unique identifier.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>**kwargs</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Named derivative arrays (<code>du</code>, <code>dv</code>, <code>dw</code>, …).
+Each value must be an array of the same length as <code>loc</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>{}</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If any keyword-argument value is not an array-like type.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshNode.fix_parameter" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">fix_parameter</span><span class="p">(</span><span class="n">param_names</span><span class="p">,</span> <span class="n">values</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inds</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshNode.fix_parameter" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Mark one or more node parameters as fixed (non-optimisable).</p>
+<p>Fixed parameters are excluded from the optimisable parameter vector
+exposed by :class:<code>MeshField</code>.  Optionally, the parameter can also be
+set to a specified value at the same time.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>param_names</code>
+            </td>
+            <td>
+                  <code><span title="list">list</span> | <span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Name or list of names of the parameters to fix, e.g.
+<code>'loc'</code>, <code>'du'</code>, <code>['loc', 'dv']</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>values</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<span title="numpy.ndarray">ndarray</span>] | <span title="numpy.ndarray">ndarray</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional value(s) to assign at the time of fixing.  Must match
+the shape implied by <code>inds</code> (or the full parameter dimension
+when <code>inds</code> is <code>None</code>).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>inds</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<span title="int">int</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Component indices to fix within the parameter array (e.g.
+<code>[0, 2]</code> to fix the <em>x</em> and <em>z</em> components of <code>loc</code>).
+When <code>None</code>, all components are fixed.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshNode.get_optimisability_arr" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_optimisability_arr</span><span class="p">()</span></code>
+
+<a href="#HOMER.mesher.MeshNode.get_optimisability_arr" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns the optimisable status of all data stored on the node.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshNode.plot" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">plot</span><span class="p">(</span><span class="n">scene</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshNode.plot" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Draws the node, and any quantities, to a pyvista plotter.
+:param scene: An existing pyvista scene to draw too - if given will not draw the plot.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><hr />
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="HOMER.mesher.MeshElement" class="doc doc-heading">
+              <code class="highlight language-python"><span class="n">HOMER</span><span class="o">.</span><span class="n">mesher</span><span class="o">.</span><span class="n">MeshElement</span><span class="p">(</span><span class="n">basis_functions</span><span class="p">,</span> <span class="n">node_indexes</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">node_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">BP_inds</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshElement" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A single high-order mesh element linking nodes through tensor-product basis functions.</p>
+<p>A :class:<code>MeshElement</code> combines a list of :class:<code>MeshNode</code> references with
+a <em>group</em> of 1-D basis functions (one per parametric direction) to define a
+2-D manifold surface element or a 3-D volume element.</p>
+<p>The number of nodes required per element equals the product of the numbers
+of 1-D basis nodes:</p>
+<ul>
+<li>H3Basis × H3Basis → 2 × 2 = 4 nodes (2-D)</li>
+<li>H3Basis × H3Basis × H3Basis → 2 × 2 × 2 = 8 nodes (3-D)</li>
+<li>L2Basis × L2Basis → 3 × 3 = 9 nodes (2-D)</li>
+</ul>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>basis_functions</code>
+            </td>
+            <td>
+                  <code><span title="HOMER.basis_definitions.BasisGroup">BasisGroup</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A sequence of 1-D basis classes (length 2 or 3) defining the
+parametric-direction interpolation.  E.g.
+<code>(H3Basis, H3Basis)</code> for a 2-D cubic-Hermite element.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>node_indexes</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<span title="int">int</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Zero-based integer indices into the parent mesh's <code>nodes</code> list.
+Exactly one of <em>node_indexes</em> or <em>node_ids</em> must be given.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>node_ids</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>User-supplied node identifiers (alternative to <em>node_indexes</em>).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>BP_inds</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Pre-computed basis-product index pairs.  Computed automatically
+when <code>None</code>; supply a cached value to skip recomputation.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>id</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional element identifier.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshElement.ndim">ndim</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric dimensionality (2 or 3).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshElement.nodes">nodes</span></code></td>
+            <td>
+                  <code><span title="list">list</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The ordered node references (indexes or ids).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshElement.basis_functions">basis_functions</span></code></td>
+            <td>
+                  <code><span title="HOMER.basis_definitions.BasisGroup">BasisGroup</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The sequence of 1-D basis classes.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshElement.used_node_fields">used_node_fields</span></code></td>
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Derivative field names (<code>'du'</code>, <code>'dv'</code>, …) that each node must
+carry for this element's basis.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshElement.BasisProductInds">BasisProductInds</span></code></td>
+            <td>
+                  <code><span title="list">list</span>[<span title="tuple">tuple</span>[<span title="int">int</span>, ...]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Ordered index pairs/triplets defining the tensor-product weight
+computation.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshElement.num_nodes">num_nodes</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Total number of nodes in this element.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+        <p>Initialise a :class:<code>MeshElement</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>basis_functions</code>
+            </td>
+            <td>
+                  <code><span title="HOMER.basis_definitions.BasisGroup">BasisGroup</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A sequence of 1-D basis classes (length 2 or 3).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>node_indexes</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<span title="int">int</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Zero-based indices into the parent mesh's node list.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>node_ids</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>User-supplied node identifiers.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>BP_inds</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Pre-computed basis-product index pairs (optional optimisation).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>id</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional element identifier.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If neither <em>node_indexes</em> nor <em>node_ids</em> is provided, or if
+both are provided.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshElement.get_used_fields" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_used_fields</span><span class="p">()</span></code>
+
+<a href="#HOMER.mesher.MeshElement.get_used_fields" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Calculates the used node fields for field objects.
+This represents the increasing derivative pattern du -&gt; du, dw, dudw -&gt; du ... dudvdw</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshElement.argsort_derivs" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">argsort_derivs</span><span class="p">(</span><span class="n">derivs_struct</span><span class="p">,</span> <span class="n">order_dict</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshElement.argsort_derivs" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Given a derivs struct defined iternally, returns the canonical ordering according to a given order dict.</p>
+<p>:params derivs_struct: The calculated derivative pairs to evaluate.
+:params order_dict: The ordering to follow</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><hr />
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="HOMER.mesher.MeshField" class="doc doc-heading">
+              <code class="highlight language-python"><span class="n">HOMER</span><span class="o">.</span><span class="n">mesher</span><span class="o">.</span><span class="n">MeshField</span><span class="p">(</span><span class="n">nodes</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">elements</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">jax_compile</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A collection of :class:<code>MeshNode</code> and :class:<code>MeshElement</code> objects representing a single field.</p>
+<p>:class:<code>MeshField</code> is the base class for both the primary geometry of a
+:class:<code>Mesh</code> and for any secondary fields (fibre directions, stresses,
+velocities, etc.) created with :meth:<code>Mesh.new_field</code>.</p>
+<p>A :class:<code>MeshField</code> owns:</p>
+<ul>
+<li>A <strong>node list</strong> storing the field's degrees of freedom (parameter values
+  and, for Hermite bases, derivative vectors).</li>
+<li>An <strong>element list</strong> defining how nodes are connected and which basis
+  functions to use for interpolation.</li>
+<li><strong>Compiled JAX functions</strong> (built by :meth:<code>generate_mesh</code>) for fast
+  evaluation, differentiation, and optimisation.</li>
+</ul>
+<p>The <code>@expand_wide_evals</code> decorator automatically adds
+<code>*_in_every_element</code> and <code>*_ele_xi_pair</code> variants for every method
+decorated with <code>@wide_eval</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>nodes</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshNode(loc, id=None, **kwargs) (HOMER.mesher.MeshNode)" href="#HOMER.mesher.MeshNode">MeshNode</a>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>List of :class:<code>MeshNode</code> objects.  May be <code>None</code> when building a
+mesh incrementally with :meth:<code>add_node</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>elements</code>
+            </td>
+            <td>
+                  <code><span title="Union">Union</span>[<span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>], <a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>, <span title="NoneType">NoneType</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>List (or single instance) of :class:<code>MeshElement</code> objects.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>jax_compile</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>True</code>, JIT-compiles evaluation functions at construction time
+(recommended for iterative fitting loops).</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshField.nodes">nodes</span></code></td>
+            <td>
+                  <code><span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshNode(loc, id=None, **kwargs) (HOMER.mesher.MeshNode)" href="#HOMER.mesher.MeshNode">MeshNode</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>All nodes belonging to this field.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshField.elements">elements</span></code></td>
+            <td>
+                  <code><span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>All elements belonging to this field.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshField.fdim">fdim</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Physical dimensionality of the field values (e.g. 3 for XYZ).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshField.ndim">ndim</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric dimensionality (2 or 3).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshField.true_param_array">true_param_array</span></code></td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Flat vector of <em>all</em> nodal parameters (free and fixed).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshField.optimisable_param_array">optimisable_param_array</span></code></td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Subset of <em>true_param_array</em> that is not fixed.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshField.optimisable_param_bool">optimisable_param_bool</span></code></td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Boolean mask selecting optimisable parameters from
+<em>true_param_array</em>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.MeshField.ele_map">ele_map</span></code></td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(n_elements, n_params_per_element)</code> index array mapping element
+slots to positions in <em>true_param_array</em>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+        <p>Initialise a :class:<code>MeshField</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>nodes</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshNode(loc, id=None, **kwargs) (HOMER.mesher.MeshNode)" href="#HOMER.mesher.MeshNode">MeshNode</a>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Node list (or <code>None</code> for incremental construction).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>elements</code>
+            </td>
+            <td>
+                  <code><span title="Union">Union</span>[<span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>], <a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>, <span title="NoneType">NoneType</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Element or list of elements (or <code>None</code>).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>jax_compile</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If <code>True</code>, JIT-compile internal evaluation functions
+immediately after construction.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.evaluate_embeddings" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">evaluate_embeddings</span><span class="p">(</span><span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.evaluate_embeddings" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Evaluate the field at parametric coordinates within one or more elements.</p>
+<p>This is a placeholder that is replaced by a compiled JAX function when
+:meth:<code>generate_mesh</code> is called.  The full signature after
+initialisation is::</p>
+<div class="highlight"><pre><span></span><code>evaluate_embeddings(element_ids, xis, fit_params=None) -&gt; jnp.ndarray
+</code></pre></div>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>element_ids</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>1-D array of integer element indices, shape <code>(n_pts,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>xis</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric coordinates, shape <code>(n_pts, ndim)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fit_params</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Override of the current :attr:<code>optimisable_param_array</code>.
+When <code>None</code> the stored parameter values are used.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Field values at the requested locations, shape <code>(n_pts, fdim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>The <code>@expand_wide_evals</code> class decorator automatically creates two
+additional variants:</p>
+<ul>
+<li><code>evaluate_embeddings_in_every_element(xis)</code> – evaluates the same
+  grid of xi points in <em>every</em> element and stacks the results.</li>
+<li><code>evaluate_embeddings_ele_xi_pair(element_ids, xis)</code> – evaluates
+  each <code>(element, xi)</code> pair independently (equivalent signature to
+  the base function but without batching).</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.evaluate_deriv_embeddings" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">evaluate_deriv_embeddings</span><span class="p">(</span><span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.evaluate_deriv_embeddings" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Evaluate a specified partial derivative of the field.</p>
+<p>This is a placeholder replaced at :meth:<code>generate_mesh</code> time.  The
+full signature is::</p>
+<div class="highlight"><pre><span></span><code>evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params=None)
+    -&gt; jnp.ndarray
+</code></pre></div>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>element_ids</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>1-D integer array, shape <code>(n_pts,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>xis</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric coordinates, shape <code>(n_pts, ndim)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>derivs</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Derivative order per parametric direction, e.g. <code>[1, 0]</code> for
+∂/∂u in a 2-D element or <code>[0, 0, 1]</code> for ∂/∂w in a 3-D one.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fit_params</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional override of :attr:<code>optimisable_param_array</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Derivative field values, shape <code>(n_pts, fdim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.evaluate_element_embeddings" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">evaluate_element_embeddings</span><span class="p">(</span><span class="n">element_id</span><span class="p">,</span> <span class="n">xis</span><span class="p">,</span> <span class="n">fit_params</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.evaluate_element_embeddings" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Evaluate the embedding for a single element identified by its ID.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>element_id</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The user-assigned element ID (not the list index).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>xis</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric coordinates, shape <code>(n_pts, ndim)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fit_params</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional parameter override.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Field values, shape <code>(n_pts, fdim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.evaluate_normals" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">evaluate_normals</span><span class="p">(</span><span class="n">element_ids</span><span class="p">,</span> <span class="n">xis</span><span class="p">,</span> <span class="n">fit_params</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.evaluate_normals" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the surface normal vectors at parametric coordinates.</p>
+<p>Only valid for 2-D manifold meshes (<code>ndim == 2</code>).  The normal is
+computed as the cross product of the two surface tangent vectors.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>element_ids</code>
+            </td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>1-D integer array of element indices, shape <code>(n_pts,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>xis</code>
+            </td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric coordinates, shape <code>(n_pts, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fit_params</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional override of :attr:<code>optimisable_param_array</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Normal vectors (not normalised), shape <code>(n_pts, 3)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If called on a 3-D volume mesh.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.eval_numeric_jac" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">eval_numeric_jac</span><span class="p">(</span><span class="n">element_ids</span><span class="p">,</span> <span class="n">xis</span><span class="p">,</span> <span class="nb">locals</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">fit_params</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.eval_numeric_jac" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Evaluates the jacobian at a set of xis within an element
+Uses numeric derivatives, useful when the underlying mesh field has zero derivative boundaries.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.evaluate_jacobians" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">evaluate_jacobians</span><span class="p">(</span><span class="n">element_ids</span><span class="p">,</span> <span class="n">xis</span><span class="p">,</span> <span class="n">fit_params</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.evaluate_jacobians" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Evaluate the Jacobian matrix of the embedding at parametric coordinates.</p>
+<p>Returns ∂x/∂ξ, the matrix mapping parametric-space tangent vectors to
+physical-space tangent vectors.  Rows correspond to physical directions
+(x, y, z) and columns to parametric directions (u, v[, w]).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>element_ids</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>1-D integer array, shape <code>(n_pts,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>xis</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric coordinates, shape <code>(n_pts, ndim)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fit_params</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional override of :attr:<code>optimisable_param_array</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Jacobian matrices, shape <code>(n_pts, fdim, ndim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.xi_grid" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">xi_grid</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">surface</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">boundary_points</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">lattice</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.xi_grid" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return a regular grid of parametric (xi) coordinates.</p>
+<p>Creates a uniform Cartesian grid of xi points for use with
+:meth:<code>evaluate_embeddings_in_every_element</code> or for passing to
+:meth:<code>get_xi_weight_mat</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>res</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of grid points along each parametric direction.  The
+total number of points is <code>res ** ndim</code> (or <code>res ** 2</code> when
+returning surface faces of a volume mesh).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>dim</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Dimensionality of the grid (2 or 3).  Defaults to
+:attr:<code>ndim</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>surface</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>For a 3-D mesh, return only points on the six element faces
+rather than the full interior grid.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>boundary_points</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>False</code>, exclude xi = 0 and xi = 1 from the grid (useful
+to avoid double-counting shared element boundaries).</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>lattice</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional <code>(xn, yn)</code> tiling definition for hexagonal surface
+patterns.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Grid points, shape <code>(res**ndim, ndim)</code> (or, when <em>lattice</em> is
+provided and <em>surface</em> is <code>True</code>, a <code>(pts, connectivity)</code>
+tuple).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.gauss_grid" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">gauss_grid</span><span class="p">(</span><span class="n">ng</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.gauss_grid" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return a tensor-product Gauss quadrature grid.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>ng</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <ul>
+<li><strong>int</strong> – return 1-D Gauss points for a single direction.</li>
+<li><strong>list[int]</strong> – tensor-product grid; e.g. <code>[3, 3]</code> for a
+  2-D surface integration or <code>[3, 3, 3]</code> for a 3-D volume.</li>
+</ul>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>Xi</code></td>            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Gauss point locations, shape <code>(n_gauss, ndim)</code> or <code>(n_gauss,)</code>
+for the 1-D case.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+<td><code>W</code></td>            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Corresponding quadrature weights, shape <code>(n_gauss,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If <code>ng</code> has more than 3 entries or is of an unsupported type.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_element_params" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_element_params</span><span class="p">(</span><span class="n">ele_num</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_element_params" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>returns the flat vector of node parameters associated with this element.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.update_from_params" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">update_from_params</span><span class="p">(</span><span class="n">inp_params</span><span class="p">,</span> <span class="n">generate</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.update_from_params" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Updates all nodes with data from an input param array.</p>
+<p>:param inp_params: the input params to update the mesh with
+:param generate: whether to rebuild the mesh after updating.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.generate_mesh" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">generate_mesh</span><span class="p">()</span></code>
+
+<a href="#HOMER.mesher.MeshField.generate_mesh" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Builds the mesh representation on call.</p>
+<p>This code is responsible for handling on-the-fly functions, and the generation of the
+'fast' pathway jax.numpy array representation.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.add_node" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">add_node</span><span class="p">(</span><span class="n">node</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.add_node" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Add a node to the node list.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.add_element" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">add_element</span><span class="p">(</span><span class="n">element</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.add_element" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Adds an element to the element list.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_element" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_element</span><span class="p">(</span><span class="n">element_ids</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_element" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns the element with the associated id.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.associated_node_index" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">associated_node_index</span><span class="p">(</span><span class="n">index_list</span><span class="p">,</span> <span class="n">nodes_to_gather</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">node_by_id</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.associated_node_index" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Given an index list, returns the associated indexes of features in that index in the input param array.
+Used to perform manipulations, and identify which features to fix</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.unfix_mesh" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">unfix_mesh</span><span class="p">()</span></code>
+
+<a href="#HOMER.mesher.MeshField.unfix_mesh" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Removes all fixed parameters in the mesh, and regenerates the mesh structure.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_surface" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_surface</span><span class="p">(</span><span class="n">element_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">res</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="n">just_faces</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">tiling</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_surface" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns a set of points evaluated over the mesh surface.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_hex_surface" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_hex_surface</span><span class="p">(</span><span class="n">element_ids</span><span class="p">,</span> <span class="n">tiling</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_hex_surface" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns lines evaluating a hexagon tiling of the element surface</p>
+<p>:params tiling: the repetitions of the underlying unit surface (5/3 ratio "looks good")</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_triangle_surface" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_triangle_surface</span><span class="p">(</span><span class="n">element_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">res</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_triangle_surface" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns a set of points evaluated over the mesh surface, and triangles to create the surface.</p>
+<p>:returns surface pts: Surface points evaluated over the mesh.
+:returns tris: the triangles creatign the mesh surface.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_lines" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_lines</span><span class="p">(</span><span class="n">element_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">res</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_lines" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns a pv.PolyData object containing lines defining the edges of the mesh surface.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_faces" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_faces</span><span class="p">(</span><span class="n">rounding_res</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_faces" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns all external faces of the current mesh.
+Faces are indicated as tuples (elem_id, dim, {0,1}).
+By definition, A manifold is a face, indicated as (elem_id, -1, -1).
+Faces are determined by spatial hashing of the face center i.e (0.5,0.5, {0,1})</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.plot" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">plot</span><span class="p">(</span><span class="n">scene</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">node_colour</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">node_size</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">tiling</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="n">mesh_colour</span><span class="o">=</span><span class="s1">&#39;gray&#39;</span><span class="p">,</span> <span class="n">mesh_opacity</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">mesh_width</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">mesh_col_scalar_name</span><span class="o">=</span><span class="s1">&#39;Field&#39;</span><span class="p">,</span> <span class="n">line_colour</span><span class="o">=</span><span class="s1">&#39;black&#39;</span><span class="p">,</span> <span class="n">line_opacity</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">line_width</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">line_col_scalar_name</span><span class="o">=</span><span class="s1">&#39;Field&#39;</span><span class="p">,</span> <span class="n">elem_labels</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">render_name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.plot" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Draws the mesh as a pyvista scene.</p>
+<p>:param scene: A pyvista scene, if provided will not call .show().
+:param node_colour: The colour to draw the node values.
+:param node_size: The size of the node points.
+:param labels: Whether to label the node numbers.
+:param res: The resolution of the surface mesh.
+:param mesh_color: The mesh surface colour.
+:param mesh_opacity: The mesh surface opacity.
+:param elem_labels: Whether to label the mesh elements.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.transform" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">transform</span><span class="p">(</span><span class="n">tform</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.transform" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Apply a 4x4 3D homogenous transform to the mesh.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.embed_points" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">embed_points</span><span class="p">(</span><span class="n">points</span><span class="p">,</span> <span class="n">verbose</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">init_elexi</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fit_params</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">return_residual</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">surface_embed</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">iterations</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.embed_points" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Find the parametric coordinates (element, xi) for a set of physical-space points.</p>
+<p>Uses an approximate nearest-neighbour search on a coarse xi grid to
+obtain initial estimates, then refines with a JAX-accelerated RK4
+fixed-iteration descent (see :meth:<code>_xis_to_points</code>).  Topology
+mapping (:meth:<code>topomap</code>) is applied at each iteration so that points
+near element boundaries are correctly assigned to neighbouring
+elements.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>points</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Physical-space query points, shape <code>(n_pts, fdim)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>verbose</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Verbosity level.  <code>0</code> → silent; <code>2</code> → print mean/max
+residual; <code>3</code> → also render an error visualisation with
+PyVista.</p>
+              </div>
+            </td>
+            <td>
+                  <code>0</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>init_elexi</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Pre-computed initial <code>(elem_num, xis)</code> tuple.  When supplied,
+the coarse nearest-neighbour search is skipped.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fit_params</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional parameter override for the mesh geometry.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>return_residual</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>True</code>, returns a <code>((elem_num, embedded), residual)</code>
+tuple instead of just <code>(elem_num, embedded)</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>surface_embed</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Restrict the coarse search to the surface faces of a 3-D mesh.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>iterations</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of RK4 refinement iterations.</p>
+              </div>
+            </td>
+            <td>
+                  <code>3</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>elem_num</code></td>            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Element index for each query point, shape <code>(n_pts,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+<td><code>embedded</code></td>            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric coordinates, shape <code>(n_pts, ndim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+<td><code>residual</code></td>            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>(Only when <em>return_residual</em> is <code>True</code>) Embedding error
+vectors, shape <code>(n_pts, fdim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.evaluate_sobolev" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">evaluate_sobolev</span><span class="p">(</span><span class="n">weights</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fit_params</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.evaluate_sobolev" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Works out and defines the Sobolev values associated with the derivatives of the input elements.
+Then calculates the appropriate gauss points, and returns the elements assessed with the appropriate weighting.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_volume" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_volume</span><span class="p">(</span><span class="n">fit_params</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_volume" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Calculates the mesh volume using a gauss point integration scheme.</p>
+<p>:param fit_params: an overide of the standard mesh parameters to use for fitting.
+:returns vol: The estimated volume of the mesh.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.evaluate_strain" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">evaluate_strain</span><span class="p">(</span><span class="n">element_ids</span><span class="p">,</span> <span class="n">xis</span><span class="p">,</span> <span class="n">othr</span><span class="p">,</span> <span class="n">coord_function</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">return_F</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">fit_params</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.evaluate_strain" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Evaluate the Green-Lagrange strain tensor between two mesh states.</p>
+<p>Computes the deformation gradient <strong>F</strong> = J_ref⁻¹ · J_def where J_ref
+is the Jacobian of <em>self</em> (reference configuration) and J_def is the
+Jacobian of <em>othr</em> (deformed configuration), then returns the strain
+tensor <strong>E</strong> = (Fᵀ F − I) / 2.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>element_ids</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>1-D integer array, shape <code>(n_pts,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>xis</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric coordinates, shape <code>(n_pts, ndim)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>othr</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="HOMER.mesher.Mesh(nodes=None, elements=None, jax_compile=False) (HOMER.mesher.Mesh)" href="#HOMER.mesher.Mesh">Mesh</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A :class:<code>MeshField</code> representing the <em>deformed</em> configuration of
+the same topology.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>coord_function</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="typing.Callable">Callable</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional callable <code>(mesh, eles, xis, Jmats) → Jmats</code> that
+re-maps the Jacobian into a local coordinate frame (required for
+2-D manifold meshes).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>return_F</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>True</code>, return the deformation gradient <strong>F</strong> instead of
+the strain tensor <strong>E</strong>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fit_params</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional parameter override for <em>self</em>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jax.numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Green-Lagrange strain tensor <code>E</code>, shape
+<code>(n_pts, ndim, ndim)</code>, or the deformation gradient <strong>F</strong> if
+<em>return_F</em> is <code>True</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If called on a 2-D manifold mesh without supplying <em>coord_function</em>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.get_xi_weight_mat" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_xi_weight_mat</span><span class="p">(</span><span class="n">eles</span><span class="p">,</span> <span class="n">xis</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.get_xi_weight_mat" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build the linear weight matrix for least-squares fitting.</p>
+<p>For each query point <code>(eles[i], xis[i])</code>, evaluates the basis
+function values and places them in the appropriate column positions of
+a global weight matrix <strong>W</strong>, where <code>W[i, j]</code> is the contribution
+of the <em>j</em>-th nodal degree of freedom to the <em>i</em>-th query point.</p>
+<p>This matrix is used by :meth:<code>linear_fit</code>::</p>
+<div class="highlight"><pre><span></span><code>W * node_params = target_values   (solved in a least-squares sense)
+</code></pre></div>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>eles</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>1-D integer array of element indices, shape <code>(n_pts,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>xis</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parametric coordinates, shape <code>(n_pts, ndim)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Weight matrix, shape <code>(n_pts, n_nodes)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.linear_fit" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">linear_fit</span><span class="p">(</span><span class="n">targets</span><span class="p">,</span> <span class="n">weight_mat</span><span class="p">,</span> <span class="n">target_empty</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.linear_fit" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Fit nodal parameters by solving a linear least-squares problem.</p>
+<p>Solves <code>weight_mat @ params ≈ targets</code> via :func:<code>numpy.linalg.lstsq</code>
+and updates the mesh's nodal parameters with the solution.  This is
+the fastest fitting approach when the xi embeddings are fixed (i.e. the
+mesh topology does not change during fitting).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>targets</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target field values, shape <code>(n_pts,)</code> or <code>(n_pts, fdim)</code>.
+Rows equal to <em>target_empty</em> (default <code>-1</code>) are excluded from
+the fit.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>weight_mat</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Weight matrix from :meth:<code>get_xi_weight_mat</code>,
+shape <code>(n_pts, n_nodes)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>target_empty</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Sentinel value used to mask out unused target rows.</p>
+              </div>
+            </td>
+            <td>
+                  <code>-1</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Fixed parameters (set via :meth:<code>MeshNode.fix_parameter</code>) are
+currently <strong>not</strong> respected by this method.  Use the nonlinear
+optimisation pathway (<code>fitting.point_cloud_fit</code>) if constraints
+are required.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.refine" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">refine</span><span class="p">(</span><span class="n">refinement_factor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">by_xi_refinement</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">clean_nodes</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.refine" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Subdivide every element, increasing the mesh resolution.</p>
+<p>Each existing element is replaced by <code>refinement_factor ** ndim</code>
+(or the equivalent for <em>by_xi_refinement</em>) smaller elements sharing
+intermediate nodes.  Derivative values at the new nodes are obtained
+by evaluating the current basis functions.</p>
+<p>Exactly one of <em>refinement_factor</em> or <em>by_xi_refinement</em> must be
+provided.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>refinement_factor</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="int">int</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Integer ≥ 2 that subdivides each parametric direction uniformly.
+For example, <code>refinement_factor=2</code> splits a single element into
+8 sub-elements in 3-D (2 × 2 × 2).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>by_xi_refinement</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="tuple">tuple</span>[<span title="numpy.ndarray">ndarray</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Tuple of 1-D arrays, one per parametric direction, specifying the
+xi values at which to place the new element boundaries.  Each
+array must start with 0 and end with 1.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>clean_nodes</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>True</code> (default), remove unreferenced nodes after
+refinement.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="AssertionError">AssertionError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If both <em>refinement_factor</em> and <em>by_xi_refinement</em> are given, or
+if <em>refinement_factor</em> &lt; 2.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.save" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">save</span><span class="p">(</span><span class="n">loc</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.save" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Saves the mesh to a .json formated file in the given location</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.dump_to_dict" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">dump_to_dict</span><span class="p">()</span></code>
+
+<a href="#HOMER.mesher.MeshField.dump_to_dict" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns a dict structure representing the mesh object, for ease of saving</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.__deepcopy__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">__deepcopy__</span><span class="p">(</span><span class="n">memo</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.__deepcopy__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Dumps the mesh to a dictionairy then rebuilds it to ensure that there is no shared memory between a mesh and it's deepcopy.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.MeshField.rebase" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">rebase</span><span class="p">(</span><span class="n">new_basis</span><span class="p">,</span> <span class="n">in_place</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">res</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.MeshField.rebase" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Convert the mesh to a different set of basis functions.</p>
+<p>Constructs a new :class:<code>MeshField</code> with <em>new_basis</em>, sampling the
+current mesh on a dense xi grid and linearly fitting the new nodal
+parameters to match the sampled geometry.  This allows, for example,
+converting a trilinear (<code>L1Basis</code>) mesh into a cubic-Hermite
+(<code>H3Basis</code>) mesh without losing the shape.</p>
+<p>The three-step algorithm is:</p>
+<ol>
+<li>Determine the new node locations by evaluating the current mesh at
+   the basis node positions of <em>new_basis</em>.</li>
+<li>Sample a fine xi grid in the current basis to get dense geometry
+   samples.</li>
+<li>Linearly fit the new nodal parameters to these samples.</li>
+</ol>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>new_basis</code>
+            </td>
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="type">type</span>[<a class="autorefs autorefs-internal" title="HOMER.basis_definitions.AbstractBasis(fn=None, node_fields=None, weights=None, deriv=None, order=None, node_locs=None)
+
+  
+      dataclass
+   (HOMER.basis_definitions.AbstractBasis)" href="../basis_definitions/#HOMER.basis_definitions.AbstractBasis">AbstractBasis</a>], <span title="type">type</span>[<a class="autorefs autorefs-internal" title="HOMER.basis_definitions.AbstractBasis(fn=None, node_fields=None, weights=None, deriv=None, order=None, node_locs=None)
+
+  
+      dataclass
+   (HOMER.basis_definitions.AbstractBasis)" href="../basis_definitions/#HOMER.basis_definitions.AbstractBasis">AbstractBasis</a>]] | <span title="tuple">tuple</span>[<span title="type">type</span>[<a class="autorefs autorefs-internal" title="HOMER.basis_definitions.AbstractBasis(fn=None, node_fields=None, weights=None, deriv=None, order=None, node_locs=None)
+
+  
+      dataclass
+   (HOMER.basis_definitions.AbstractBasis)" href="../basis_definitions/#HOMER.basis_definitions.AbstractBasis">AbstractBasis</a>], <span title="type">type</span>[<a class="autorefs autorefs-internal" title="HOMER.basis_definitions.AbstractBasis(fn=None, node_fields=None, weights=None, deriv=None, order=None, node_locs=None)
+
+  
+      dataclass
+   (HOMER.basis_definitions.AbstractBasis)" href="../basis_definitions/#HOMER.basis_definitions.AbstractBasis">AbstractBasis</a>], <span title="type">type</span>[<a class="autorefs autorefs-internal" title="HOMER.basis_definitions.AbstractBasis(fn=None, node_fields=None, weights=None, deriv=None, order=None, node_locs=None)
+
+  
+      dataclass
+   (HOMER.basis_definitions.AbstractBasis)" href="../basis_definitions/#HOMER.basis_definitions.AbstractBasis">AbstractBasis</a>]] | <span title="list">list</span>[<span title="type">type</span>[<a class="autorefs autorefs-internal" title="HOMER.basis_definitions.AbstractBasis(fn=None, node_fields=None, weights=None, deriv=None, order=None, node_locs=None)
+
+  
+      dataclass
+   (HOMER.basis_definitions.AbstractBasis)" href="../basis_definitions/#HOMER.basis_definitions.AbstractBasis">AbstractBasis</a>], <span title="type">type</span>[<a class="autorefs autorefs-internal" title="HOMER.basis_definitions.AbstractBasis(fn=None, node_fields=None, weights=None, deriv=None, order=None, node_locs=None)
+
+  
+      dataclass
+   (HOMER.basis_definitions.AbstractBasis)" href="../basis_definitions/#HOMER.basis_definitions.AbstractBasis">AbstractBasis</a>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Sequence of new 1-D basis classes, one per parametric direction.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>in_place</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Currently unused (future: modify <em>self</em> rather than returning a
+new object).</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>res</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of xi grid points per direction used for the linear fit.</p>
+              </div>
+            </td>
+            <td>
+                  <code>10</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="HOMER.mesher.MeshField(nodes=None, elements=None, jax_compile=False) (HOMER.mesher.MeshField)" href="#HOMER.mesher.MeshField">MeshField</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>New mesh with the requested basis functions.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><hr />
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="HOMER.mesher.Mesh" class="doc doc-heading">
+              <code class="highlight language-python"><span class="n">HOMER</span><span class="o">.</span><span class="n">mesher</span><span class="o">.</span><span class="n">Mesh</span><span class="p">(</span><span class="n">nodes</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">elements</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">jax_compile</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.Mesh" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="HOMER.mesher.MeshField(nodes=None, elements=None, jax_compile=False) (HOMER.mesher.MeshField)" href="#HOMER.mesher.MeshField">MeshField</a></code></p>
+
+
+
+        <p>A coordinate mesh that can also carry named secondary fields.</p>
+<p>:class:<code>Mesh</code> extends :class:<code>MeshField</code> by adding a dictionary
+<code>fields</code> that stores secondary :class:<code>MeshField</code> objects.  The
+primary geometry (XYZ world-space coordinates) is stored in the parent
+:class:<code>MeshField</code>, while any secondary quantities such as fibre
+directions, velocities, or material properties are stored as named
+entries in <code>fields</code>.</p>
+<p>Secondary fields are created with :meth:<code>new_field</code> and accessed via
+dictionary-style indexing::</p>
+<div class="highlight"><pre><span></span><code>mesh = Mesh(nodes=[...], elements=[...])
+mesh.new_field(&#39;fibre&#39;, field_dimension=3,
+               field_locs=data_pts, field_values=fibre_vectors,
+               new_basis=[H3Basis]*3)
+fibre_field = mesh[&#39;fibre&#39;]   # MeshField
+</code></pre></div>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>nodes</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshNode(loc, id=None, **kwargs) (HOMER.mesher.MeshNode)" href="#HOMER.mesher.MeshNode">MeshNode</a>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Nodes defining the primary geometry.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>elements</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>] | <a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Elements of the mesh.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>jax_compile</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Pre-compile JAX functions at construction time.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="HOMER.mesher.Mesh.fields">fields</span></code></td>
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="HOMER.mesher.MeshField(nodes=None, elements=None, jax_compile=False) (HOMER.mesher.MeshField)" href="#HOMER.mesher.MeshField">MeshField</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Named secondary fields.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+        <p>Initialise a :class:<code>Mesh</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>nodes</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshNode(loc, id=None, **kwargs) (HOMER.mesher.MeshNode)" href="#HOMER.mesher.MeshNode">MeshNode</a>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Node list (may be <code>None</code> for incremental construction).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>elements</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="list">list</span>[<a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>] | <a class="autorefs autorefs-internal" title="HOMER.mesher.MeshElement(basis_functions, node_indexes=None, node_ids=None, BP_inds=None, id=None) (HOMER.mesher.MeshElement)" href="#HOMER.mesher.MeshElement">MeshElement</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Element or element list.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>jax_compile</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If <code>True</code>, JIT-compile internal functions at construction.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.Mesh.refine" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">refine</span><span class="p">(</span><span class="n">refinement_factor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">by_xi_refinement</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">clean_nodes</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.Mesh.refine" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Refine the primary geometry <em>and</em> all secondary fields simultaneously.</p>
+<p>Calls :meth:<code>MeshField.refine</code> on the coordinate mesh and on every
+field in :attr:<code>fields</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>refinement_factor</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="int">int</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Uniform refinement multiplier (≥ 2).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>by_xi_refinement</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="tuple">tuple</span>[<span title="numpy.ndarray">ndarray</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-direction xi breakpoint arrays.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>clean_nodes</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Remove unreferenced nodes after refinement.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.Mesh.plot" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">plot</span><span class="p">(</span><span class="n">scene</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">node_colour</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">node_size</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">tiling</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="n">mesh_colour</span><span class="o">=</span><span class="s1">&#39;gray&#39;</span><span class="p">,</span> <span class="n">mesh_opacity</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">mesh_width</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">mesh_col_scalar_name</span><span class="o">=</span><span class="s1">&#39;Field&#39;</span><span class="p">,</span> <span class="n">line_colour</span><span class="o">=</span><span class="s1">&#39;black&#39;</span><span class="p">,</span> <span class="n">line_opacity</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">line_width</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">line_col_scalar_name</span><span class="o">=</span><span class="s1">&#39;Field&#39;</span><span class="p">,</span> <span class="n">elem_labels</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">render_name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">field_to_draw</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">field_xi</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">draw_xyz_field</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">field_artist</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">default_field_point_size</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span> <span class="n">default_xi_res</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.Mesh.plot" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Draw the mesh and optionally overlay a secondary field.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>scene</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="pyvista.Plotter">Plotter</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Existing :class:<code>pyvista.Plotter</code>.  When <code>None</code>, a new plotter
+is created and shown.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>node_colour</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Colour for node spheres.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;r&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>node_size</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Node sphere size.</p>
+              </div>
+            </td>
+            <td>
+                  <code>10</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>labels</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>True</code>, add node index labels (forces <em>node_size</em> = 0).</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>tiling</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(xn, yn)</code> tiling for the hexagonal surface overlay.</p>
+              </div>
+            </td>
+            <td>
+                  <code>(10, 6)</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>mesh_colour</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | <span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Surface mesh colour.  Pass a :class:<code>numpy.ndarray</code> to colour-map
+by scalar values.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;gray&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>mesh_opacity</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Surface opacity (0–1).</p>
+              </div>
+            </td>
+            <td>
+                  <code>0.1</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>mesh_width</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Line width for the hex wireframe.</p>
+              </div>
+            </td>
+            <td>
+                  <code>2</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>mesh_col_scalar_name</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Scalar array name used when <em>mesh_colour</em> is an array.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;Field&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>line_colour</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | <span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Colour for the structural edge lines.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;black&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>line_opacity</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Edge line opacity.</p>
+              </div>
+            </td>
+            <td>
+                  <code>1</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>line_width</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Edge line width.</p>
+              </div>
+            </td>
+            <td>
+                  <code>2</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>line_col_scalar_name</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Scalar name for colour-mapped edges.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;Field&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>elem_labels</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>True</code>, label element centres.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>render_name</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Prefix for named actors (allows individual actor replacement in
+an interactive scene).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>field_to_draw</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Name of a secondary field to visualise.  When <code>None</code> only the
+geometry is drawn.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>field_xi</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Custom xi grid at which to evaluate the secondary field.
+Defaults to a uniform grid at <em>default_xi_res</em>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>draw_xyz_field</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>False</code>, suppress drawing of the primary geometry.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>field_artist</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="typing.Callable">Callable</span>[[<span title="pyvista.Plotter">Plotter</span>, <span title="numpy.ndarray">ndarray</span>, <span title="numpy.ndarray">ndarray</span>], None]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Custom callable <code>(plotter, locs, values) → None</code> for rendering
+the secondary field.  Defaults to line segments for 3-D fields
+and coloured spheres for 1-D scalar fields.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>default_field_point_size</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Point size used by the default scalar field artist.</p>
+              </div>
+            </td>
+            <td>
+                  <code>25</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>default_xi_res</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Xi grid resolution for the secondary field visualisation.</p>
+              </div>
+            </td>
+            <td>
+                  <code>4</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.Mesh.new_field" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">new_field</span><span class="p">(</span><span class="n">field_name</span><span class="p">,</span> <span class="n">field_dimension</span><span class="p">,</span> <span class="n">new_basis</span><span class="p">,</span> <span class="n">field_locs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">field_values</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">res</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.Mesh.new_field" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a secondary field and optionally fit it to sample data.</p>
+<p>A secondary field is a :class:<code>MeshField</code> with its own basis
+functions and node topology that is <em>co-located</em> with the primary
+coordinate mesh.  It can represent any spatially varying quantity
+– fibre directions, velocity vectors, pressures, stresses, etc.</p>
+<p>The three-step construction algorithm is:</p>
+<ol>
+<li>Determine the new field node locations by evaluating the primary
+   mesh at the node positions of <em>new_basis</em>.</li>
+<li>If <em>field_locs</em> and <em>field_values</em> are provided, embed the sample
+   points into the mesh with :meth:<code>embed_points</code>.</li>
+<li>Build the linear weight matrix and solve for nodal parameters with
+   :meth:<code>linear_fit</code>.</li>
+</ol>
+<p>After this call, the field is accessible as <code>mesh[field_name]</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>field_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Key used to store and retrieve the new field, e.g.
+<code>'fibre_direction'</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>field_dimension</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Dimensionality of the field values:</p>
+<ul>
+<li><code>1</code> – scalar field (e.g. pressure, temperature, Z-coordinate)</li>
+<li><code>3</code> – 3-D vector field (e.g. fibre direction, velocity)</li>
+</ul>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>new_basis</code>
+            </td>
+            <td>
+                  <code><span title="HOMER.basis_definitions.BasisGroup">BasisGroup</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Sequence of 1-D basis classes for the new field, one per
+parametric direction.  May differ from the primary mesh basis.
+For example, use <code>[H3Basis]*3</code> for a smooth vector field or
+<code>[L1Basis]*3</code> for a piecewise-linear scalar field.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>field_locs</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="numpy.ndarray">ndarray</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Physical-space sample locations where field values are known,
+shape <code>(n_samples, fdim)</code>.  When <code>None</code>, an empty field is
+created without fitting.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>field_values</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="numpy.ndarray">ndarray</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target field values at <em>field_locs</em>, shape
+<code>(n_samples,)</code> for scalars or <code>(n_samples, field_dimension)</code>
+for vectors.  Required if <em>field_locs</em> is provided.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>res</code>
+            </td>
+            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Unused (reserved for future use).</p>
+              </div>
+            </td>
+            <td>
+                  <code>10</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <p>Fit a unit-normal vector field and a scalar height field::</p>
+<div class="highlight"><pre><span></span><code>mesh.new_field(
+    &#39;normals&#39;,
+    field_dimension=3,
+    field_locs=sample_pts,       # shape (N, 3)
+    field_values=normal_vectors, # shape (N, 3)
+    new_basis=[H3Basis, H3Basis, H3Basis],
+)
+mesh.new_field(
+    &#39;height&#39;,
+    field_dimension=1,
+    field_locs=sample_pts,       # shape (N, 3)
+    field_values=sample_pts[:, 2],  # scalar Z values
+    new_basis=[L1Basis, L1Basis, L1Basis],
+)
+
+# Retrieve and evaluate
+normal_field = mesh[&#39;normals&#39;]
+values_at_xis = normal_field.evaluate_embeddings(elem_ids, xis)
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.Mesh.save" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">save</span><span class="p">(</span><span class="n">loc</span><span class="p">)</span></code>
+
+<a href="#HOMER.mesher.Mesh.save" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Saves the mesh to a .json formated file in the given location</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="HOMER.mesher.Mesh.dump_to_dict" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">dump_to_dict</span><span class="p">()</span></code>
+
+<a href="#HOMER.mesher.Mesh.dump_to_dict" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Returns a dict structure representing the mesh object, for ease of saving</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "toc.integrate", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
