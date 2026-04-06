@@ -4,7 +4,7 @@
 
 High Order MEsh Representations.
 
-![Python version](https://img.shields.io/badge/python-3.8-blue)
+![Python version](https://img.shields.io/badge/python-3.10-blue)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 
@@ -12,7 +12,7 @@ High Order MEsh Representations.
 
 ---
 # Overview
-HOMER is an open-source, Python-based (v3.8+) library using [JAX](https://github.com/jax-ml/jax) to define and optimise high order meshes.
+HOMER is an open-source, Python-based (v3.10+) library using [JAX](https://github.com/jax-ml/jax) to define and optimise high order meshes.
 It leverages JAX autodifferentiation for efficient fitting and modelling, while keeping the flexibility of python in loss function definitions.
 Fix that mesh parameter - constrain a node to lie on a plane - express another as a combination of PCA components - HOMER handles your derivatives.
 
@@ -44,6 +44,13 @@ Fix that mesh parameter - constrain a node to lie on a plane - express another a
 | `L4Basis` | Quartic Lagrange | 5 | C⁰ | – |
 
 ---
+
+## Documentation
+
+More detailed documentation is available at: https://abi-breast-biomechanics-group.github.io/HOMER/
+
+___
+
 
 ## Quick Example
 
