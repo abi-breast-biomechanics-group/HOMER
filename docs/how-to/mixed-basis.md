@@ -41,8 +41,8 @@ mesh.plot()
 
 ## H3 × L2 Mixed Surface Mesh
 
-Use `H3Basis` in the *u* direction for smooth derivatives and `L2Basis` in
-the *v* direction for simpler parametric variation:
+Use `H3Basis` in the xi_0 direction for smooth derivatives and `L2Basis` in
+the xi_1 direction for simpler parametric variation:
 
 ```python
 from HOMER import H3Basis, L2Basis
@@ -54,10 +54,6 @@ element = MeshElement(
     basis_functions=(H3Basis, L2Basis),
 )
 ```
-
-!!! note
-    In a mixed element, only nodes contributing to `H3Basis` directions need
-    derivative fields.  Here, `du` is required but `dv` is not.
 
 ---
 

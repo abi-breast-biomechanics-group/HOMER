@@ -80,11 +80,3 @@ mesh = seed.rebase([H3Basis]*3, res=20)  # default res=10
 
 - `rebase()` always returns a **new** `MeshField` object.  The original mesh
   is not modified.
-- The returned object is a `MeshField`, not a `Mesh`.  If you need a `Mesh`
-  with secondary fields after rebasing, wrap it:
-  ```python
-  from HOMER import Mesh
-  from copy import deepcopy
-  rebased = seed.rebase([H3Basis]*3)
-  # Use the returned MeshField directly, or re-assign nodes/elements
-  ```

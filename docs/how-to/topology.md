@@ -87,6 +87,8 @@ directions of the two faces are aligned (``True``) or anti-aligned (``False``).
 
 - The topology exploration uses spatial hashing: two faces are considered
   connected if their midpoint coordinates are equal to 10 decimal places.
+  As the same parameters define this midpoint, they are definitionally equal.
+  This rounding factor can be changed for very small meshes, but maybe just consider a change of scale and make your computer happier.
 - Multi-element junctions (more than 2 elements meeting at a face) are not
   supported and raise a `ValueError`.
 - For 2-D manifold meshes, each element is its own "face" and `topomap` still

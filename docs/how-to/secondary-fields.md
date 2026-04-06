@@ -1,6 +1,6 @@
 # Fitting Secondary Mesh Vector and Scalar Fields
 
-Secondary fields allow you to store *arbitrary* spatially-varying data
+Secondary fields allow you to store arbitrary spatially-varying data
 (fibre directions, velocity vectors, stresses, material properties, etc.)
 as a smooth interpolation over the same mesh topology as the primary geometry.
 
@@ -8,13 +8,13 @@ as a smooth interpolation over the same mesh topology as the primary geometry.
 
 ## Concepts
 
-A **secondary field** is a `MeshField` whose values are not 3-D physical
+A secondary field is a `MeshField` whose values are not 3-D physical
 coordinates but some other quantity:
 
 | Field type | `field_dimension` | Example |
 |---|---|---|
 | Scalar | 1 | pressure, temperature, Z-height |
-| 3-D vector | 3 | fibre direction, velocity, surface normal |
+| n-D vector | n | fibre direction, velocity, surface normal |
 
 Secondary fields:
 
@@ -158,7 +158,8 @@ values = fibre_field.evaluate_embeddings(elem_ids, xis)  # (3, 3)
 # Or across the whole mesh at once
 all_values = fibre_field.evaluate_embeddings_in_every_element(
     mesh.xi_grid(5)
-)  # (n_elements * 125, 3)
+)  # (n_elements * 125, 3):wa
+
 ```
 
 ---

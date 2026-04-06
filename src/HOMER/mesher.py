@@ -2203,6 +2203,8 @@ class Mesh(MeshField):
         jax_compile:
             If ``True``, JIT-compile internal functions at construction.
         """
+        super().__init__(nodes, elements, jax_compile)
+        self.fields = {}
 
     def __getitem__(self, input: str) -> MeshField:
         return self.fields[input]

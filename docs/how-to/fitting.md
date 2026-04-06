@@ -1,11 +1,14 @@
 # Mesh Fitting and Optimisation
 
-HOMER offers two main fitting strategies:
+HOMER offers two main pre-built fitting strategies:
 
 1. **Linear least-squares** (`get_xi_weight_mat` + `linear_fit`) – fast when
    the parametric embeddings are fixed.
 2. **Nonlinear optimisation** (`point_cloud_fit` + `scipy.optimize`) – for
    free-form shape optimisation against a point cloud.
+
+However, as HOMER uses JAX to implement the mesh representations, it allows very expressive manipulations of mesh geometry.
+Importantly, this still provides the ability to automatically define Jacobians on these manipulations.
 
 ---
 

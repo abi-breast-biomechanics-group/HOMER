@@ -18,7 +18,7 @@ from HOMER import Mesh, MeshNode, MeshElement, H3Basis
 # Every node needs: du, dv, dw, dudv, dudw, dvdw, dudvdw
 def corner_node(loc, dw):
     return MeshNode(
-        loc=np.array(loc),
+        loc=np.array(loc), 
         du=np.zeros(3), dv=np.zeros(3), dw=np.array(dw),
         dudv=np.zeros(3), dudw=np.zeros(3),
         dvdw=np.zeros(3), dudvdw=np.zeros(3),
@@ -61,8 +61,9 @@ element = MeshElement(
 ```
 
 !!! note
-    Nodes used with `L1Basis` in a given direction do **not** need the
-    corresponding derivative field (`dw` in this example).
+    Nodes used with `L1Basis` in a given direction do **not** need a derivative field.
+    By convention, we use `du`for the first derivative dimension, `dv` the second, and `dw` the third.
+    An L1H3H3 mesh will still have the derivative fields `du`, `dv`, `dudv`.
 
 ---
 
@@ -79,15 +80,15 @@ wedge_element = MeshElement(
 )
 ```
 
-Collapsed elements are useful when the mesh must conform to a curved boundary
-that tapers to a line or point.
+Collapsed elements are useful for certain geometries with a shared central point.
 
 ---
 
-## Building from a Trilinear Seed
+## Building from a Trilinear Base Mesh
 
 A convenient workflow is to create a coarse `L1` × `L1` × `L1` mesh, then
-*rebase* it to `H3`:
+rebase it to the desired configuration (e.g. `H3`).
+This is especially useful for `H3` meshes, which otherwise have large numbers of non-zero derivatives:
 
 ```python
 from HOMER.geometry import cube
@@ -106,7 +107,7 @@ mesh = seed.rebase([H3Basis, H3Basis, H3Basis])
 
 ---
 
-## Evaluating Volume Quantities
+## Evaluating Mesh Quantities
 
 ```python
 import numpy as np

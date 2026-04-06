@@ -44,7 +44,7 @@ grid = np.tile(grid, (4,1))
 elems = np.repeat([0,1,2,3], res**2)
 
 target_points = target_mesh.evaluate_ele_xi_pair_embeddings(elems, grid)
-print(target_points)
+# print(target_points)
 
 ################## Show the initial fit
 s = pv.Plotter()

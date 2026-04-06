@@ -4,6 +4,8 @@
 correspond to given physical-space points.  This is the first step in many
 workflows: fitting secondary fields, evaluating data at mesh locations, or
 computing embedding errors.
+This uses a JAX based backend, so is still relatively performant, even for large numbers of points.
+Future versions of HOMER will include an embedding deriv function, which returns the sparse derivatives of the underlying function.
 
 ---
 
@@ -33,7 +35,6 @@ Set `verbose=2` to print mean and max residual errors:
 elem_ids, xis = mesh.embed_points(pts, verbose=2)
 # final mean error of 0.0012 units, max error of 0.0041
 ```
-
 Set `verbose=3` to render an interactive visualisation of the embedding
 errors with PyVista.
 
@@ -43,6 +44,8 @@ errors with PyVista.
 
 When `return_residual=True`, the function returns the vector distance between
 each query point and its nearest mesh location:
+This is a fully JAX compliant function, so can be used in optimisation.
+However, it is currently dense and quickly becomes prohibitively expensive to compute.
 
 ```python
 (elem_ids, xis), residuals = mesh.embed_points(pts, return_residual=True)
@@ -70,6 +73,7 @@ them as `init_elexi` to skip the coarse nearest-neighbour search:
 
 ## Surface Embedding (3-D Volume Meshes)
 
+Often, volumetric data provides point surfaces, which must be embedded into the surface of the mesh.
 To restrict the search to the external faces of a volume mesh, pass
 `surface_embed=True`:
 
