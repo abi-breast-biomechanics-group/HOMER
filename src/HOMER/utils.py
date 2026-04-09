@@ -21,6 +21,37 @@ import jax
 import functools
 
 
+def spheres_to_polydata(verts: np.ndarray, faces: np.ndarray) -> pv.PolyData:
+    """
+    Build a single PolyData from many 'sphere' instances.
+    The sphere doesn't actually need to be spherical, just keeps similar connectvitiy.
+
+    Parameters
+    ----------
+    verts : np.ndarray, shape (M, N, 3)
+        M spheres, each with N vertices (x, y, z).
+    faces : np.ndarray, shape (F,)
+        Shared connectivity in PyVista flat format: [3, i, j, k, 3, ...].
+        Must be triangles (all polygons size 3).
+
+    Returns
+    -------
+    pv.PolyData
+        A single merged mesh representing all M spheres.
+    """
+    M, N, _ = verts.shape
+
+    # Reshape to (num_triangles, 4) so we can offset only the index columns
+    face_block = faces.reshape(-1, 4)       # [[3, i, j, k], ...]
+    offsets = (np.arange(M) * N).reshape(M, 1, 1)          # (M, 1, 1)
+    face_block_tiled = np.tile(face_block, (M, 1, 1))       # (M, F, 4)
+    face_block_tiled[:, :, 1:] += offsets  # shift only i,j,k — leave the '3' alone
+
+    all_faces = face_block_tiled.reshape(-1)
+    all_verts = verts.reshape(-1, 3)
+
+    return pv.PolyData(all_verts, all_faces)
+
 @functools.partial(jax.jit, static_argnames=["k"])
 def jax_aknn(d0, d1, k):
     """
