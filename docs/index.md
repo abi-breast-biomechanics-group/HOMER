@@ -49,14 +49,21 @@ mesh.plot()
 
 ### Installation
 
+Currently, installation requires cloning this repository:
 ```bash
-pip install HOMER
+git clone https://github.com/abi-breast-biomechanics-group/HOMER
+cd HOMER
+```
+
+then install via pip (preferably within a conda env)
+```bash
+pip install -e .
 ```
 
 For the optional documentation extras:
 
 ```bash
-pip install "HOMER[docs]"
+pip install -e ".[docs]"
 ```
 
 ### Key Concepts

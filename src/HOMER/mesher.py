@@ -1470,7 +1470,7 @@ class MeshField:
         """
 
         @jax.custom_jvp
-        def mesh_embed_points(points, verbose=0, init_elexi=None, fit_params=None, surface_embed=False, iterations=3):
+        def mesh_embed_points(points, init_elexi=None, fit_params=None, surface_embed=False, iterations=3):
             """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
             Uses an approximate nearest-neighbour search on a coarse xi grid to
@@ -1656,7 +1656,7 @@ class MeshField:
             fit_params = self.optimisable_param_array
 
         points = jnp.atleast_2d(points) #ensure correct shape and type
-        (elem_num, embedded), residual =  mesh_embed_points(points, verbose, init_elexi, fit_params, surface_embed, iterations)
+        (elem_num, embedded), residual =  mesh_embed_points(points, init_elexi, fit_params, surface_embed, iterations)
 
         if verbose >= 2:
             final_mean_dist = np.mean(np.linalg.norm(np.asarray(residual), axis=-1))
