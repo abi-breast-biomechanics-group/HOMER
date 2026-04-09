@@ -105,12 +105,12 @@ def parse_mesh_from_dict(dict_rep:dict) -> Mesh:
             obj_mesh.add_element(MeshElement(
                 node_indexes=elem_def['nodes'], 
                 basis_functions=[STR_LOOKUP[k] for k in elem_def['basis']],
-            ))
+            ), generate_mesh=False)
         else:
             obj_mesh.add_element(MeshElement(
                 node_ids=elem_def['nodes'], 
                 basis_functions=[STR_LOOKUP[k] for k in elem_def['basis']],
-            ))
+            ), generate_mesh=False)
     obj_mesh.generate_mesh()
     return obj_mesh
 

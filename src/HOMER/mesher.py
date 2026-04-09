@@ -904,12 +904,13 @@ class MeshField:
         self.nodes.append(node)
         # self.generate_mesh()
 
-    def add_element(self, element:MeshElement) -> None:
+    def add_element(self, element:MeshElement, generate_mesh=True) -> None:
         """
         Adds an element to the element list.
         """
         self.elements.append(element)
-        self.generate_mesh()
+        if generate_mesh:
+            self.generate_mesh()
 
     def get_element(self, element_ids: list) -> list[MeshElement]:
         """
