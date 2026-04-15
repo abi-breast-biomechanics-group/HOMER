@@ -1786,9 +1786,7 @@ class MeshField:
             deriv_self = coord_function(self, element_ids, xis, deriv_self)
             deriv_othr = coord_function(othr, element_ids, xis, deriv_othr)
         
-        # str_tensor = jnp.linalg.inv(deriv_self) @ deriv_othr
-        F = jnp.linalg.solve(deriv_self, deriv_othr)
-        # F = str_tensor.reshape(-1, self.ndim, self.ndim)
+        F = jnp.matrix_transpose(jnp.linalg.solve(jnp.matrix_transpose(deriv_self), jnp.matrix_transpose(deriv_othr)))
         if return_F:
             return F
   
