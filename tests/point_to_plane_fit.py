@@ -37,7 +37,7 @@ pts = np.random.rand(1000, 3)
 pts[:, 0] = 0.3
 
 #look at an initial embedding:
-mesh.embed_points(pts, verbose=3)
+# mesh.embed_points(pts, verbose=3)
 
 def loc_dist(params):
     _, res = mesh.embed_points(pts, fit_params=params, return_residual=True)
