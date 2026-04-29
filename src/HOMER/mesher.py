@@ -1340,9 +1340,10 @@ class MeshField:
 
             map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
             params = jnp.asarray(fit_params)[map]
-            p_array = params[jnp.asarray(element_ids).astype(int)]
             outputs = jax.vmap(lambda x: self.elem_evals(x, jnp.asarray(xis)).reshape(-1,self.fdim))
-            res = outputs(p_array)
+            res = outputs(
+                params
+            )
             return res.reshape(-1,self.fdim)
         
         self.evaluate_embeddings = evaluate_embeddings
@@ -1363,10 +1364,9 @@ class MeshField:
 
             map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
             params = jnp.asarray(fit_params)[map]
-            p_array = params[jnp.asarray(element_ids).astype(int)]
 
             outputs = jax.vmap(lambda x: self.elem_deriv_evals(x, jnp.asarray(xis), derivs).reshape(-1,self.fdim))
-            res = outputs(p_array)
+            res = outputs(params)
             return res.reshape(-1,self.fdim)
         
         self.evaluate_deriv_embeddings = evaluate_deriv_embeddings
