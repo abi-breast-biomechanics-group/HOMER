@@ -1,6 +1,7 @@
 import pyvista as pv
 from scipy.spatial import KDTree
 import numpy as np
+import jax
 
 from scipy.optimize import least_squares
 
@@ -42,6 +43,9 @@ pts[:, 0] = 0.3
 def loc_dist(params):
     _, res = mesh.embed_points(pts, fit_params=params, return_residual=True)
     return res.flatten()                 
+
+test = jax.jacfwd(loc_dist)
+test(mesh.optimisable_param_array)
                             
 fitting_function, jacobian_fun = jacobian(loc_dist, init_estimate=mesh.optimisable_param_array)
 res = least_squares(fitting_function, x0=mesh.optimisable_param_array, jac=jacobian_fun, verbose=2)

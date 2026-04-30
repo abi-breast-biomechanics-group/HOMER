@@ -1729,8 +1729,6 @@ class MeshField:
             )(elem_num, init_xi, points, mf_pt, jnp.linalg.norm(test_res, axis=-1))
 
             # elem_num, embedded, res = elem_num, init_xi, test_res
-
-
             return (elem_num, embedded), res
 
         
@@ -1750,7 +1748,7 @@ class MeshField:
 
             """
             #testing value
-            # correct_primal, correct_tangent = jax.jvp(mesh_embed_points_test, primals=primal, tangents=tangent)
+            correct_primal, correct_tangent = jax.jvp(mesh_embed_points_test, primals=primal, tangents=tangent)
 
             #primal computation.
             (ele, xi), res = primal_out = mesh_embed_points(*primal)
@@ -1781,6 +1779,7 @@ class MeshField:
             xi_d_param = mapped_lsq(jacs, xi_rel_motion_param)
 
             tangent_out = ((jnp.zeros_like(ele, dtype=jax.float0), xi_d_point + xi_d_param), (res_d_point + res_d_param)[:, None])
+            breakpoint()
 
             return primal_out, tangent_out
 
