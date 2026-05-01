@@ -30,6 +30,7 @@ import functools
 from os import PathLike
 from typing import Optional, Callable
 import typing
+from jaxlib.mlir._mlir_libs import append_load_on_create_dialect
 import numpy as np
 import jax.numpy as jnp
 import jax
@@ -1167,6 +1168,7 @@ class MeshField:
         # test_faces = self.get_faces()
         self.faces = faces
         self.bmap = bmap
+        self._topo_lookup = lookup_arr
         # print('.')
         # raise ValueError
 
@@ -1194,6 +1196,47 @@ class MeshField:
             return out_ele, out_xi, map_valid
 
         self.topomap = topomap
+
+    def get_xi_surface_nodes(self, xi_dim, bound_val):
+        """
+        Given a xi dim, and the boundary value, uses the known mesh topology to find all elements 
+        which have no neighbouring elements at that boundary.
+        Then uses the xi_weight mat to find the relative weightings of values in the mesh.
+        """
+        if self.ndim == 2:
+            raise ValueError("everything on a 2d mesh is a surface, but requested to find surface elements")
+
+        #find the elements
+        valid_elements = np.where(self._topo_lookup[:, xi_dim, bound_val] == -1)[0]
+
+
+        #find the nodes
+        xiq_grid = np.mgrid[:5,:5]
+        xiq_grid = np.column_stack((xiq_grid[0].flatten(), xiq_grid[1].flatten()))/4
+        xiq_pt = np.ones((5**2)) * bound_val
+        xi_query = np.insert(xiq_grid, xi_dim, xiq_pt, axis=1)
+        xi_query = np.tile(xi_query, (len(valid_elements), 1))
+
+        eles_to_q= np.repeat(valid_elements, 5**2)
+        mat = self.get_xi_weight_mat(eles_to_q, xi_query) #this should be 1/3rd of the params
+        pams = np.repeat(np.any(mat > 0, axis=0), 3)
+
+        valid_nodes = []
+        for idn, node in enumerate(self.nodes):
+            append = False 
+            sval, pams = pams[:self.fdim], pams[self.fdim:]
+            if np.any(sval):
+                append = True
+            for key, value in node.items():
+                l_val = value.flatten().shape[0]
+                sval, pams = pams[:l_val], pams[l_val:] 
+                if np.any(sval):
+                    append = True
+            if append:
+                valid_nodes.append(idn)
+
+        return valid_elements, valid_nodes
+
 
     def get_faces(self, rounding_res = 10) -> list[tuple[int]]:
         """
@@ -1425,83 +1468,18 @@ class MeshField:
 
         residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
         return (elem_f, xi_f), residual
-    # @partial(jax.jit, static_argnames=("self", "iterations", "ls_max_steps"))
-    # def _xis_to_points(
-    #     self,
-    #     elem,
-    #     xi0,
-    #     x_target,
-    #     lbound,
-    #     iterations,
-    #     fit_params=None,
-    #     alpha0=1.0,
-    #     c=1e-4,              # sufficient decrease factor
-    #     tau=0.5,             # backtracking shrink
-    #     alpha_min=1e-6,
-    #     ls_max_steps=10,
-    # ):
-    #     """
-    #     Iterative solve with JAX-compatible backtracking line search.
-    #     Returns: ((elem, xi), residual)
-    #     """
-    #
-    #     def phi(elem_i, xi_i):
-    #         # Objective = 1/2 ||F(xi)-x_target||^2
-    #         res = self.evaluate_embeddings(elem_i, xi_i, fit_params=fit_params)[0] - x_target
-    #         return 0.5 * jnp.vdot(res, res), res
-    #
-    #     def outer_body(_, state):
-    #         elem_i, xi_i = state
-    #
-    #         f0, r = phi(elem_i, xi_i)
-    #         p = self._solve_RHS(elem_i, xi_i, r, lbound, fit_params=fit_params)
-    #
-    #         # directional derivative surrogate: grad approx via p; if unavailable, use conservative test only
-    #         # Armijo-like target using ||p||^2 as proxy descent measure
-    #         p_norm_sq = jnp.vdot(p, p)
-    #
-    #         def ls_cond(ls_state):
-    #             k, alpha, best_elem, best_xi, accepted = ls_state
-    #             return (k < ls_max_steps) & (~accepted) & (alpha >= alpha_min)
-    #
-    #         def ls_body(ls_state):
-    #             k, alpha, _, _, _ = ls_state
-    #             xi_trial = xi_i + alpha * p
-    #             elem_t, xi_t, _ = self.topomap(elem_i, xi_trial)
-    #             f_t, _ = phi(elem_t, xi_t)
-    #             # Armijo-like sufficient decrease
-    #             accept = f_t <= (f0 - c * alpha * p_norm_sq)
-    #
-    #             alpha_next = jnp.where(accept, alpha, alpha * tau)
-    #             best_elem = jnp.where(accept, elem_t, elem_i)
-    #             best_xi = jnp.where(accept, xi_t, xi_i)
-    #
-    #             return (k + 1, alpha_next, best_elem, best_xi, accept)
-    #
-    #         init_ls = (jnp.array(0), jnp.asarray(alpha0, xi_i.dtype), elem_i, xi_i, jnp.array(False))
-    #         _, alpha_fin, elem_acc, xi_acc, accepted = jax.lax.while_loop(ls_cond, ls_body, init_ls)
-    #
-    #         # Fallback small step if never accepted
-    #         def fallback_step(_):
-    #             xi_trial = xi_i + jnp.maximum(alpha_fin, alpha_min) * p
-    #             elem_t, xi_t, _ = self.topomap(elem_i, xi_trial)
-    #             return elem_t, xi_t
-    #
-    #         elem_next, xi_next = jax.lax.cond(
-    #             accepted,
-    #             lambda _: (elem_acc, xi_acc),
-    #             fallback_step,
-    #             operand=None
-    #         )
-    #
-    #         return (elem_next, xi_next)
-    #
-    #     elem_f, xi_f = jax.lax.fori_loop(
-    #         0, iterations, outer_body, (elem.astype(jnp.int32), xi0)
-    #     )
-    #
-    #     residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
-    #     return (elem_f, xi_f), residual
+
+
+
+
+
+
+
+
+
+
+
+
 
     def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=3):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
