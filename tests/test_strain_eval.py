@@ -31,6 +31,11 @@ mesh_def.linear_fit(wlocs_def, weight_mat=wmat)
 # evaluate the strain field over this deformation
 grid = mesh.xi_grid(res=5)
 strains = mesh.evaluate_strain_in_every_element(grid, mesh_def)
+
+
+mesh.plot_strains(eles = np.zeros(grid.shape[0]), xis = grid, strains = strains)
+
+
 slocs = mesh.evaluate_embeddings(0, grid)
 svecs = mesh_def.evaluate_jacobians(0, grid)
 
