@@ -1425,7 +1425,7 @@ class MeshField:
         residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
         return (elem_f, xi_f), residual
     
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=3):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
         Uses an approximate nearest-neighbour search on a coarse xi grid to
@@ -1468,270 +1468,94 @@ class MeshField:
             (Only when *return_residual* is ``True``) Embedding error
             vectors, shape ``(n_pts, fdim)``.
         """
-        def mesh_embed_points_test(points, fit_params, init_elexi=None, surface_embed=False, iterations=3):
-            """Find the parametric coordinates (element, xi) for a set of physical-space points.
-
-            Uses an approximate nearest-neighbour search on a coarse xi grid to
-            obtain initial estimates, then refines with a JAX-accelerated RK4
-            fixed-iteration descent (see :meth:`_xis_to_points`).  Topology
-            mapping (:meth:`topomap`) is applied at each iteration so that points
-            near element boundaries are correctly assigned to neighbouring
-            elements.
-
-            Parameters
-            ----------
-            points:
-                Physical-space query points, shape ``(n_pts, fdim)``.
-            verbose:
-                Verbosity level.  ``0`` → silent; ``2`` → print mean/max
-                residual; ``3`` → also render an error visualisation with
-                PyVista.
-            init_elexi:
-                Pre-computed initial ``(elem_num, xis)`` tuple.  When supplied,
-                the coarse nearest-neighbour search is skipped.
-            fit_params:
-                Optional parameter override for the mesh geometry.
-            return_residual:
-                When ``True``, returns a ``((elem_num, embedded), residual)``
-                tuple instead of just ``(elem_num, embedded)``.
-            surface_embed:
-                Restrict the coarse search to the surface faces of a 3-D mesh.
-            iterations:
-                Number of RK4 refinement iterations.
-
-            Returns
-            -------
-            elem_num : jnp.ndarray
-                Element index for each query point, shape ``(n_pts,)``.
-            embedded : jnp.ndarray
-                Parametric coordinates, shape ``(n_pts, ndim)``.
-            residual : jnp.ndarray
-                (Only when *return_residual* is ``True``) Embedding error
-                vectors, shape ``(n_pts, fdim)``.
-            """
-
-            points = jnp.atleast_2d(points) #ensure correct shape and type
-            
-            if init_elexi is None: #do a coarse embedding
-                if self.elements[0].ndim == 2:
-                    res = 40
-                    xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
-                    ndim = 2
-                    coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-                    test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-                    i = i_data[:, 0]
-                    elem_num = i // xis.shape[0]
-                    init_xi = xis[i % xis.shape[0]]
-
-                    #TODO 2D manifold embedding, it should maube be exactly the same
-                    at_lo = init_xi < 1e-6
-                    at_hi = init_xi > 1 - 1e-6
-                    mf_pt = at_lo | at_hi
-                else:
-                    res = 40
-                    ndim = 3
-                    if not surface_embed:
-                        # Build interior grid
-                        xis = self.xi_grid(res, 3, boundary_points=True)
-                        n_pts = xis.shape[0]          # grid points per element
-                        coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-                        test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-
-                        i = i_data[:, 0]
-                        elem_num = i // xis.shape[0]
-                        init_xi = xis[i % xis.shape[0]]
-                        
-                        init_ests = self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
-                        J_init = self.eval_numeric_jac_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
-                        proj_dir = jnp.sum((points - init_ests)[:, :, None] * J_init, axis=1) > 0
-
-                        # a further check is necessary here: does the mf edge actually sit on a boundary?
-
-                        at_lo = init_xi < 1e-6
-                        at_hi = init_xi > 1 - 1e-6
-                        
-                        mf_lo = at_lo & ~proj_dir #is the point on the manifold?
-                        mf_hi = at_hi & proj_dir
-                        init_xi += (~mf_lo & at_lo) * 2e-2 - (~mf_hi & at_hi)*2e-2
-
-                        mf_pt = mf_lo | mf_hi
-
-                    else:
-                        # surface_embed=True: embed on self surface faces only (unchanged)
-                        faces = self.faces
-                        face_pts = []
-                        elem_pts = []
-                        xi_pts = []
-                        xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
-                        for face in faces:
-                            grid_def = xi3grid[face[1], face[2]]
-                            elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
-                            xi_pts.append(grid_def)
-                            face_pts.append(self.evaluate_embeddings(jnp.array([face[0]]),grid_def))
-                        coarse_pts = jnp.concatenate(face_pts, axis=0)
-                        elems = jnp.concatenate(elem_pts, axis=0)
-                        xis = jnp.concatenate(xi_pts, axis=0)
-                        test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-                        i = i_data[:, 0]
-                        elem_num = elems[i]
-                        init_xi  = xis[i]
-
-                        at_lo = init_xi < 1e-6
-                        at_hi = init_xi > 1 - 1e-6
-                        mf_pt = at_lo | at_hi
-            else:
-                elem_num, init_xi = init_elexi
-                elem_num = jnp.atleast_1d(elem_num)
-                init_xi = jnp.atleast_2d(init_xi)
-                ndim = self.elements[0].ndim
-
-                test_res = points - self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi)
-
-                at_lo = init_xi < 1e-6
-                at_hi = init_xi > 1 - 1e-6
-                mf_pt = at_lo | at_hi
-
-            (elem_num, embedded), res = jax.vmap(
-                lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
-            )(elem_num, init_xi, points, mf_pt, jnp.linalg.norm(test_res, axis=-1))
-
-            # elem_num, embedded, res = elem_num, init_xi, test_res
-
-
-            return (elem_num, embedded), res
-
-        @jax.custom_jvp
-        def mesh_embed_points(points, fit_params, init_elexi=None, surface_embed=False, iterations=3):
-            """Find the parametric coordinates (element, xi) for a set of physical-space points.
-
-            Uses an approximate nearest-neighbour search on a coarse xi grid to
-            obtain initial estimates, then refines with a JAX-accelerated RK4
-            fixed-iteration descent (see :meth:`_xis_to_points`).  Topology
-            mapping (:meth:`topomap`) is applied at each iteration so that points
-            near element boundaries are correctly assigned to neighbouring
-            elements.
-
-            Parameters
-            ----------
-            points:
-                Physical-space query points, shape ``(n_pts, fdim)``.
-            verbose:
-                Verbosity level.  ``0`` → silent; ``2`` → print mean/max
-                residual; ``3`` → also render an error visualisation with
-                PyVista.
-            init_elexi:
-                Pre-computed initial ``(elem_num, xis)`` tuple.  When supplied,
-                the coarse nearest-neighbour search is skipped.
-            fit_params:
-                Optional parameter override for the mesh geometry.
-            return_residual:
-                When ``True``, returns a ``((elem_num, embedded), residual)``
-                tuple instead of just ``(elem_num, embedded)``.
-            surface_embed:
-                Restrict the coarse search to the surface faces of a 3-D mesh.
-            iterations:
-                Number of RK4 refinement iterations.
-
-            Returns
-            -------
-            elem_num : jnp.ndarray
-                Element index for each query point, shape ``(n_pts,)``.
-            embedded : jnp.ndarray
-                Parametric coordinates, shape ``(n_pts, ndim)``.
-            residual : jnp.ndarray
-                (Only when *return_residual* is ``True``) Embedding error
-                vectors, shape ``(n_pts, fdim)``.
-            """
-
-            points = jnp.atleast_2d(points) #ensure correct shape and type
-            
-            if init_elexi is None: #do a coarse embedding
-                if self.elements[0].ndim == 2:
-                    res = 40
-                    xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
-                    ndim = 2
-                    coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-                    test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-                    i = i_data[:, 0]
-                    elem_num = i // xis.shape[0]
-                    init_xi = xis[i % xis.shape[0]]
-
-                    #TODO 2D manifold embedding, it should maube be exactly the same
-                    at_lo = init_xi < 1e-6
-                    at_hi = init_xi > 1 - 1e-6
-                    mf_pt = at_lo | at_hi
-                else:
-                    res = 40
-                    ndim = 3
-                    if not surface_embed:
-                        # Build interior grid
-                        xis = self.xi_grid(res, 3, boundary_points=True)
-                        n_pts = xis.shape[0]          # grid points per element
-                        coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-                        test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-
-                        i = i_data[:, 0]
-                        elem_num = i // xis.shape[0]
-                        init_xi = xis[i % xis.shape[0]]
-                        
-                        init_ests = self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
-                        J_init = self.eval_numeric_jac_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
-                        proj_dir = jnp.sum((points - init_ests)[:, :, None] * J_init, axis=1) > 0
-
-                        # a further check is necessary here: does the mf edge actually sit on a boundary?
-
-                        at_lo = init_xi < 1e-6
-                        at_hi = init_xi > 1 - 1e-6
-                        
-                        mf_lo = at_lo & ~proj_dir #is the point on the manifold?
-                        mf_hi = at_hi & proj_dir
-                        init_xi += (~mf_lo & at_lo) * 2e-2 - (~mf_hi & at_hi)*2e-2
-
-                        mf_pt = mf_lo | mf_hi
-
-                    else:
-                        # surface_embed=True: embed on self surface faces only (unchanged)
-                        faces = self.faces
-                        face_pts = []
-                        elem_pts = []
-                        xi_pts = []
-                        xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
-                        for face in faces:
-                            grid_def = xi3grid[face[1], face[2]]
-                            elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
-                            xi_pts.append(grid_def)
-                            face_pts.append(self.evaluate_embeddings(jnp.array([face[0]]),grid_def))
-                        coarse_pts = jnp.concatenate(face_pts, axis=0)
-                        elems = jnp.concatenate(elem_pts, axis=0)
-                        xis = jnp.concatenate(xi_pts, axis=0)
-                        test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-                        i = i_data[:, 0]
-                        elem_num = elems[i]
-                        init_xi  = xis[i]
-
-                        at_lo = init_xi < 1e-6
-                        at_hi = init_xi > 1 - 1e-6
-                        mf_pt = at_lo | at_hi
-            else:
-                elem_num, init_xi = init_elexi
-                elem_num = jnp.atleast_1d(elem_num)
-                init_xi = jnp.atleast_2d(init_xi)
-                ndim = self.elements[0].ndim
-
-                test_res = points - self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi)
-
-                at_lo = init_xi < 1e-6
-                at_hi = init_xi > 1 - 1e-6
-                mf_pt = at_lo | at_hi
-
-            (elem_num, embedded), res = jax.vmap(
-                lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
-            )(elem_num, init_xi, points, mf_pt, jnp.linalg.norm(test_res, axis=-1))
-
-            # elem_num, embedded, res = elem_num, init_xi, test_res
-            return (elem_num, embedded), res
-
         
+        @jax.custom_jvp
+        def mesh_embed_points(points, fit_params):
+            points = jnp.atleast_2d(points) #ensure correct shape and type
+            if init_elexi is None: #do a coarse embedding
+                if self.elements[0].ndim == 2:
+                    res = 40
+                    xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
+                    ndim = 2
+                    coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
+                    test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+                    i = i_data[:, 0]
+                    elem_num = i // xis.shape[0]
+                    init_xi = xis[i % xis.shape[0]]
+
+                    #TODO 2D manifold embedding, it should maube be exactly the same
+                    at_lo = init_xi < 1e-6
+                    at_hi = init_xi > 1 - 1e-6
+                    mf_pt = at_lo | at_hi
+                else:
+                    res = 40
+                    if not surface_embed:
+                        # Build interior grid
+                        xis = jnp.array(self.xi_grid(res, 3, boundary_points=True))
+                        n_pts = xis.shape[0]          # grid points per element
+                        coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
+                        test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+
+                        i = i_data[:, 0]
+                        elem_num = jnp.array(i // xis.shape[0])
+                        init_xi = xis[i % jnp.array(xis.shape[0])]
+                        
+                        init_ests = self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
+                        J_init = self.eval_numeric_jac_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
+                        proj_dir = jnp.sum((points - init_ests)[:, :, None] * J_init, axis=1) > 0
+
+                        # a further check is necessary here: does the mf edge actually sit on a boundary?
+
+                        at_lo = init_xi < 1e-6
+                        at_hi = init_xi > 1 - 1e-6
+                        
+                        mf_lo = at_lo & ~proj_dir #is the point on the manifold?
+                        mf_hi = at_hi & proj_dir
+                        init_xi += (~mf_lo & at_lo) * 2e-2 - (~mf_hi & at_hi)*2e-2
+
+                        mf_pt = mf_lo | mf_hi
+
+                    else:
+                        # surface_embed=True: embed on self surface faces only (unchanged)
+                        faces = self.faces
+                        face_pts = []
+                        elem_pts = []
+                        xi_pts = []
+                        xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
+                        for face in faces:
+                            grid_def = xi3grid[face[1], face[2]]
+                            elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
+                            xi_pts.append(grid_def)
+                            face_pts.append(self.evaluate_embeddings(jnp.array([face[0]]),grid_def))
+                        coarse_pts = jnp.concatenate(face_pts, axis=0)
+                        elems = jnp.concatenate(elem_pts, axis=0)
+                        xis = jnp.concatenate(xi_pts, axis=0)
+                        test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+                        i = i_data[:, 0]
+                        elem_num = elems[i]
+                        init_xi  = xis[i]
+
+                        at_lo = init_xi < 1e-6
+                        at_hi = init_xi > 1 - 1e-6
+                        mf_pt = at_lo | at_hi
+            else:
+                elem_num, init_xi = init_elexi
+                elem_num = jnp.atleast_1d(elem_num)
+                init_xi = jnp.atleast_2d(init_xi)
+                ndim = self.elements[0].ndim
+
+                test_res = points - self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi)
+
+                at_lo = init_xi < 1e-6
+                at_hi = init_xi > 1 - 1e-6
+                mf_pt = at_lo | at_hi
+
+            (elem_num, embedded), res = jax.vmap(
+                lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
+            )(elem_num, init_xi, points, mf_pt, jnp.linalg.norm(test_res, axis=-1))
+
+            # elem_num, embedded, res = elem_num, init_xi, test_res
+            return (elem_num, embedded), res
 
 
         @mesh_embed_points.defjvp
@@ -1747,39 +1571,53 @@ class MeshField:
             res is useful for fitting.
 
             """
-            #testing value
-            correct_primal, correct_tangent = jax.jvp(mesh_embed_points_test, primals=primal, tangents=tangent)
 
             #primal computation.
             (ele, xi), res = primal_out = mesh_embed_points(*primal)
             res = res.squeeze()
             #local tangent spaces.
-            point_dot, param_dot, _, _, _ = tangent
+            point_dot, param_dot = tangent
             params = primal[1] #the only really important thing from the primals
 
             res_mag = jnp.linalg.norm(res, axis=-1)
             approx_normals = res / jnp.maximum(res_mag, 1e-6)[:, None] #if the residual is tiny, then fully embedded.
 
             #given a delta_params, how will the output change.
-            deriv_fn = jax.jacfwd(lambda e, x, f: self.evaluate_embeddings_ele_xi_pair(e, x, fit_params=f), argnums=2)
-            param_shift = lambda e,x: deriv_fn(e,x, params) @ param_dot
-            param_sft = jax.vmap(param_shift)(ele, xi)
+            def eval_at_params(p):
+                return self.evaluate_embeddings_ele_xi_pair(ele, xi, fit_params=p)
+            _, param_sft = jax.jvp(eval_at_params, (params,), (param_dot,))
 
-            res_d_point = jnp.sum(approx_normals * point_dot) * approx_normals 
-            res_d_param = jnp.sum(approx_normals * param_sft) * approx_normals #must have the same shape as the output! mx3
-            
-            # account for behaviour inside and outside the mesh by projecting the motion onto the residual if the residual is non-negligable.
-            xi_rel_motion_point = jnp.where(res_mag[:, None] < 1e-4, point_dot, res_d_point)
-            xi_rel_motion_param = jnp.where(res_mag[:, None] < 1e-4, param_sft, res_d_param)
+            dot_pt = jnp.einsum('ij,ij->i', approx_normals, point_dot)[:, None]
+            dot_pa = jnp.einsum('ij,ij->i', approx_normals, param_sft)[:, None]
 
+            res_d_point = dot_pt * approx_normals
+            res_d_param = dot_pa * approx_normals
+
+            # sl = pv.Plotter()
+            # self.plot(sl)
+            # ploc = self.evaluate_embeddings_ele_xi_pair(ele, xi)
+            # sl.add_points(np.array(primal[0]), render_points_as_spheres=True, point_size=15)
+            # vector = param_sft.val[..., 0]
+            #
+            # sl.add_arrows(np.array(ploc), np.array(vector), color='g')
+            # sl.add_arrows(np.array(ploc), np.array(res_d_param.val[0]), color='r')
+            # sl.show()
+            # breakpoint()
+
+            is_embedded = res_mag < 1e-4
+            xi_rel_total = jnp.where(
+                is_embedded[:, None], 
+                point_dot-param_sft, 
+                res_d_point-res_d_param
+            )
             jacs = self.evaluate_jacobians_ele_xi_pair(ele, xi, fit_params=params)
-            
-            mapped_lsq = jax.vmap(lambda A,y: jnp.linalg.lstsq(A,y)[0])
-            xi_d_point = mapped_lsq(jacs, xi_rel_motion_point)
-            xi_d_param = mapped_lsq(jacs, xi_rel_motion_param)
 
-            tangent_out = ((jnp.zeros_like(ele, dtype=jax.float0), xi_d_point + xi_d_param), (res_d_point + res_d_param)[:, None])
-            breakpoint()
+            def qr_fast_solve(A, b):
+                Q, R = jnp.linalg.qr(A)
+                return jax.scipy.linalg.solve_triangular(R, Q.T @ b)
+            xi_d_total = jax.vmap(qr_fast_solve)(jacs, xi_rel_total)
+
+            tangent_out = ((jnp.zeros_like(ele, dtype=jax.float0), xi_d_total), (res_d_point + res_d_param)[:, None])
 
             return primal_out, tangent_out
 
@@ -1787,7 +1625,7 @@ class MeshField:
             fit_params = self.optimisable_param_array
 
         points = jnp.atleast_2d(points) #ensure correct shape and type
-        (elem_num, embedded), residual =  mesh_embed_points(points, fit_params, init_elexi, surface_embed, iterations)
+        (elem_num, embedded), residual = mesh_embed_points(points, fit_params)
 
         if verbose >= 2:
             final_mean_dist = np.mean(np.linalg.norm(np.asarray(residual), axis=-1))
