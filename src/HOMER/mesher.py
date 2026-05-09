@@ -1469,7 +1469,7 @@ class MeshField:
         residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
         return (elem_f, xi_f), residual
 
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
         Uses an approximate nearest-neighbour search on a coarse xi grid to
@@ -1689,7 +1689,9 @@ class MeshField:
             data = pv.PolyData(np.asarray(locs))
             data['err'] = errors
             s.add_mesh(pv.line_segments_from_points(line_segs), color='k')
-            s.add_mesh(data, render_points_as_spheres=True, point_size=20)
+            if max_c is None:
+                max_c = np.max(errors)
+            s.add_mesh(data, render_points_as_spheres=True, point_size=20, clim=[0, max_c])
             s.show()
         
         if return_residual:
@@ -1701,7 +1703,7 @@ class MeshField:
 
 
 
-    def evaluate_sobolev(self, weights=None, fit_params=None):
+    def evaluate_sobolev(self, weights=None, fit_params=None,flatten=True):
         """
         Works out and defines the Sobolev values associated with the derivatives of the input elements.
         Then calculates the appropriate gauss points, and returns the elements assessed with the appropriate weighting. 
@@ -1725,7 +1727,13 @@ class MeshField:
         out_data = []
         for d, sw in zip(deriv_combos, weights):
             data = self.evaluate_deriv_embeddings_in_every_element(gp, d, fit_params=fit_params)
-            weighted = (data.reshape(n_eles, -1, 3) * w[None, :, None]).ravel() * sw
+
+            weighted = (data.reshape(n_eles, -1, 3) * w[None, :, None])
+            if not flatten:
+                fshape = weighted.shape
+            weighted = weighted.ravel() * sw
+            if not flatten:
+                weighted = weighted.reshape(fshape)
             out_data.append(weighted)
 
         return jnp.concatenate(out_data)
@@ -1914,6 +1922,11 @@ class MeshField:
             target_mask = targets != target_empty
         A = weight_mat[target_mask]
         b = targets[target_mask]
+
+        cond_a = np.linalg.cond(A, p=None)
+
+        print(A.shape, cond_a)
+        print(b.shape)
 
         assert A.shape[0] > A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
         new_params, residual, rank, s = np.linalg.lstsq(np.asarray(A).astype(np.double), np.asarray(b).astype(np.double))
