@@ -1274,7 +1274,7 @@ class MeshField:
         return self.faces
 
     def plot(self, scene:Optional[pv.Plotter] = None,
-             node_colour='r', node_size=10,
+             node_colour: str | np.ndarray ='r', node_col_scalar_name='Field', node_size=10,
              labels = False, tiling=(10, 6), 
              mesh_colour: str | np.ndarray ='gray', mesh_opacity=0.1, mesh_width = 2, mesh_col_scalar_name="Field",
              line_colour: str | np.ndarray ='black', line_opacity=1, line_width=2, line_col_scalar_name="Field",
@@ -1318,9 +1318,12 @@ class MeshField:
         if isinstance(line_colour, np.ndarray):
             lines[line_col_scalar_name] = line_colour
 
-        s.add_mesh(lines, line_width=line_width, color=line_colour if line_colour is not isinstance(line_colour, np.ndarray) else None, name=l_tag, opacity=line_opacity)
+        s.add_mesh(lines, line_width=line_width, color=line_colour if not isinstance(line_colour, np.ndarray) else None, name=l_tag, opacity=line_opacity)
         node_dots_m = pv.PolyData(node_dots)
-        s.add_mesh(node_dots, render_points_as_spheres=True, color=node_colour, point_size=node_size, name=n_tag)
+        if isinstance(node_colour, np.ndarray):
+            node_dots_m[node_col_scalar_name] = node_colour
+        
+        s.add_mesh(node_dots_m, render_points_as_spheres=True, color=node_colour if not isinstance(node_colour, np.ndarray) else None, point_size=node_size, name=n_tag)
 
         # tri_surf, tris = self.get_triangle_surface(res=res)
         hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling)
@@ -1374,8 +1377,8 @@ class MeshField:
         """
         @wide_eval 
         def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
-            element_ids = jnp.atleast_1d(element_ids)
-            xis = jnp.atleast_2d(xis)
+            element_ids = jnp.atleast_1d(jnp.array(element_ids))
+            xis = jnp.atleast_2d(jnp.array(xis))
 
             param_data = jnp.asarray(self.true_param_array)
             if not len(fit_params) == len(param_data):
@@ -1398,7 +1401,7 @@ class MeshField:
         """
         @wide_eval
         def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
-            element_ids = jnp.atleast_1d(element_ids)
+            element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(xis)
             param_data = jnp.asarray(self.true_param_array)
 
@@ -1469,7 +1472,7 @@ class MeshField:
         residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
         return (elem_f, xi_f), residual
 
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None, grid_res=40):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
         Uses an approximate nearest-neighbour search on a coarse xi grid to
@@ -1512,13 +1515,14 @@ class MeshField:
             (Only when *return_residual* is ``True``) Embedding error
             vectors, shape ``(n_pts, fdim)``.
         """
+        local_res = np.array([grid_res])
         
         @jax.custom_jvp
         def mesh_embed_points(points, fit_params):
             points = jnp.atleast_2d(points) #ensure correct shape and type
             if init_elexi is None: #do a coarse embedding
                 if self.elements[0].ndim == 2:
-                    res = 40
+                    res = local_res[0]
                     xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
                     ndim = 2
                     coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
@@ -1532,8 +1536,8 @@ class MeshField:
                     at_hi = init_xi > 1 - 1e-6
                     mf_pt = at_lo | at_hi
                 else:
-                    res = 40
                     if not surface_embed:
+                        res = local_res[0]
                         # Build interior grid
                         xis = jnp.array(self.xi_grid(res, 3, boundary_points=True))
                         n_pts = xis.shape[0]          # grid points per element
@@ -1561,6 +1565,7 @@ class MeshField:
 
                     else:
                         # surface_embed=True: embed on self surface faces only (unchanged)
+                        res = local_res[0]
                         faces = self.faces
                         face_pts = []
                         elem_pts = []
@@ -1806,8 +1811,8 @@ class MeshField:
         if return_F:
             return F
   
-        strain = (F.transpose(0,2,1) @ F - np.eye(self.ndim)[None])/2
-        return strain.reshape(-1, self.ndim, self.ndim)
+        strain = (F.transpose(0,2,1) @ F - np.eye(3)[None])/2 #srtaings always 3D here
+        return strain.reshape(-1, 3,3) #self.ndim, self.ndim)
 
 
     def plot_strains(self, eles, xis, strains, scene:Optional[pv.Plotter]=None, cmap='coolwarm'):
@@ -2298,7 +2303,7 @@ class Mesh(MeshField):
         for field in self.fields.values():
             field.refine(refinement_factor, by_xi_refinement, clean_nodes)
 
-    def plot(self, scene: Optional[pv.Plotter] = None, node_colour='r', node_size=10, labels=False, tiling=(10, 6), 
+    def plot(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_size=10, labels=False, tiling=(10, 6), 
              mesh_colour: str | np.ndarray = 'gray', mesh_opacity=0.1, mesh_width=2, mesh_col_scalar_name="Field", 
              line_colour: str | np.ndarray = 'black', line_opacity=1, line_width=2, line_col_scalar_name="Field",
              elem_labels=False, render_name: Optional[str] = None, 
@@ -2365,7 +2370,7 @@ class Mesh(MeshField):
     
         #then you evaluate the field with the surface values throughout the mesh.
         if draw_xyz_field:
-            super().plot(scene, node_colour, node_size, labels, tiling, 
+            super().plot(scene, node_colour, node_col_scalar_name, node_size, labels, tiling, 
                          mesh_colour, mesh_opacity, mesh_width, mesh_col_scalar_name,
                          line_colour, line_opacity, line_width, line_col_scalar_name,
                          elem_labels, render_name)

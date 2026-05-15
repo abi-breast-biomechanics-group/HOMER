@@ -60,8 +60,12 @@ def jacobian(
     if sparse:
         if isinstance(sparsity, Callable):
             def scipy_sparse_jac(params, **kwargs):
+                # t0 = time()
                 sparse_csr = sparsity(params)
-                update_csr_jacobian(partial(fwd_func, **kwargs), params, sparse_csr)
+                # t1 = time()
+                # print(t1 - t0)
+                # update_csr_jacobian(partial(fwd_func, **kwargs), params, sparse_csr)
+                sparse_csr = update_csr_jacobian_hybrid(partial(fwd_func, **kwargs), params, sparse_csr)
                 return sparse_csr
         else:
             if sparsity is None:
@@ -122,7 +126,7 @@ def _next_power_of_2(x):
     return 1 if x == 0 else 2**(x - 1).bit_length()
 
 def update_csr_jacobian(f, params, sparsity_csr, MAX_BATCH_SIZE=128):
-    ts0 = time()
+    # ts0 = time()
     M, N = sparsity_csr.shape
     indptr = sparsity_csr.indptr
     indices = sparsity_csr.indices
@@ -200,8 +204,8 @@ def update_csr_jacobian(f, params, sparsity_csr, MAX_BATCH_SIZE=128):
         data_loc_mapping[g_start:g_end, :, :deps_len] = starts + offsets
         
         group_idx += num_chunks
-    ts1 = time()
-    print(f" to0k {ts1-ts0} s")
+    # ts1 = time()
+    # print(f" to0k {ts1-ts0} s")
     batched_grads = extract_vmapped_sparse_jacobian(
         f, params, row_indices, row_masks, col_indices, col_masks
     )
@@ -216,70 +220,45 @@ def update_csr_jacobian(f, params, sparsity_csr, MAX_BATCH_SIZE=128):
     return sparsity_csr
 
 @partial(jax.jit, static_argnums=0)
-def extract_batched_sparse_jacobian(f, x_full, row_indices, row_masks, col_indices, col_masks):
+def extract_vmapped_sparse_jacobian(f, x_full, row_indices, row_masks, col_indices, col_masks):
     """
     row_indices/masks shape: (MAX_GROUPS, MAX_BATCH_SIZE)
     col_indices/masks shape: (MAX_GROUPS, MAX_DEPS)
     """
-    y, vjp_fn = jax.vjp(f, x_full)
-    M = y.shape[0]
-    
-    # We vmap the pullback so it can accept a matrix of cotangents
-    # vjp_fn normally takes a 1D vector. Now it takes a 2D batch.
-    batched_vjp = jax.vmap(vjp_fn)
-
-    def scan_body(carry, i):
-        r_idx = row_indices[i]  # shape (MAX_BATCH_SIZE,)
-        r_mask = row_masks[i]   # shape (MAX_BATCH_SIZE,)
-        c_idx = col_indices[i]  # shape (MAX_DEPS,)
-        c_mask = col_masks[i]   # shape (MAX_DEPS,)
-        
-        # Build a batch of one-hot cotangent vectors
-        e_batch = jnp.zeros((row_indices.shape[1], M))
-        # Vectorized assignment: Place 1.0 at the correct row indices if mask is True
-        e_batch = e_batch.at[jnp.arange(row_indices.shape[1]), r_idx].set(r_mask.astype(jnp.float32))
-        
-        # Execute the backward pass for the entire batch at once
-        # dense_grads shape: (MAX_BATCH_SIZE, N)
-        dense_grads = batched_vjp(e_batch)[0] 
-        
-        # Advanced indexing to slice out only the active columns for this group
-        # sparse_batch shape: (MAX_BATCH_SIZE, MAX_DEPS)
-        sparse_batch = dense_grads[:, c_idx]
-        
-        # Zero out padding on both axes
-        sparse_batch = jnp.where(c_mask[None, :], sparse_batch, 0.0) # Mask columns
-        sparse_batch = jnp.where(r_mask[:, None], sparse_batch, 0.0) # Mask rows
-        
-        return carry, sparse_batch
-
-    # Scan over the groups
-    _, batched_sparse_grads = jax.lax.scan(scan_body, None, jnp.arange(row_indices.shape[0]))
-    
-    # Returns shape (MAX_GROUPS, MAX_BATCH_SIZE, MAX_DEPS)
-    return batched_sparse_grads
-
-@partial(jax.jit, static_argnums=0)
-def extract_vmapped_sparse_jacobian(f, x_full, row_indices, row_masks, col_indices, col_masks):
-    y, vjp_fn = jax.vjp(f, x_full)
-    M = y.shape[0]
-    
-    # Inner function that computes gradients for a single group
     def group_fn(r_idx, r_mask, c_idx, c_mask):
-        # Create one-hot cotangents
-        e_batch = jnp.zeros((row_indices.shape[1], M))
-        e_batch = e_batch.at[jnp.arange(row_indices.shape[1]), r_idx].set(r_mask.astype(jnp.float32))
+        # 1. Build tangents for the dependencies in this group
+        # Shape: (MAX_DEPS, N)
+        tangents = jnp.zeros((c_idx.shape[0], x_full.shape[0]), dtype=jnp.float32)
+        # Place 1.0s at the target column indices, applying the column mask
+        tangents = tangents.at[jnp.arange(c_idx.shape[0]), c_idx].set(c_mask.astype(jnp.float32))
         
-        # Pullback for this batch
-        dense_grads = jax.vmap(vjp_fn)(e_batch)[0]
+        push_forward = lambda t: jax.jvp(f, (x_full,), (t,))[1]
+        jvp_out = jax.vmap(push_forward)(tangents)
+        sparse_batch = jvp_out.T[r_idx]
         
-        # Slicing and masking
-        sparse_batch = dense_grads[:, c_idx]
-        sparse_batch = jnp.where(c_mask[None, :], sparse_batch, 0.0)
+        # 4. Mask out the invalid rows (padding)
         sparse_batch = jnp.where(r_mask[:, None], sparse_batch, 0.0)
         return sparse_batch
 
-    # Vectorize across the MAX_GROUPS dimension instead of scanning sequentially!
+    # Vectorize the group function across the MAX_GROUPS dimension
     batched_sparse_grads = jax.vmap(group_fn)(row_indices, row_masks, col_indices, col_masks)
-    
     return batched_sparse_grads
+
+@partial(jax.jit, static_argnums=0)
+def extract_csr_data(f, x_full, row_indices, col_indices):
+    J_dense = jax.jacfwd(f)(x_full)
+    # return J_dense
+    return J_dense[row_indices, col_indices]
+
+def update_csr_jacobian_hybrid(f, x_full, sparsity_csr):
+    row_indices = np.repeat(np.arange(sparsity_csr.shape[0]), np.diff(sparsity_csr.indptr))
+    col_indices = sparsity_csr.indices
+    csr_data_jax = extract_csr_data(f, x_full, row_indices, col_indices)
+    # return csr_data_jax
+    sparsity_csr.data = np.asarray(csr_data_jax)
+    return sparsity_csr
+
+# @partial(jax.jit, static_argnums=0)
+# def update_csr_jacobian_hybrid(f, x_full): #, row_indices):
+#     J_dense = jax.jacfwd(f)(x_full)
+#     return J_dense
