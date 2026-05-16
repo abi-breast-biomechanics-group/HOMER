@@ -437,7 +437,7 @@ class MeshField:
         slots to positions in *true_param_array*.
     """
 
-    def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False) -> None:
+    def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False, skip_generate=False) -> None:
         """Initialise a :class:`MeshField`.
 
         Parameters
@@ -476,7 +476,7 @@ class MeshField:
         self.fdim = None
         ######### Compilation flags
         self.compile = jax_compile
-        if not len(self.nodes) == 0 and not len(self.elements) == 0:
+        if not len(self.nodes) == 0 and not len(self.elements) == 0 and not skip_generate:
             self.generate_mesh()
     
         
@@ -1160,9 +1160,8 @@ class MeshField:
                 # print(ele, tested)
                 lookup_arr[ele[1], tested[1][0], tested[1][1]] = ele[0]
 
-
-            elif cn > 2:
-                raise ValueError("Mesh had multiple elements intersecting at a single point")
+            # elif cn > 2:
+            #     raise ValueError("Mesh had multiple elements intersecting at a single point")
         lookup_arr = jnp.asarray(lookup_arr)
         #face if once, 
         # test_faces = self.get_faces()
@@ -1894,7 +1893,7 @@ class MeshField:
             out_weight[np.ix_(mask, relevant_weight_locs)] = weight_mat
         return out_weight
 
-    def linear_fit(self, targets, weight_mat, target_empty=-1):
+    def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, skip_bool=False):
         """Fit nodal parameters by solving a linear least-squares problem.
 
         Solves ``weight_mat @ params ≈ targets`` via :func:`numpy.linalg.lstsq`
@@ -1921,26 +1920,30 @@ class MeshField:
         optimisation pathway (``fitting.point_cloud_fit``) if constraints
         are required.
         """
-        if targets.ndim > 1:
-            target_mask = np.any(targets != target_empty, axis=-1)
+        if not skip_bool: #just to make jax easier
+            if targets.ndim > 1:
+                target_mask = np.any(targets != target_empty, axis=-1)
+            else:
+                target_mask = targets != target_empty
+            A = weight_mat[target_mask]
+            b = targets[target_mask]
+            assert A.shape[0] > A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
         else:
-            target_mask = targets != target_empty
-        A = weight_mat[target_mask]
-        b = targets[target_mask]
+            A = weight_mat
+            b = targets
 
-        cond_a = np.linalg.cond(A, p=None)
+        # cond_a = np.linalg.cond(A, p=None)
+        # new_params, residual, rank, s = jnp.linalg.lstsq(np.asarray(A).astype(np.double), np.asarray(b).astype(np.double))
+        new_params, residual, rank, s = jnp.linalg.lstsq(A,b)
+        
+        if not skip_bool:
+            if rank < A.shape[1]:
+                logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")
 
-        print(A.shape, cond_a)
-        print(b.shape)
-
-        assert A.shape[0] > A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
-        new_params, residual, rank, s = np.linalg.lstsq(np.asarray(A).astype(np.double), np.asarray(b).astype(np.double))
-
-        if rank < A.shape[1]:
-            logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")
-
-        print('residual error:', residual)
-        self.true_param_array = new_params.flatten()
+        # print('residual error:', residual)
+        if return_params:
+            return new_params.flatten()
+        self.true_param_array = np.array(new_params).flatten()
         self.optimisable_param_array = self.true_param_array[self.optimisable_param_bool]
         self.update_from_params(new_params.flatten(), generate=False)
         self.generate_mesh()
@@ -2213,7 +2216,7 @@ class MeshField:
             element = MeshElement(node_indexes=node_ids, basis_functions=new_basis)
             new_elements.append(element)
 
-        new_mesh = MeshField(nodes=new_pts, elements=new_elements)
+        new_mesh = Mesh(nodes=new_pts, elements=new_elements)
         egrid = self.xi_grid(res=res, boundary_points=False)
         el = (np.ones((1, res**self.ndim)) * np.arange(len(self.elements))[:, None]).flatten().astype(int)
         xi = np.tile(egrid.reshape(-1, self.ndim), (len(self.elements), 1))
@@ -2408,7 +2411,7 @@ class Mesh(MeshField):
             scene.show()
         return
 
-    def new_field(self, field_name: str, field_dimension: int, new_basis: BasisGroup, field_locs: Optional[np.ndarray]=None, field_values: Optional[np.ndarray]=None, res=10) -> None:
+    def new_field(self, field_name: str, field_dimension: int, new_basis: Optional[BasisGroup]=None, field_locs: Optional[np.ndarray]=None, field_values: Optional[np.ndarray]=None, field_params=None, res=10) -> None:
         """Create a secondary field and optionally fit it to sample data.
 
         A secondary field is a :class:`MeshField` with its own basis
@@ -2476,7 +2479,8 @@ class Mesh(MeshField):
             normal_field = mesh['normals']
             values_at_xis = normal_field.evaluate_embeddings(elem_ids, xis)
         """
-
+        if new_basis is None:
+            new_basis = self.elements[0].basis_functions
         list_locs = [b.node_locs for b in new_basis]
         eval_pts = np.array(all_pairings(*list_locs))
         used_fields = MeshElement(node_ids=[np.arange(eval_pts.shape[0])], basis_functions=new_basis).used_node_fields
@@ -2499,7 +2503,16 @@ class Mesh(MeshField):
             element = MeshElement(node_indexes=node_ids, basis_functions=new_basis)
             new_elements.append(element)
 
-        self[field_name] = MeshField(nodes=new_pts, elements=new_elements)
+        self[field_name] = MeshField(nodes=new_pts, elements=new_elements, skip_generate=True)
+
+        if field_params is not None:
+            self[field_name].true_param_array = field_params.copy()
+            self[field_name].optimisable_param_bool = np.ones(field_params.shape[0], dtype=bool)
+            self[field_name].optimisable_param_array = field_params.copy()
+            self[field_name].generate_mesh() #need to let it generate the mesh
+            self[field_name].true_param_array = field_params.copy()
+            self[field_name].optimisable_param_bool = np.ones(field_params.shape[0], dtype=bool)
+            self[field_name].optimisable_param_array = field_params.copy()
 
         if field_locs is None or field_values is None:
             return
@@ -2623,216 +2636,6 @@ GAUSS = {
         6:[np.array([[0.8306046932331322, 0.1693953067668678, 0.3806904069584016, 0.6193095930415985, 0.0337652428984240, 0.9662347571015760]]).T,
            np.array([0.1803807865240693, 0.1803807865240693, 0.2339569672863455, 0.2339569672863455, 0.0856622461895852, 0.0856622461895852])],
 }
-
-@jax.custom_jvp
-def mesh_embed_points(points, verbose=0, init_elexi=None, fit_params=None, surface_embed=False, iterations=3):
-    """Find the parametric coordinates (element, xi) for a set of physical-space points.
-
-    Uses an approximate nearest-neighbour search on a coarse xi grid to
-    obtain initial estimates, then refines with a JAX-accelerated RK4
-    fixed-iteration descent (see :meth:`_xis_to_points`).  Topology
-    mapping (:meth:`topomap`) is applied at each iteration so that points
-    near element boundaries are correctly assigned to neighbouring
-    elements.
-
-    Parameters
-    ----------
-    points:
-        Physical-space query points, shape ``(n_pts, fdim)``.
-    verbose:
-        Verbosity level.  ``0`` → silent; ``2`` → print mean/max
-        residual; ``3`` → also render an error visualisation with
-        PyVista.
-    init_elexi:
-        Pre-computed initial ``(elem_num, xis)`` tuple.  When supplied,
-        the coarse nearest-neighbour search is skipped.
-    fit_params:
-        Optional parameter override for the mesh geometry.
-    return_residual:
-        When ``True``, returns a ``((elem_num, embedded), residual)``
-        tuple instead of just ``(elem_num, embedded)``.
-    surface_embed:
-        Restrict the coarse search to the surface faces of a 3-D mesh.
-    iterations:
-        Number of RK4 refinement iterations.
-
-    Returns
-    -------
-    elem_num : jnp.ndarray
-        Element index for each query point, shape ``(n_pts,)``.
-    embedded : jnp.ndarray
-        Parametric coordinates, shape ``(n_pts, ndim)``.
-    residual : jnp.ndarray
-        (Only when *return_residual* is ``True``) Embedding error
-        vectors, shape ``(n_pts, fdim)``.
-    """
-
-    points = jnp.atleast_2d(points) #ensure correct shape and type
-    
-    if init_elexi is None: #do a coarse embedding
-        if mesh.elements[0].ndim == 2:
-            res = 40
-            xis = jnp.asarray(mesh.xi_grid(res, 2, boundary_points=False))
-            ndim = 2
-            coarse_pts = mesh.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-            test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-            i = i_data[:, 0]
-            elem_num = i // xis.shape[0]
-            init_xi = xis[i % xis.shape[0]]
-
-            #TODO 2D manifold embedding, it should maube be exactly the same
-            at_lo = init_xi < 1e-6
-            at_hi = init_xi > 1 - 1e-6
-            mf_pt = at_lo | at_hi
-        else:
-            res = 40
-            ndim = 3
-            if not surface_embed:
-                # Build interior grid
-                xis = mesh.xi_grid(res, 3, boundary_points=True)
-                n_pts = xis.shape[0]          # grid points per element
-                coarse_pts = mesh.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-                test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-
-                i = i_data[:, 0]
-                elem_num = i // xis.shape[0]
-                init_xi = xis[i % xis.shape[0]]
-                
-                init_ests = mesh.evaluate_embeddings_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
-                J_init = mesh.eval_numeric_jac_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
-                proj_dir = jnp.sum((points - init_ests)[:, :, None] * J_init, axis=1) > 0
-
-                # a further check is necessary here: does the mf edge actually sit on a boundary?
-
-                at_lo = init_xi < 1e-6
-                at_hi = init_xi > 1 - 1e-6
-                
-                mf_lo = at_lo & ~proj_dir #is the point on the manifold?
-                mf_hi = at_hi & proj_dir
-                init_xi += (~mf_lo & at_lo) * 2e-2 - (~mf_hi & at_hi)*2e-2
-
-                mf_pt = mf_lo | mf_hi
-
-            else:
-                # surface_embed=True: embed on mesh surface faces only (unchanged)
-                faces = mesh.faces
-                face_pts = []
-                elem_pts = []
-                xi_pts = []
-                xi3grid = mesh.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
-                for face in faces:
-                    grid_def = xi3grid[face[1], face[2]]
-                    elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
-                    xi_pts.append(grid_def)
-                    face_pts.append(mesh.evaluate_embeddings(jnp.array([face[0]]),grid_def))
-                coarse_pts = jnp.concatenate(face_pts, axis=0)
-                elems = jnp.concatenate(elem_pts, axis=0)
-                xis = jnp.concatenate(xi_pts, axis=0)
-                test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-                i = i_data[:, 0]
-                elem_num = elems[i]
-                init_xi  = xis[i]
-
-                at_lo = init_xi < 1e-6
-                at_hi = init_xi > 1 - 1e-6
-                mf_pt = at_lo | at_hi
-    else:
-        elem_num, init_xi = init_elexi
-        elem_num = jnp.atleast_1d(elem_num)
-        init_xi = jnp.atleast_2d(init_xi)
-        ndim = mesh.elements[0].ndim
-
-        test_res = points - mesh.evaluate_embeddings_ele_xi_pair(elem_num, init_xi)
-
-        at_lo = init_xi < 1e-6
-        at_hi = init_xi > 1 - 1e-6
-        mf_pt = at_lo | at_hi
-
-    (elem_num, embedded), res = jax.vmap(
-        lambda elem, xi, target, rmag, lbound : mesh._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
-    )(elem_num, init_xi, points, mf_pt, jnp.linalg.norm(test_res, axis=-1))
-
-    # elem_num, embedded, res = elem_num, init_xi, test_res
-
-    if verbose >= 2:
-        final_mean_dist = np.mean(np.linalg.norm(np.asarray(res), axis=-1))
-        final_max_dist  = np.max(np.linalg.norm(np.asarray(res), axis=-1))
-        print(f"final mean error of {final_mean_dist} units, max error of {final_max_dist}")
-
-    if verbose == 3:
-        locs = mesh.evaluate_embeddings_ele_xi_pair(elem_num, embedded)
-        vec_errors = points - locs
-        errors = np.linalg.norm(vec_errors, axis=-1)
-
-        line_segs = np.concatenate(
-            (np.atleast_2d(locs)[:, None], np.atleast_2d(points)[:, None]), axis=1
-        ).reshape(-1, mesh.fdim)
-        s = pv.Plotter()
-        mesh.plot(s)
-        data = pv.PolyData(np.asarray(locs))
-        data['err'] = errors
-        s.add_mesh(pv.line_segments_from_points(line_segs), color='k')
-        s.add_mesh(data, render_points_as_spheres=True, point_size=20)
-        s.show()
-
-    return (elem_num, embedded), res
-
-
-@mesh_embed_points.defjvp
-def embed_pts_ptderiv(primal, cotangent):
-    """
-    Follows jax protocol to define the jax compatable derivatives.
-    Gives the local derivatives of the point embedding with respect to the input points to embed.
-
-    It calculates the linear derivatvies of elem_num, xi, and the residual of the mesh embed function.
-    elem_num derivative is always zero.
-    
-    xi is the main point of interest.
-    res is useful for fitting.
-
-    """
-    mesh = primal[0]
-    x = primal[1]
-    breakpoint()
-    (ele, xi), res = primal_out = mesh_embed_points(*primal)
-
-    """
-    define the derivatives with respect to the second argument, "points"
-    Describes how the ele xi positions change with response to the locations of the points. 
-    """
-    tval = None if len(primal) == 1 else primal[1]
-    jacs = mesh.evaluate_jacobians_ele_xi_pair(ele, xi, fit_params=tval) 
-    a0_local_xi_deriv = jnp.linalg.solve(jacs, x) #get the results over this space.
-    #this is then a block diagonal value
-    a0_local_el_deriv = jnp.zeros(ele.shape, x.shape)
-
-    #the residual of the res vector is nice and simple - it changes with the input points.
-    a0_local_res_deriv = cotangent[0]
-
-    """
-    Following section implements the derivatives with respect to the mesh embedding.
-    gives the local deriates of the point embedding with respect to the mesh parameters.
-    """
-
-    deriv_fn = jax.jacfwd(mesh.evaluate_embeddings_in_ele_xi, argnums=3)
-    local_param_derivs = deriv_fn(ele, xi, fit_params=primal[4])
-
-    #can then just do the same tangenting
-    a1_local_el_deriv = jnp.zeros(ele.shape, x.shape)
-
-    a1_local_xi_deriv = local_param_derivs @ cotangent_out
-
-    a1_loacl_res_deriv
-
-
-
-
-
-    #formatting of the cotangent out is wrong, please fix.
-    cotangent_out = (local_el_deriv, tangented_xi)
-    
-
-    return primal_out, cotangent_out
 
     
     
