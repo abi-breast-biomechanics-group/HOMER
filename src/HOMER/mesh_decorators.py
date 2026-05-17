@@ -19,11 +19,13 @@ to automatically extend its API without boilerplate.
 import ast
 import jax
 import jax.numpy as jnp
-import hashlib 
+import hashlib
 import inspect
 from pathlib import Path
 import logging
 import traceback
+
+_PYI_FORMAT_VERSION = 2
 
 def wide_eval(fn):
     fn._is_derived = True
@@ -67,7 +69,7 @@ def make_ele_xi_pair(name):
     return ele_xi_pair
 
 def _get_class_hash(cls) -> str:
-    sources = []
+    sources = [f"pyi_format:{_PYI_FORMAT_VERSION}"]
     for name, val in sorted(vars(cls).items()):
         if callable(val):
             try:
@@ -110,6 +112,21 @@ def _extract_import_lines(source_file: Path) -> list[str]:
     except (SyntaxError, OSError):
         return []
 
+def _extract_instance_annotations(class_node: ast.ClassDef) -> dict[str, str]:
+    annotations: dict[str, str] = {}
+    for node in class_node.body:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if not node.target.id.startswith('_'):
+                annotations[node.target.id] = ast.unparse(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "__init__":
+            for stmt in ast.walk(node):
+                if isinstance(stmt, ast.AnnAssign):
+                    target = stmt.target
+                    if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == "self":
+                        if not target.attr.startswith('_'):
+                            annotations.setdefault(target.attr, ast.unparse(stmt.annotation))
+    return annotations
+
 def _write_pyi(cls, pyi_path: Path, current_hash: str):
     """Write a .pyi stub file for the decorated class and all other top-level module symbols."""
     source_file = Path(inspect.getfile(cls))
@@ -133,6 +150,11 @@ def _write_pyi(cls, pyi_path: Path, current_hash: str):
                 if node.name == cls.__name__:
                     # Use runtime introspection for the decorated class to capture generated methods
                     lines.append(f"class {cls.__name__}:")
+                    annotations = _extract_instance_annotations(node)
+                    for attr_name, ann in sorted(annotations.items()):
+                        lines.append(f"    {attr_name}: {ann}")
+                    if annotations:
+                        lines.append("")
                     for name, val in sorted(vars(cls).items()):
                         if callable(val):
                             try:
@@ -181,7 +203,9 @@ def _write_pyi(cls, pyi_path: Path, current_hash: str):
                 except (ValueError, TypeError):
                     lines.append(f"    def {name}(self, *args, **kwargs): ...")
 
-    pyi_path.write_text("\n".join(lines))
+    contents = "\n".join(lines).rstrip("\n") + "\n"
+    with pyi_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(contents)
     print(f"[expand_wide_evals] Updated {pyi_path}")
 
 def expand_wide_evals(cls:"type[MeshField]"):
