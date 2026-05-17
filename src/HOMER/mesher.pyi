@@ -39,6 +39,16 @@ class MeshElement:
     def argsort_derivs(self, derivs_struct: list[list[str]], order_dict: dict[tuple]): ...
 
 class MeshField:
+    ele_map: Optional[np.ndarray]
+    elem_deriv_evals: Optional[Callable]
+    elem_evals: Optional[Callable]
+    elements: list[MeshElement]
+    generate_weight_matrix: Optional[Callable]
+    nodes: list[MeshNode]
+    optimisable_param_array: Optional[np.ndarray]
+    optimisable_param_bool: Optional[np.ndarray]
+    true_param_array: Optional[np.ndarray]
+
     def __deepcopy__(self, memo): ...
     def __init__(self, nodes: Optional[list[HOMER.mesher.MeshNode]] = None, elements: Union[list[HOMER.mesher.MeshElement], HOMER.mesher.MeshElement, NoneType] = None, jax_compile: bool = False, skip_generate=False) -> None: ...
     def _clean_pts(self): ...
