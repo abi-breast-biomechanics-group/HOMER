@@ -203,7 +203,9 @@ def _write_pyi(cls, pyi_path: Path, current_hash: str):
                 except (ValueError, TypeError):
                     lines.append(f"    def {name}(self, *args, **kwargs): ...")
 
-    pyi_path.write_text("\n".join(lines))
+    contents = "\n".join(lines).rstrip("\n") + "\n"
+    with pyi_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(contents)
     print(f"[expand_wide_evals] Updated {pyi_path}")
 
 def expand_wide_evals(cls:"type[MeshField]"):
