@@ -1,5 +1,4 @@
 from HOMER import MeshNode, MeshElement, Mesh, H3Basis
-from HOMER.io import save_mesh, load_mesh
 import numpy as np
 
 point0 = MeshNode(loc=np.array([0,0,1]), du=np.zeros(3), dv=np.zeros(3), dw = np.array([2,-0.5,0.5]), dudv=np.zeros(3), dudw=np.zeros(3), dvdw=np.zeros(3), dudvdw=np.zeros(3))
@@ -16,7 +15,6 @@ mesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, poi
 mesh.refine(2)
 
 mesh.save('bin/test_mesh.json')
-new_mesh = load_mesh("bin/test_mesh.json")
+new_mesh = Mesh.load("bin/test_mesh.json")
 new_mesh.plot()
-
 

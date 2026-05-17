@@ -81,8 +81,7 @@ pts = mesh.evaluate_embeddings_in_every_element(xis)     # (100, 3) world-space 
 
 # 5. Save and reload
 mesh.save('my_mesh.json')
-from HOMER.io import load_mesh
-mesh2 = load_mesh('my_mesh.json')
+mesh2 = Mesh.load('my_mesh.json')
 ```
 
 ---
@@ -113,4 +112,3 @@ pip install "HOMER[docs]"
 mkdocs build
 mkdocs serve   # live preview at http://127.0.0.1:8000
 ```
-

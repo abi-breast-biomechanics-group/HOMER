@@ -6,23 +6,28 @@ derivative fields, element node-lists, and basis function types.  The JSON
 format is human-readable and version-independent as long as the basis class
 names remain stable.
 
+Schema overview:
+
+* **Field-only** (legacy / MeshField): ``{"nodes": ..., "elements": ...}``
+* **Mesh with fields**: ``{"main": <field dict>, "fields": {name: <field dict>}}``
+
 Main public API:
 
 * :func:`save_mesh` – write a mesh to a ``.json`` file.
 * :func:`load_mesh` – read a mesh from a ``.json`` file.
-* :func:`dump_mesh_to_dict` – serialise to a plain Python dict.
-* :func:`parse_mesh_from_dict` – deserialise from a plain Python dict.
+* :func:`dump_mesh_to_dict` – serialise a mesh (with fields) to a dict.
+* :func:`parse_mesh_from_dict` – deserialise a mesh (with fields) from a dict.
+* :func:`dump_meshfield_to_dict` – serialise a single field to a dict.
+* :func:`parse_meshfield_from_dict` – deserialise a single field from a dict.
 
 Example round-trip::
 
-    from HOMER.io import save_mesh, load_mesh
-
-    save_mesh(mesh, 'my_mesh.json')
-    mesh2 = load_mesh('my_mesh.json')
+    mesh.save('my_mesh.json')
+    mesh2 = Mesh.load('my_mesh.json')
 """
 
 from os import PathLike
-from HOMER.mesher import Mesh, MeshNode, MeshElement
+from HOMER.mesher import Mesh, MeshNode, MeshElement, MeshField
 from HOMER.basis_definitions import L1Basis, L2Basis, L3Basis, L4Basis, H3Basis
 
 from pathlib import Path
@@ -32,8 +37,8 @@ import numpy as np
 #how do we io these files
 STR_LOOKUP = {str(k.__name__):k for k in [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis]}
 
-def dump_mesh_to_dict(obj_mesh:Mesh):
-    """Serialise a :class:`~HOMER.mesher.Mesh` to a plain Python dictionary.
+def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
+    """Serialise a :class:`~HOMER.mesher.MeshField` to a plain Python dictionary.
 
     The resulting dict has two top-level keys:
 
@@ -45,82 +50,108 @@ def dump_mesh_to_dict(obj_mesh:Mesh):
 
     Parameters
     ----------
-    obj_mesh:
-        The mesh to serialise.
+    obj_field:
+        The field to serialise.
 
     Returns
     -------
     dict
-        JSON-serialisable dictionary representation of the mesh.
+        JSON-serialisable dictionary representation of the field.
     """
     dict_rep = {}
     nodes = {}
-    for idn, node in enumerate(obj_mesh.nodes):
+    for idn, node in enumerate(obj_field.nodes):
         node_def = {"loc": node.loc.tolist()}
-        node_def.update({k:v.tolist() for k,v in node.items()})
+        node_def.update({k: v.tolist() for k, v in node.items()})
         if node.id is not None:
             node_def['id'] = node.id
         nodes[idn] = node_def
     dict_rep["nodes"] = nodes
 
     elements = {}
-    for ide, element in enumerate(obj_mesh.elements):
+    for ide, element in enumerate(obj_field.elements):
         nodes_sanitised = [n if not isinstance(n, (np.int64, np.int32)) else int(n) for n in element.nodes]
-        ele_def = {"nodes":nodes_sanitised}
+        ele_def = {"nodes": nodes_sanitised}
         ele_def['basis'] = [str(b.__name__) for b in element.basis_functions]
-        ele_def['used_index']= element.used_index
+        ele_def['used_index'] = element.used_index
         elements[ide] = ele_def
     dict_rep["elements"] = elements
     return dict_rep
 
-def parse_mesh_from_dict(dict_rep:dict) -> Mesh:
+
+def dump_mesh_to_dict(obj_mesh: Mesh | MeshField) -> dict:
+    """Serialise a :class:`~HOMER.mesher.Mesh` (or MeshField) to a dictionary.
+
+    Mesh objects are stored with a ``'main'`` field and optional named
+    ``'fields'``.  Passing a :class:`MeshField` returns the legacy
+    ``{'nodes', 'elements'}`` structure for compatibility.
+    """
+    if isinstance(obj_mesh, Mesh):
+        return {
+            "main": dump_meshfield_to_dict(obj_mesh),
+            "fields": {name: dump_meshfield_to_dict(field) for name, field in obj_mesh.fields.items()},
+        }
+    return dump_meshfield_to_dict(obj_mesh)
+
+def _parse_field_from_dict(dict_rep: dict, field_cls: type[MeshField]) -> MeshField:
+    obj_field = field_cls()
+    node_dict = dict_rep.get('nodes', {})
+    for node_def in node_dict.values():
+        node_def = dict(node_def)
+        loc = node_def.pop('loc')
+        node_id = node_def.pop('id', None)
+        obj_field.add_node(
+            MeshNode(loc, **{k: np.array(v) for k, v in node_def.items()}, id=node_id))
+
+    elem_dict = dict_rep.get('elements', {})
+    for elem_def in elem_dict.values():
+        elem_def = dict(elem_def)
+        basis_functions = [STR_LOOKUP[k] for k in elem_def['basis']]
+        if elem_def.get('used_index', True):
+            obj_field.add_element(MeshElement(
+                node_indexes=elem_def['nodes'],
+                basis_functions=basis_functions,
+            ), generate_mesh=False)
+        else:
+            obj_field.add_element(MeshElement(
+                node_ids=elem_def['nodes'],
+                basis_functions=basis_functions,
+            ), generate_mesh=False)
+    if obj_field.nodes and obj_field.elements:
+        obj_field.generate_mesh()
+    return obj_field
+
+
+def parse_meshfield_from_dict(dict_rep: dict) -> MeshField:
+    """Deserialise a :class:`~HOMER.mesher.MeshField` from a dictionary."""
+    return _parse_field_from_dict(dict_rep, MeshField)
+
+
+def parse_mesh_from_dict(dict_rep: dict) -> Mesh:
     """Deserialise a :class:`~HOMER.mesher.Mesh` from a plain Python dictionary.
 
     Reconstructs nodes (with all derivative arrays), elements (looking up
     basis classes by name), and calls :meth:`~HOMER.mesher.MeshField.generate_mesh`
-    before returning.
-
-    Parameters
-    ----------
-    dict_rep:
-        Dictionary in the format produced by :func:`dump_mesh_to_dict`.
-
-    Returns
-    -------
-    Mesh
-        A fully initialised :class:`~HOMER.mesher.Mesh` object.
+    before returning.  Accepts both the legacy ``{'nodes','elements'}`` format
+    and the newer ``{'main','fields'}`` schema.
     """
-    obj_mesh = Mesh()
+    if 'main' in dict_rep or 'fields' in dict_rep:
+        main_dict = dict_rep.get('main')
+        if main_dict is None:
+            main_dict = {k: dict_rep[k] for k in ('nodes', 'elements') if k in dict_rep}
+        obj_mesh = _parse_field_from_dict(main_dict, Mesh)
+        for field_name, field_dict in dict_rep.get('fields', {}).items():
+            obj_mesh[field_name] = _parse_field_from_dict(field_dict, MeshField)
+        return obj_mesh
+    return _parse_field_from_dict(dict_rep, Mesh)
 
-    node_dict = dict_rep['nodes']
-    for node_def in node_dict.values():
-        loc = node_def.pop('loc')
-        node_id = node_def.pop('id', None)
-        obj_mesh.add_node(
-            MeshNode(loc, **{k:np.array(v) for k, v in node_def.items()}, id=node_id))
-
-    elem_dict = dict_rep['elements']
-    for elem_def in elem_dict.values():
-        if elem_def.get('used_index', True):
-            obj_mesh.add_element(MeshElement(
-                node_indexes=elem_def['nodes'], 
-                basis_functions=[STR_LOOKUP[k] for k in elem_def['basis']],
-            ), generate_mesh=False)
-        else:
-            obj_mesh.add_element(MeshElement(
-                node_ids=elem_def['nodes'], 
-                basis_functions=[STR_LOOKUP[k] for k in elem_def['basis']],
-            ), generate_mesh=False)
-    obj_mesh.generate_mesh()
-    return obj_mesh
-
-def save_mesh(obj_mesh:Mesh, file_location: PathLike):
-    """Serialise a mesh to a JSON file.
+def save_mesh(obj_mesh: Mesh | MeshField, file_location: PathLike):
+    """Serialise a mesh (or field) to a JSON file.
 
     Parameters
     ----------
     obj_mesh:
-        The :class:`~HOMER.mesher.Mesh` to save.
+        The :class:`~HOMER.mesher.Mesh` (or :class:`MeshField`) to save.
     file_location:
         Destination path.  A ``.json`` extension is recommended.
     """
@@ -132,7 +163,7 @@ def save_mesh(obj_mesh:Mesh, file_location: PathLike):
         json.dump(dict_rep, fp=f, indent=4)
     return
 
-def load_mesh(file_location:PathLike) -> Mesh:
+def load_mesh(file_location: PathLike) -> Mesh:
     """Load a mesh from a JSON file produced by :func:`save_mesh`.
 
     Parameters
@@ -150,4 +181,3 @@ def load_mesh(file_location:PathLike) -> Mesh:
     with open(file_location, 'r') as f:
         dict_rep = json.load(f)
     return parse_mesh_from_dict(dict_rep)
-

@@ -2135,27 +2135,27 @@ class MeshField:
 
     def save(self, loc: PathLike):
         """
-        Saves the mesh to a .json formated file in the given location
+        Saves the field to a .json formated file in the given location
         """
         from HOMER.io import save_mesh #avoid the circular import here
         save_mesh(self, loc)
 
     def dump_to_dict(self):
         """
-        Returns a dict structure representing the mesh object, for ease of saving
+        Returns a dict structure representing the field object, for ease of saving
         """
 
-        from HOMER.io import dump_mesh_to_dict
-        return dump_mesh_to_dict(self)
+        from HOMER.io import dump_meshfield_to_dict
+        return dump_meshfield_to_dict(self)
 
     def __deepcopy__(self, memo):
         """
-        Dumps the mesh to a dictionairy then rebuilds it to ensure that there is no shared memory between a mesh and it's deepcopy.
+        Dumps the field to a dictionairy then rebuilds it to ensure that there is no shared memory between a field and it's deepcopy.
         """
 
-        from HOMER.io import dump_mesh_to_dict, parse_mesh_from_dict
-        dict_rep = deepcopy(dump_mesh_to_dict(self))
-        return parse_mesh_from_dict(dict_rep) 
+        from HOMER.io import dump_meshfield_to_dict, parse_meshfield_from_dict
+        dict_rep = deepcopy(dump_meshfield_to_dict(self))
+        return parse_meshfield_from_dict(dict_rep)
 
 
     def rebase(self, new_basis: BasisGroup, in_place=False, res=10) -> 'MeshField':
@@ -2523,9 +2523,40 @@ class Mesh(MeshField):
         return
 
     
+    def __deepcopy__(self, memo):
+        """
+        Deep copy a Mesh (including any secondary fields).
+        """
+        from HOMER.io import dump_mesh_to_dict, parse_mesh_from_dict
+        dict_rep = deepcopy(dump_mesh_to_dict(self))
+        return parse_mesh_from_dict(dict_rep)
+
+    @classmethod
+    def from_dict(cls, dict_rep: dict) -> "Mesh":
+        """
+        Build a Mesh from a dictionary representation.
+        """
+        from HOMER.io import parse_mesh_from_dict
+        return parse_mesh_from_dict(dict_rep)
+
+    @classmethod
+    def load(cls, loc: PathLike) -> "Mesh":
+        """
+        Load a Mesh (including fields) from a JSON file.
+        """
+        from HOMER.io import load_mesh
+        return load_mesh(loc)
+
+    def to_dict(self) -> dict:
+        """
+        Returns a dict structure representing the mesh object, including fields.
+        """
+        from HOMER.io import dump_mesh_to_dict
+        return dump_mesh_to_dict(self)
+
     def save(self, loc: PathLike):
         """
-        Saves the mesh to a .json formated file in the given location
+        Saves the mesh (including fields) to a .json formated file in the given location
         """
         from HOMER.io import save_mesh #avoid the circular import here
         save_mesh(self, loc)
@@ -2534,9 +2565,7 @@ class Mesh(MeshField):
         """
         Returns a dict structure representing the mesh object, for ease of saving
         """
-        all_dicts = {f:self[f].dump_to_dict() for f in self.fields.keys()}
-        all_dicts['main'] = self.super().dump_to_dict()
-        return all_dicts
+        return self.to_dict()
 
 
 
@@ -2639,4 +2668,3 @@ GAUSS = {
 
     
     
-
