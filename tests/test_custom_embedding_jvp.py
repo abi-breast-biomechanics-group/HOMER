@@ -56,7 +56,6 @@ def params_to_xi(params): #params to xi is borked.
     _, xis = cube_1.embed_points(points, fit_params=params)
     return (xis - xi_grid).flatten()
 
-cube_1.embed_points(points, verbose=3)
 
 init_params = cube_1.optimisable_param_array
 fitting_function, jacobian_fun = jacobian(params_to_xi, init_estimate=init_params)

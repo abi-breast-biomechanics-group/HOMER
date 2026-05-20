@@ -1171,7 +1171,7 @@ class MeshField:
         # print('.')
         # raise ValueError
 
-        @jax.jit
+        # @jax.jit
         def topomap(ele, xi):
             """
             Applies topology mapping using lookup_arr.
@@ -1183,16 +1183,17 @@ class MeshField:
             xi_clipped = jnp.clip(xi, 0.0, 1.0)
             b_lo, b_hi = xi < 0, xi > 1.0
             crossed = b_lo | b_hi
-            map_valid = jnp.sum(crossed.astype(jnp.int32)) == 1 # Only one bound transition allowed
-            where_bound = jnp.argmax(crossed.astype(jnp.int32)).astype(jnp.int32)
+            map_valid = jnp.sum(crossed.astype(jnp.int32), axis=-1) == 1 # Only one bound transition allowed
+            where_bound = jnp.atleast_1d(jnp.argmax(crossed.astype(jnp.int32), axis= -1).astype(jnp.int32))
             # jax.debug.print("elem {elem}, xi {xi}, maps {maps}, valid {valid}, where {where}", elem=ele, xi=xi, maps=crossed, valid=map_valid, where=where_bound)
-            side = jnp.where(b_hi[where_bound], 1, 0).astype(jnp.int32)
+            # side = jnp.where(b_hi[where_bound], 1, 0).astype(jnp.int32)
+            side = jnp.take_along_axis(jnp.atleast_2d(b_hi), where_bound[:, None], axis=-1)[..., 0].astype(int)
             new_ele = lookup_arr[ele, where_bound, side]
             map_valid = map_valid & (new_ele != -1)
             xi_mapped = xi + b_lo.astype(xi.dtype) - b_hi.astype(xi.dtype)
             out_ele = jnp.where(map_valid, new_ele, ele)
-            out_xi = jnp.where(map_valid, xi_mapped, xi_clipped)
-            return out_ele, out_xi, map_valid
+            out_xi = jnp.where(map_valid[:, None], xi_mapped, xi_clipped)
+            return out_ele.squeeze(), out_xi.squeeze(), map_valid.squeeze() #squeeze back down to support the 1D outputs
 
         self.topomap = topomap
 
@@ -1401,7 +1402,7 @@ class MeshField:
         @wide_eval
         def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
-            xis = jnp.atleast_2d(xis)
+            xis = jnp.atleast_2d(jnp.array(xis))
             param_data = jnp.asarray(self.true_param_array)
 
             if not len(fit_params) == len(param_data):
@@ -1549,19 +1550,31 @@ class MeshField:
                         
                         init_ests = self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
                         J_init = self.eval_numeric_jac_ele_xi_pair(elem_num, init_xi, fit_params=fit_params)
-                        proj_dir = jnp.sum((points - init_ests)[:, :, None] * J_init, axis=1) > 0
 
                         # a further check is necessary here: does the mf edge actually sit on a boundary?
+                        proj_step = jnp.linalg.solve(J_init, (points - init_ests)[:, :, None]).squeeze() 
+                        delta_xi = init_xi + proj_step
+                        at_lo = delta_xi < 1e-6
+                        at_hi = delta_xi > 1 - 1e-6
 
-                        at_lo = init_xi < 1e-6
-                        at_hi = init_xi > 1 - 1e-6
+                        init_xi_test = init_xi + 0.01 * at_hi - 0.01 * at_lo 
                         
-                        mf_lo = at_lo & ~proj_dir #is the point on the manifold?
-                        mf_hi = at_hi & proj_dir
-                        init_xi += (~mf_lo & at_lo) * 2e-2 - (~mf_hi & at_hi)*2e-2
+                        #take a gradient step and see if that step was topologically valid - if it was, update, if it wasn't, leave the point alone.
+                        _, _, valid = self.topomap(elem_num, init_xi_test)
+                        cand_ele, cand_xi, _ = self.topomap(elem_num, delta_xi) #need to move manifold points off of the location?
 
-                        mf_pt = mf_lo | mf_hi
-
+                        elem_num = jnp.where(valid, cand_ele, elem_num)
+                        init_xi = jnp.where(valid[..., None], cand_xi, init_xi)
+                        # elem_num.at[valid].set(cand_ele[valid])
+                        # init_xi = init_xi.at[valid].set(cand_xi[valid])
+                        mf_pt = ~valid & (jnp.any(at_lo | at_hi, axis=-1)) #no valid map and at the hi points
+                        
+                        # breakpoint()
+                        # pt_Data = pv.PolyData(np.array(points))
+                        # # pt_Data['status'] = np.array(np.any(at_hi|at_lo, axis=-1))
+                        # pt_Data['status'] = mf_pt
+                        # pt_Data.plot(render_points_as_spheres=True)
+                        #
                     else:
                         # surface_embed=True: embed on self surface faces only (unchanged)
                         res = local_res[0]
@@ -1814,7 +1827,7 @@ class MeshField:
         return strain.reshape(-1, 3,3) #self.ndim, self.ndim)
 
 
-    def plot_strains(self, eles, xis, strains, scene:Optional[pv.Plotter]=None, cmap='coolwarm'):
+    def plot_strains(self, eles, xis, strains, scene:Optional[pv.Plotter]=None, cmap='coolwarm', spacer=4):
         """
         Given ele, xi locations, and the strain tensors evaluated at those locations, evaluates local strain ellipsoids, and plots them.
         """
@@ -1839,14 +1852,16 @@ class MeshField:
         r_mag = np.linalg.norm(def_pts[..., 0], axis=-1) - 1
 
         pts = jax_aknn(locs, locs, k=2)[0]
-        scale_to_use = np.median(pts[:, 1])/4
+        scale_to_use = np.median(pts[:, 1])/spacer
 
         sphere_pts = def_pts[..., 0] * scale_to_use + locs[:, None]
 
         sphere_arr = spheres_to_polydata(np.asarray(sphere_pts), sphere_base.faces)
         sphere_arr['relative length change'] = r_mag.flatten()
 
-        max_c = np.nanmax(np.abs(r_mag))
+        mean_c = np.nanmedian(np.abs(r_mag))
+        mad_c = np.nanmedian(np.abs(np.abs(r_mag) - mean_c))
+        max_c = mean_c + 4 * mad_c
         
         draw_flag = False
         if scene is None:
@@ -2216,7 +2231,7 @@ class MeshField:
             element = MeshElement(node_indexes=node_ids, basis_functions=new_basis)
             new_elements.append(element)
 
-        new_mesh = Mesh(nodes=new_pts, elements=new_elements)
+        new_mesh = MeshField(nodes=new_pts, elements=new_elements)
         egrid = self.xi_grid(res=res, boundary_points=False)
         el = (np.ones((1, res**self.ndim)) * np.arange(len(self.elements))[:, None]).flatten().astype(int)
         xi = np.tile(egrid.reshape(-1, self.ndim), (len(self.elements), 1))
@@ -2305,6 +2320,17 @@ class Mesh(MeshField):
         super().refine(refinement_factor, by_xi_refinement, clean_nodes)
         for field in self.fields.values():
             field.refine(refinement_factor, by_xi_refinement, clean_nodes)
+
+    def rebase(self, new_basis: BasisGroup, in_place=False, res=10) -> 'Mesh':
+        """ Rebases self, capturing the rebase of the underlying mesh field.
+        """
+        temp_meshField = super().rebase(new_basis, in_place=False, res=res)
+        mesh_field_backup = self.fields
+        new_mesh = Mesh(elements=temp_meshField.elements, nodes=temp_meshField.nodes)
+        new_mesh.fields = mesh_field_backup
+        if in_place:
+            self = new_mesh
+        return new_mesh
 
     def plot(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_size=10, labels=False, tiling=(10, 6), 
              mesh_colour: str | np.ndarray = 'gray', mesh_opacity=0.1, mesh_width=2, mesh_col_scalar_name="Field", 

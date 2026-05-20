@@ -59,8 +59,8 @@ def make_ele_xi_pair(name):
         if fit_params is None:
             fit_params = self.optimisable_param_array
         new_fn = getattr(self, name)
-        eval_e = jnp.atleast_1d(eles)
-        eval_xi = jnp.atleast_2d(xis)
+        eval_e = jnp.atleast_1d(jnp.array(eles))
+        eval_xi = jnp.atleast_2d(jnp.array(xis))
         out_sorted = jax.vmap( #vmap original over every (element, xi) pair in sorted order
             lambda single_e, single_xi: new_fn(single_e, single_xi, *a, fit_params=fit_params, **kw), (0, 0)
         )(eval_e, eval_xi).squeeze()
