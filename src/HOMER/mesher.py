@@ -1472,7 +1472,7 @@ class MeshField:
         residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
         return (elem_f, xi_f), residual
 
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None, grid_res=40):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None, grid_res=40, vis_max_norm=None):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
         Uses an approximate nearest-neighbour search on a coarse xi grid to
@@ -1697,6 +1697,12 @@ class MeshField:
             locs = self.evaluate_embeddings_ele_xi_pair(elem_num, embedded)
             vec_errors = points - locs
             errors = np.linalg.norm(vec_errors, axis=-1)
+
+            if vis_max_norm is not None:
+                mask = errors < vis_max_norm
+                locs = locs[mask]
+                points = points[mask]
+                errors = errors[mask]
 
             line_segs = np.concatenate(
                 (np.atleast_2d(locs)[:, None], np.atleast_2d(points)[:, None]), axis=1

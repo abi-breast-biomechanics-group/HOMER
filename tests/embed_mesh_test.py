@@ -72,6 +72,7 @@ pts = np.random.rand(1000, 3) * 1.5 - 0.25
                             # init_elexi=([0], [(0.25,0.25, 0.1)]), 
                             verbose=3, return_residual=True,
                             iterations=20,
+                            # vis_max_norm=0.1,
                             )
 
 # mesh2 = mesh1.rebase([L4Basis]*3)
