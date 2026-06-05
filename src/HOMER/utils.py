@@ -20,6 +20,11 @@ from scipy.sparse import csr_array
 import jax
 import functools
 
+def surface_normal_mapping(mesh, eles, xis, derivs):
+    """A default mapping function that can be used for evaluation of strain over 2D surfaces."""
+    normal = mesh.evaluate_normals(eles, xis)
+    normal = normal / jnp.linalg.norm(normal, axis=-1, keepdims=True)
+    return jnp.concatenate((normal[..., None], derivs), axis=-1)
 
 def spheres_to_polydata(verts: np.ndarray, faces: np.ndarray) -> pv.PolyData:
     """

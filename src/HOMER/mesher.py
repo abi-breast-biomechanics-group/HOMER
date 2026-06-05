@@ -1849,7 +1849,7 @@ class MeshField:
             U = jax.vmap(reconstruct_single_U)(evecs, sqrt_lambdas)
             return U
         locs = self.evaluate_embeddings_ele_xi_pair(eles, xis)
-        sphere_base = pv.Sphere(1, theta_resolution=15, phi_resolution=15)
+        sphere_base = pv.Sphere(radius = 1, theta_resolution=15, phi_resolution=15)
 
         test_pts = sphere_base.points[None, ..., None]
         U = get_batch_stretch_tensors(strains)
@@ -1872,8 +1872,9 @@ class MeshField:
         draw_flag = False
         if scene is None:
             scene = pv.Plotter()
-            self.plot(scene)
             draw_flag= True
+
+        self.plot(scene)
         scene.add_mesh(sphere_arr, smooth_shading=True, cmap=cmap, clim=[-max_c, max_c])
         if draw_flag:
             scene.show()

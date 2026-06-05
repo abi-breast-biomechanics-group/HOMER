@@ -50,3 +50,18 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=(L1Basis, L1Basis, L1Basis))
     mesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1).rebase(basis)
     return mesh
+
+def basic_surface(corner_locs, basis=None):
+
+    if basis is None:
+        basis = [L1Basis] * 2
+
+    point0 = MeshNode(loc=corner_locs[0])
+    point1 = MeshNode(loc=corner_locs[1])
+    point2 = MeshNode(loc=corner_locs[2])
+    point3 = MeshNode(loc=corner_locs[3])
+
+    element1 = MeshElement(node_indexes=[0,1,2,3], basis_functions=(L1Basis, L1Basis))
+    mesh = Mesh(nodes = [point0, point1, point2, point3], elements = element1).rebase(basis)
+
+    return mesh
