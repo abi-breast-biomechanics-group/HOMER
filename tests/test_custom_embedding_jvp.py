@@ -1,13 +1,59 @@
 from functools import partial
 from jax import jacfwd
-from HOMER import cube
+from HOMER import cube, L3Basis
 import jax.numpy as jnp
 import jax
 import numpy as np
 
 from HOMER.jacobian_evaluator import jacobian
+
 from scipy.optimize import least_squares
 import pyvista as pv
+
+
+
+base_test = cube(basis=([L3Basis]*3))
+# breakpoint()
+
+def test_shift(p):
+    base_params = jnp.array(base_test.true_param_array.reshape(-1,3))
+    base_params = base_params.at[:, -1].add(p)
+    # base_params = base_params.at[:, -2].add(-p)
+    _, xi = base_test.embed_points(jnp.array([0.3, 0, 0]), 
+                                   fit_params = base_params.ravel(), 
+                                   # verbose=3,
+                                   # iterations=40,
+                                   )
+    return xi
+
+print('test_shift result: ', test_shift(0.0)) #does it decrease it?
+jac = jax.jacfwd(test_shift)
+res = jac(0.0)
+print(res)
+
+
+# breakpoint()
+# raise ValueError
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -45,10 +91,10 @@ if False:
 cube_0 = cube()
 cube_1 = cube(
     scale=2,
-    centre=np.ones(3)*1.5,
+    centre=np.ones(3)*1,
 )
 
-xi_grid = cube_0.xi_grid(4)
+xi_grid = cube_0.xi_grid(6)
 points = cube_0.evaluate_embeddings([0], xi_grid)
 cube_1.embed_points(points, verbose=3)
 

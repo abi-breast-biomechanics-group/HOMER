@@ -20,6 +20,47 @@ from scipy.sparse import csr_array
 import jax
 import functools
 
+def skew_symmetric(w):
+    """Returns the 3x3 skew-symmetric matrix of a 3D vector."""
+    return jnp.array([
+        [0.0, -w[2], w[1]],
+        [w[2], 0.0, -w[0]],
+        [-w[1], w[0], 0.0]
+    ])
+
+@jax.jit
+def rodrigues_exp(w):
+    """
+    Computes the SO(3) matrix exponential using Rodrigues' formula.
+    
+    Args:
+        w: A 3D array representing the rotation vector (axis * angle).
+           The direction is the axis of rotation, and the L2 norm is the angle.
+           
+    Returns:
+        A 3x3 rotation matrix.
+    """
+    theta2 = jnp.sum(w**2)
+    theta = jnp.sqrt(jnp.maximum(theta2, 1e-12))
+    
+    K = skew_symmetric(w)
+    K2 = K @ K
+    I = jnp.eye(3)
+    
+    is_small = theta < 1e-4
+    A = jnp.where(
+        is_small, 
+        1.0 - theta2 / 6.0, 
+        jnp.sin(theta) / theta
+    )
+    B = jnp.where(
+        is_small, 
+        0.5 - theta2 / 24.0, 
+        (1.0 - jnp.cos(theta)) / theta2
+    )
+    R = I + A * K + B * K2
+    return R
+
 def surface_normal_mapping(mesh, eles, xis, derivs):
     """A default mapping function that can be used for evaluation of strain over 2D surfaces."""
     normal = mesh.evaluate_normals(eles, xis)

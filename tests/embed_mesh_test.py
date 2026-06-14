@@ -35,7 +35,14 @@ mesh = Mesh(nodes=[point0, point0_1, point1, point0_2, point_middle, point1_3, p
 
 pts = np.random.rand(1000, 3)
 pts[:, 0] = 0.6
-ele, xi = mesh.embed_points(pts, verbose=3)
+(ele, xi), res = mesh.embed_points(pts, verbose=3, return_residual=True)
+
+#on this mesh, we can check for convergence by looking for the angle between the normals and the residualts.
+normal = mesh.evaluate_normals_ele_xi_pair(ele, xi)
+n_normal = normal/np.linalg.norm(normal, axis=-1, keepdims=True)
+r_normal = res/np.linalg.norm(res, axis=-1, keepdims=True)
+product = np.abs(np.sum(n_normal*r_normal[:, 0], axis=-1))
+print("mean normal similarity: ", np.mean(product), "This should essentially be 1")
 
 
 point0 = MeshNode(loc=([0,0,1]), du=[0,0,0], dv=[0,0,0], dw = ([2,-0.5,0.5]),   dudv=[0,0,0], dudw=[0,0,0], dvdw=[0,0,0], dudvdw=[0,0,0], id=1)
@@ -74,6 +81,8 @@ pts = np.random.rand(1000, 3) * 1.5 - 0.25
                             iterations=20,
                             # vis_max_norm=0.1,
                             )
+
+
 
 # mesh2 = mesh1.rebase([L4Basis]*3)
 #  

@@ -973,7 +973,7 @@ class MeshField:
         self.generate_mesh()
 
     ################################## PLOTTING
-    def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, just_faces=False, tiling=None) -> np.ndarray|tuple[np.ndarray, np.ndarray]:
+    def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, just_faces=False, tiling=None, fit_params=None) -> np.ndarray|tuple[np.ndarray, np.ndarray]:
         """
         Returns a set of points evaluated over the mesh surface.
         """
@@ -984,7 +984,7 @@ class MeshField:
             if element_ids is not None:
                 all_points = []
                 for ne, e in enumerate(elements_to_iter):
-                    all_points.append(self.evaluate_embeddings(np.array([ne]), grid))
+                    all_points.append(self.evaluate_embeddings(np.array([ne]), grid, fit_params=fit_params))
                 return np.concatenate(all_points, axis=0) 
             else:
                 return self.evaluate_embeddings_in_every_element(grid)
@@ -997,7 +997,7 @@ class MeshField:
                     xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
                     for face in faces:
                         grid_def = xi3grid[face[1], face[2]]
-                        face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def))
+                        face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def, fit_params=fit_params))
                     return np.concatenate(face_pts, axis=0)
                 
                 c = []
@@ -1008,26 +1008,26 @@ class MeshField:
 
                 for idf, face in enumerate(faces):
                     grid_def = xi3grid[face[1], face[2]]
-                    face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def))
+                    face_pts.append(self.evaluate_embeddings(np.array([face[0]]),grid_def, fit_params=fit_params))
                     c.append([[0, idf * l_xi, idf * l_xi]] + connectivity)
                 return np.concatenate(face_pts, axis=0), np.concatenate(c, axis=0)
             else:
                 if tiling is None:
                     xi2grid = self.xi_grid(res=res, dim=2)
-                    return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid))
+                    return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid, fit_params=fit_params))
                 xi2grid, connectivity = self.xi_grid(res=res, dim=2, lattice=tiling)
                 lc = len(xi2grid)
                 c = np.concatenate([connectivity.reshape(-1, 3) + [[0, idc * lc, idc * lc]] for idc in range(len(self.elements))], axis=0)
-                return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid)), c
+                return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid, fit_params=fit_params)), c
 
 
-    def get_hex_surface(self, element_ids, tiling = (10, 6)) -> tuple[np.ndarray, np.ndarray]:
+    def get_hex_surface(self, element_ids, tiling = (10, 6), fit_params=None) -> tuple[np.ndarray, np.ndarray]:
         """
         Returns lines evaluating a hexagon tiling of the element surface
 
         :params tiling: the repetitions of the underlying unit surface (5/3 ratio "looks good")
         """
-        surface_points, single_face_connectivity = self.get_surface(element_ids, just_faces=True, tiling=tiling)
+        surface_points, single_face_connectivity = self.get_surface(element_ids, just_faces=True, tiling=tiling, fit_params=fit_params)
         return surface_points, single_face_connectivity.astype(int)
 
     def get_triangle_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20) -> tuple[np.ndarray, np.ndarray]:
@@ -1046,7 +1046,7 @@ class MeshField:
         return surface_pts, tris
 
 
-    def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=20) -> pv.PolyData:
+    def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=20, fit_params=None) -> pv.PolyData:
         """
         Returns a pv.PolyData object containing lines defining the edges of the mesh surface.
         """
@@ -1093,7 +1093,7 @@ class MeshField:
         n_ele = len(self.elements) 
         ele_up = lc * np.arange(n_ele)[None, :, None] * [0, 1, 1]
         long_connectivity = (connectivity[:, None] + ele_up).reshape(-1, 3)
-        line_points = np.asarray(self.evaluate_embeddings_in_every_element(flat_xis)) #.reshape(n_ele, -1 , 3)[:2].reshape(-1, 3)
+        line_points = np.asarray(self.evaluate_embeddings_in_every_element(flat_xis, fit_params=fit_params)) #.reshape(n_ele, -1 , 3)[:2].reshape(-1, 3)
 
         mesh = pv.PolyData(
             line_points, 
@@ -1124,8 +1124,6 @@ class MeshField:
         n_test = len(xi_l)
 
 
-
-        pv.Plotter
 
         locs = np.round(locs, rounding_res)
         _, idx, inv, cnt = np.unique(
@@ -1280,6 +1278,7 @@ class MeshField:
              line_colour: str | np.ndarray ='black', line_opacity=1, line_width=2, line_col_scalar_name="Field",
              elem_labels=False,
              render_name:Optional[str] = None,
+             fit_params=None,
              ):
         """
         Draws the mesh as a pyvista scene.
@@ -1311,9 +1310,20 @@ class MeshField:
 
 
         #evaluate the mesh surface and evaluate all of the elements
-        lines = self.get_lines()
-        node_dots = np.array([node.loc for node in self.nodes])
+        lines = self.get_lines(fit_params=fit_params)
+
+        def all_pairings(*lists):
+            return [t[::-1] for t in itertools.product(*reversed(copy(lists)))]
+        bs = self.elements[0].basis_functions
+        list_locs = [b.node_locs for b in bs]
+        eval_pts = np.array(all_pairings(*list_locs))
+        node_dots = np.array(self.evaluate_embeddings_in_every_element(eval_pts, fit_params=fit_params))
+        # grid = self.xi_grid(res=2) #includes the boundary points, so only node values
+        # node_dots = np.array(self.evaluate_embeddings_in_every_element(grid, fit_params=fit_params))
+
+
         s=pv.Plotter() if scene is None else scene
+
 
         if isinstance(line_colour, np.ndarray):
             lines[line_col_scalar_name] = line_colour
@@ -1326,7 +1336,7 @@ class MeshField:
         s.add_mesh(node_dots_m, render_points_as_spheres=True, color=node_colour if not isinstance(node_colour, np.ndarray) else None, point_size=node_size, name=n_tag)
 
         # tri_surf, tris = self.get_triangle_surface(res=res)
-        hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling)
+        hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling, fit_params=fit_params)
         surf_mesh = pv.PolyData(hex_surf, lines)
         
         if isinstance(mesh_colour, np.ndarray):
@@ -1381,8 +1391,11 @@ class MeshField:
             xis = jnp.atleast_2d(jnp.array(xis))
 
             param_data = jnp.asarray(self.true_param_array)
-            if not len(fit_params) == len(param_data):
-                fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
+            if fit_params is not None:
+                if not len(fit_params) == len(param_data):
+                    fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
+            else:
+                fit_params = param_data
 
             map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
             params = jnp.asarray(fit_params)[map]
@@ -1403,11 +1416,14 @@ class MeshField:
         def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(jnp.array(xis))
+
             param_data = jnp.asarray(self.true_param_array)
-
-            if not len(fit_params) == len(param_data):
-                fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
-
+            if fit_params is not None:
+                if not len(fit_params) == len(param_data):
+                    fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
+            else:
+                fit_params = param_data
+                    
             map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
             params = jnp.asarray(fit_params)[map]
 
@@ -1423,6 +1439,20 @@ class MeshField:
         """
         self.generate_weight_matrix = make_weight_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
     ################################# useful utils.
+
+    def eval_surface(self, res, boundary_points=False):
+        faces = self.faces
+        face_pts = []
+        elem_pts = []
+        xi_pts = []
+        xi3grid = self.xi_grid(res=res, dim=3, surface=True, boundary_points=boundary_points).reshape(3,2,-1,3)
+        for face in faces:
+            grid_def = xi3grid[face[1], face[2]]
+            elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
+            xi_pts.append(grid_def)
+            face_pts.append(self.evaluate_embeddings(jnp.array([face[0]]),grid_def))
+        coarse_pts = jnp.concatenate(face_pts, axis=0)
+        return coarse_pts
 
     def _solve_RHS(self, el, xi, r, stepsize, lbound, fit_params=None):
         J = self.evaluate_jacobians(el, xi, fit_params=fit_params)[0]  # (fdim, ndim)
@@ -1469,10 +1499,10 @@ class MeshField:
             0, iterations, body, (elem.astype(int), xi0, elem.astype(int), xi0, init_err, 1)
         )
 
-        residual = self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params) - x_target
+        residual = x_target - self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params)
         return (elem_f, xi_f), residual
 
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None, grid_res=40, vis_max_norm=None):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None, grid_res=40, vis_max_norm=None, scene=None):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
         Uses an approximate nearest-neighbour search on a coarse xi grid to
@@ -1543,7 +1573,6 @@ class MeshField:
                         n_pts = xis.shape[0]          # grid points per element
                         coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
                         test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-
                         i = i_data[:, 0]
                         elem_num = jnp.array(i // xis.shape[0])
                         init_xi = xis[i % jnp.array(xis.shape[0])]
@@ -1583,33 +1612,40 @@ class MeshField:
                         elem_pts = []
                         xi_pts = []
                         xi3grid = self.xi_grid(res=res, dim=3, surface=True).reshape(3,2,-1,3)
+                        mf_locs = []
                         for face in faces:
                             grid_def = xi3grid[face[1], face[2]]
                             elem_pts.append(np.ones(grid_def.shape[0]) * face[0])
                             xi_pts.append(grid_def)
-                            face_pts.append(self.evaluate_embeddings(jnp.array([face[0]]),grid_def))
+                            face_pts.append(self.evaluate_embeddings(jnp.array([face[0]]),grid_def, fit_params=fit_params))
+                            mf_bool = np.zeros(grid_def.shape, dtype=bool)
+                            mf_bool[:, face[1]] = True #set the value of the face true
+                            mf_locs.append(mf_bool)
+
                         coarse_pts = jnp.concatenate(face_pts, axis=0)
                         elems = jnp.concatenate(elem_pts, axis=0)
                         xis = jnp.concatenate(xi_pts, axis=0)
+                        mfs = jnp.concatenate(mf_locs, axis=0)
                         test_res, i_data = jax_aknn(points, coarse_pts, k=1)
                         i = i_data[:, 0]
                         elem_num = elems[i]
                         init_xi  = xis[i]
+                        mf_pt = mfs[i]
 
-                        at_lo = init_xi < 1e-6
-                        at_hi = init_xi > 1 - 1e-6
-                        mf_pt = at_lo | at_hi
+                        # at_lo = init_xi < 1e-6
+                        # at_hi = init_xi > 1 - 1e-6
+                        # mf_pt = at_lo | at_hi
             else:
                 elem_num, init_xi = init_elexi
                 elem_num = jnp.atleast_1d(elem_num)
                 init_xi = jnp.atleast_2d(init_xi)
-                ndim = self.elements[0].ndim
-
                 test_res = points - self.evaluate_embeddings_ele_xi_pair(elem_num, init_xi)
 
                 at_lo = init_xi < 1e-6
                 at_hi = init_xi > 1 - 1e-6
                 mf_pt = at_lo | at_hi
+
+                print(np.sum(test_res))
 
             (elem_num, embedded), res = jax.vmap(
                 lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
@@ -1618,8 +1654,31 @@ class MeshField:
             # elem_num, embedded, res = elem_num, init_xi, test_res
             return (elem_num, embedded), res
 
+    
+        @jax.jit #distance function
+        def D(eles, xis, x, params):
+            return jnp.sum((x - self.evaluate_embeddings([eles], xis, fit_params=params))**2)/2
+        
+        @jax.jit #distance gradian
+        def g(eles, xis, x, params):
+            return jax.grad(D, argnums=1)(eles, xis, x, params)
 
-        @mesh_embed_points.defjvp
+        @jax.jit #derivative evaluation for a single point
+        def embed_single_jvp(ele, xi, point, params, point_dot, param_dot):
+            local_H = jax.jacobian(g, argnums=1)(ele, xi, point, params)
+            comb_product = jax.jvp(lambda w, p: g(ele, xi, w, p), (point, params), (point_dot, param_dot))[1]
+            # define a mask to handle points embedded on the surface, to a certain tolerance.
+            active_mask = jnp.isclose(xi, 1.0, atol=1e-5) | jnp.isclose(xi, 0, atol=1e-5)
+            free_mask = ~active_mask
+            masked_H = jnp.where(free_mask[:, None] * free_mask[None, :], local_H, 0.0) + jnp.diag(jnp.where(active_mask, 1.0, 0.0))
+            masked_comb_product = jnp.where(active_mask, 0.0, comb_product)
+            
+            xi_dot = -jnp.linalg.solve(masked_H, masked_comb_product)
+            w_dot = jax.jvp(lambda x, p: self.evaluate_embeddings([ele], x, fit_params=p), (xi, params), (xi_dot, param_dot))[1][0]
+            r_dot = point_dot - w_dot
+            return xi_dot, r_dot
+
+        @mesh_embed_points.defjvp #vectorising the function over the input
         def embed_pts_ptderiv(primal, tangent):
             """
             Follows jax protocol to define the jax compatable derivatives.
@@ -1628,59 +1687,15 @@ class MeshField:
             It calculates the linear derivatvies of elem_num, xi, and the residual of the mesh embed function.
             elem_num derivative is always zero.
             
-            xi is the main point of interest.
-            res is useful for fitting.
-
             """
-
-            #primal computation.
-            (ele, xi), res = primal_out = mesh_embed_points(*primal)
-            res = res.squeeze()
-            #local tangent spaces.
+            (ele, xi), _ = primal_out = mesh_embed_points(*primal)
+            points, params = primal
             point_dot, param_dot = tangent
-            params = primal[1] #the only really important thing from the primals
-
-            res_mag = jnp.linalg.norm(res, axis=-1)
-            approx_normals = res / jnp.maximum(res_mag, 1e-6)[:, None] #if the residual is tiny, then fully embedded.
-
-            #given a delta_params, how will the output change.
-            def eval_at_params(p):
-                return self.evaluate_embeddings_ele_xi_pair(ele, xi, fit_params=p)
-            _, param_sft = jax.jvp(eval_at_params, (params,), (param_dot,))
-
-            dot_pt = jnp.einsum('ij,ij->i', approx_normals, point_dot)[:, None]
-            dot_pa = jnp.einsum('ij,ij->i', approx_normals, param_sft)[:, None]
-
-            res_d_point = dot_pt * approx_normals
-            res_d_param = dot_pa * approx_normals
-
-            # sl = pv.Plotter()
-            # self.plot(sl)
-            # ploc = self.evaluate_embeddings_ele_xi_pair(ele, xi)
-            # sl.add_points(np.array(primal[0]), render_points_as_spheres=True, point_size=15)
-            # vector = param_sft.val[..., 0]
-            #
-            # sl.add_arrows(np.array(ploc), np.array(vector), color='g')
-            # sl.add_arrows(np.array(ploc), np.array(res_d_param.val[0]), color='r')
-            # sl.show()
-            # breakpoint()
-
-            is_embedded = res_mag < 1e-4
-            xi_rel_total = jnp.where(
-                is_embedded[:, None], 
-                point_dot-param_sft, 
-                res_d_point-res_d_param
-            )
-            jacs = self.evaluate_jacobians_ele_xi_pair(ele, xi, fit_params=params)
-
-            def qr_fast_solve(A, b):
-                Q, R = jnp.linalg.qr(A)
-                return jax.scipy.linalg.solve_triangular(R, Q.T @ b)
-            xi_d_total = jax.vmap(qr_fast_solve)(jacs, xi_rel_total)
-
-            tangent_out = ((jnp.zeros_like(ele, dtype=jax.float0), xi_d_total), (res_d_point + res_d_param)[:, None])
-
+            xi_dot, r_dot = jax.vmap(lambda e, x, w, w_dot: embed_single_jvp(e, x, w, params, w_dot, param_dot))(ele, xi, points, point_dot)
+            tangent_out = ((jnp.zeros_like(ele, dtype=jax.float0), xi_dot), (r_dot)[:, None])
             return primal_out, tangent_out
+
+
 
         if fit_params is None:
             fit_params = self.optimisable_param_array
@@ -1694,7 +1709,7 @@ class MeshField:
             print(f"final mean error of {final_mean_dist} units, max error of {final_max_dist}")
 
         if verbose == 3:
-            locs = self.evaluate_embeddings_ele_xi_pair(elem_num, embedded)
+            locs = self.evaluate_embeddings_ele_xi_pair(elem_num, embedded, fit_params=fit_params)
             vec_errors = points - locs
             errors = np.linalg.norm(vec_errors, axis=-1)
 
@@ -1707,15 +1722,21 @@ class MeshField:
             line_segs = np.concatenate(
                 (np.atleast_2d(locs)[:, None], np.atleast_2d(points)[:, None]), axis=1
             ).reshape(-1, self.fdim)
-            s = pv.Plotter()
-            self.plot(s)
-            data = pv.PolyData(np.asarray(locs))
+            if scene is not None:
+                s = scene
+            else:
+                s = pv.Plotter()
+            self.plot(s, fit_params=fit_params, node_size=0.001, line_opacity=0.05, mesh_opacity=0.05)
+            data = pv.PolyData(np.asarray(points))
             data['err'] = errors
-            s.add_mesh(pv.line_segments_from_points(line_segs), color='k')
+            lines = pv.line_segments_from_points(line_segs)
+            lines['err'] = errors
             if max_c is None:
                 max_c = np.max(errors)
+            s.add_mesh(lines, line_width=4, render_lines_as_tubes=True, clim=[0, max_c])
             s.add_mesh(data, render_points_as_spheres=True, point_size=20, clim=[0, max_c])
-            s.show()
+            if scene is None:
+                s.show()
         
         if return_residual:
             return (elem_num, embedded), residual
@@ -2344,7 +2365,7 @@ class Mesh(MeshField):
              line_colour: str | np.ndarray = 'black', line_opacity=1, line_width=2, line_col_scalar_name="Field",
              elem_labels=False, render_name: Optional[str] = None, 
              field_to_draw = None, field_xi = None, draw_xyz_field = True, field_artist: Optional[Callable[[pv.Plotter, np.ndarray, np.ndarray], None]] = None,
-             default_field_point_size=25, default_xi_res=4):
+             default_field_point_size=25, default_xi_res=4, fit_params=None):
         """Draw the mesh and optionally overlay a secondary field.
 
         Parameters
@@ -2409,7 +2430,7 @@ class Mesh(MeshField):
             super().plot(scene, node_colour, node_col_scalar_name, node_size, labels, tiling, 
                          mesh_colour, mesh_opacity, mesh_width, mesh_col_scalar_name,
                          line_colour, line_opacity, line_width, line_col_scalar_name,
-                         elem_labels, render_name)
+                         elem_labels, render_name, fit_params)
 
         if field_to_draw == None:
             if s_flag:
