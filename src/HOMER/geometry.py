@@ -51,7 +51,33 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     mesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1).rebase(basis)
     return mesh
 
-def basic_surface(corner_locs, basis=None):
+def cubeMNO(res, basis=None):
+    """
+    Creates a multi-element unit cube mesh.
+    Then re-orders the cube to have sane elements.
+    """
+    base_cube = cube(basis=basis) 
+    base_cube.refine(by_xi_refinement=[np.linspace(0, 1, r+1) for r in res])
+
+    def sort_grid_numpy(points_array):
+        rounded_points = np.round(points_array, 4)
+        x, y, z = rounded_points[:, 0], rounded_points[:, 1], rounded_points[:, 2]
+        sort_indices = np.lexsort((x,y,z))
+        return sort_indices
+
+    new_inds = sort_grid_numpy(np.array([p.loc for p in base_cube.nodes]))
+    inv_inds = np.arange(new_inds.shape[0])
+    inv_inds[new_inds] = inv_inds
+    base_cube.nodes = [base_cube.nodes[n] for n in new_inds]
+    for e in base_cube.elements:
+        e.nodes = [inv_inds[x] for x in e.nodes]
+    base_cube.generate_mesh()
+    return base_cube
+
+def basic_surface(corner_locs=None, basis=None):
+
+    if corner_locs is None:
+        corner_locs = np.array([[0,0,0], [0,0,1], [0,1,0], [0,1,1]])
 
     if basis is None:
         basis = [L1Basis] * 2
@@ -65,3 +91,26 @@ def basic_surface(corner_locs, basis=None):
     mesh = Mesh(nodes = [point0, point1, point2, point3], elements = element1).rebase(basis)
 
     return mesh
+
+def basic_surfaceMN(res, basis=None):
+    """
+    Creates a multi-element surface mesh.
+    Then re-orders the cube to have sane elements.
+    """
+    surf = basic_surface(basis=basis) 
+    surf.refine(by_xi_refinement=[np.linspace(0, 1, r+1) for r in res])
+
+    def sort_grid_numpy(points_array):
+        rounded_points = np.round(points_array, 4)
+        x, y, z = rounded_points[:, 0], rounded_points[:, 1], rounded_points[:, 2]
+        sort_indices = np.lexsort((x,y,z))
+        return sort_indices
+
+    new_inds = sort_grid_numpy(np.array([p.loc for p in surf.nodes]))
+    inv_inds = np.arange(new_inds.shape[0])
+    inv_inds[new_inds] = inv_inds
+    surf.nodes = [surf.nodes[n] for n in new_inds]
+    for e in surf.elements:
+        e.nodes = [inv_inds[x] for x in e.nodes]
+    surf.generate_mesh()
+    return surf

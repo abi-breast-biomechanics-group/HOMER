@@ -24,6 +24,7 @@ import inspect
 from pathlib import Path
 import logging
 import traceback
+from functools import partial
 
 _PYI_FORMAT_VERSION = 2
 
@@ -39,6 +40,7 @@ def depreciation(fn):
     return new_fn
 
 def make_iee(name):
+    # @partial(jax.jit, static_argnames=['self' 'othr'])
     def iee(self, *a, fit_params=None, **kw): 
         """Evaluates the base function in every element of the mesh"""
 
@@ -52,6 +54,7 @@ def make_iee(name):
     return iee
 
 def make_ele_xi_pair(name):  
+    # @partial(jax.jit, static_argnames=['self', 'othr'])
     def ele_xi_pair(self, eles, xis, *a, fit_params=None, **kw):
         """
         Evaluates the base function in pairs of ele_xi_lists

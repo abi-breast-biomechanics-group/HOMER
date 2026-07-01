@@ -20,6 +20,302 @@ from scipy.sparse import csr_array
 import jax
 import functools
 
+def validate_and_extract_topology_2d(m):
+    """
+    Validates if the mapping array m represents a valid 2D grid homotopic to a square,
+    and returns the grid shape and mapping tables.
+    """
+    m = np.asarray(m)
+    num_elements = m.shape[0]
+
+    # 1. Find the origin element (must have -1 on the start faces of both axes)
+    is_origin = np.all(m[:, :, 0] == -1, axis=1)
+    origins = np.where(is_origin)[0]
+
+    if len(origins) != 1:
+        raise ValueError(f"Not homotopic to a square: Found {len(origins)} origin elements (expected 1).")
+    origin = origins[0]
+
+    # 2. Determine grid dimensions (N0, N1)
+    N = np.zeros(2, dtype=int)
+    for axis in range(2):
+        curr = origin
+        while curr != -1:
+            N[axis] += 1
+            curr = m[curr, axis, 1]
+
+    if N[0] * N[1] != num_elements:
+        raise ValueError(f"Not homotopic to a square: Grid bounds {N} mismatch total elements {num_elements}.")
+
+    # 3. Build lookup tables
+    grid_to_e = np.full(N, -1, dtype=int)
+    e_to_grid = np.full((num_elements, 2), -1, dtype=int)
+
+    # Traverse and populate the expected grid
+    for i in range(N[0]):
+        for j in range(N[1]):
+            if i == 0 and j == 0:
+                e = origin
+            elif j > 0:
+                e = m[grid_to_e[i, j-1], 1, 1]
+            else:
+                e = m[grid_to_e[i-1, 0], 0, 1]
+
+            if e == -1 or e_to_grid[e, 0] != -1:
+                raise ValueError("Not homotopic to a square: Cycle or premature boundary detected.")
+
+            grid_to_e[i, j] = e
+            e_to_grid[e] = [i, j]
+
+    # 4. Rigorous verification of all edges
+    for i in range(N[0]):
+        for j in range(N[1]):
+            e = grid_to_e[i, j]
+            expected = [
+                [grid_to_e[i-1, j] if i > 0 else -1, grid_to_e[i+1, j] if i < N[0]-1 else -1],
+                [grid_to_e[i, j-1] if j > 0 else -1, grid_to_e[i, j+1] if j < N[1]-1 else -1]
+            ]
+            if not np.array_equal(m[e], expected):
+                raise ValueError(f"Not homotopic to a square: Neighbor mismatch at element {e}.")
+
+    return N, grid_to_e, e_to_grid
+
+def build_square_mappings(m):
+    """
+    Consumes mapping array `m` and returns JAX-compatible forward and inverse mapping functions for 2D.
+    """
+    # Validate and build discrete mappings purely in NumPy first
+    N_np, grid_to_e_np, e_to_grid_np = validate_and_extract_topology_2d(m)
+    
+    # Cast necessary arrays to JAX format
+    N = jnp.array(N_np, dtype=jnp.float32)
+    N_ints = jnp.array(N_np, dtype=jnp.int32)
+    grid_to_e = jnp.array(grid_to_e_np, dtype=jnp.int32)
+    e_to_grid = jnp.array(e_to_grid_np, dtype=jnp.float32)
+
+    @jax.jit
+    def macro_to_local(uv):
+        """
+        Maps [u, v] coordinates in the macro-square [0-1, 0-1]
+        to the local element index (e) and its local [x, y] coordinates.
+        """
+        # Ensure uv is clamped to the valid domain
+        uv_clamped = jnp.clip(uv, 0.0, 1.0)
+        
+        # Scale by grid size to find macro indices
+        scaled = uv_clamped * N
+        
+        # Determine 2D grid index (handling the 1.0 boundary edge case)
+        indices = jnp.floor(scaled).astype(jnp.int32)
+        indices = jnp.clip(indices, 0, N_ints - 1)
+        
+        # Find exact local coordinates [x, y] inside the element
+        local_xy = scaled - indices
+        
+        # Fetch the element index mapping
+        e = grid_to_e[indices[:, 0], indices[:, 1]]
+        
+        return e, local_xy
+
+    @jax.jit
+    def local_to_macro(e, local_xy):
+        """
+        Maps an element index (e) and its local [x, y] coordinates [0-1, 0-1]
+        back to the macro-square [u, v] coordinates.
+        """
+        grid_pos = e_to_grid[e]
+        
+        # Add local offset and normalize back to [0, 1] range
+        uv = (grid_pos + local_xy) / N
+        return uv
+
+    return macro_to_local, local_to_macro
+
+def validate_and_extract_topology(m):
+    """
+    Validates if the mapping array m represents a valid grid homotopic to a cube,
+    and returns the grid shape and mapping tables.
+    """
+    m = np.asarray(m)
+    num_elements = m.shape[0]
+
+    # 1. Find the origin element (must have -1 on the start faces of all 3 axes)
+    is_origin = np.all(m[:, :, 0] == -1, axis=1)
+    origins = np.where(is_origin)[0]
+
+    if len(origins) != 1:
+        raise ValueError(f"Not homotopic to a cube: Found {len(origins)} origin elements (expected 1).")
+    origin = origins[0]
+
+    # 2. Determine grid dimensions (N0, N1, N2)
+    N = np.zeros(3, dtype=int)
+    for axis in range(3):
+        curr = origin
+        while curr != -1:
+            N[axis] += 1
+            curr = m[curr, axis, 1]
+
+    if N[0] * N[1] * N[2] != num_elements:
+        raise ValueError(f"Not homotopic to a cube: Grid bounds {N} mismatch total elements {num_elements}.")
+
+    # 3. Build lookup tables
+    grid_to_e = np.full(N, -1, dtype=int)
+    e_to_grid = np.full((num_elements, 3), -1, dtype=int)
+
+    # Traverse and populate the expected grid
+    for i in range(N[0]):
+        for j in range(N[1]):
+            for k in range(N[2]):
+                if i == 0 and j == 0 and k == 0:
+                    e = origin
+                elif k > 0:
+                    e = m[grid_to_e[i, j, k-1], 2, 1]
+                elif j > 0:
+                    e = m[grid_to_e[i, j-1, 0], 1, 1]
+                else:
+                    e = m[grid_to_e[i-1, 0, 0], 0, 1]
+
+                if e == -1 or e_to_grid[e, 0] != -1:
+                    raise ValueError("Not homotopic to a cube: Cycle or premature boundary detected.")
+
+                grid_to_e[i, j, k] = e
+                e_to_grid[e] = [i, j, k]
+
+    # 4. Rigorous verification of all faces
+    for i in range(N[0]):
+        for j in range(N[1]):
+            for k in range(N[2]):
+                e = grid_to_e[i, j, k]
+                expected = [
+                    [grid_to_e[i-1, j, k] if i > 0 else -1, grid_to_e[i+1, j, k] if i < N[0]-1 else -1],
+                    [grid_to_e[i, j-1, k] if j > 0 else -1, grid_to_e[i, j+1, k] if j < N[1]-1 else -1],
+                    [grid_to_e[i, j, k-1] if k > 0 else -1, grid_to_e[i, j, k+1] if k < N[2]-1 else -1]
+                ]
+                if not np.array_equal(m[e], expected):
+                    raise ValueError(f"Not homotopic to a cube: Neighbor mismatch at element {e}.")
+
+    return N, grid_to_e, e_to_grid
+
+def build_cube_mappings(m):
+    """
+    Consumes mapping array `m` and returns JAX-compatible forward and inverse mapping functions.
+    """
+    # Validate and build discrete mappings purely in NumPy first
+    N_np, grid_to_e_np, e_to_grid_np = validate_and_extract_topology(m)
+    
+    # Cast necessary arrays to JAX format
+    N = jnp.array(N_np, dtype=jnp.float32)
+    N_ints = jnp.array(N_np, dtype=jnp.int32)
+    grid_to_e = jnp.array(grid_to_e_np, dtype=jnp.int32)
+    e_to_grid = jnp.array(e_to_grid_np, dtype=jnp.float32)
+
+    @jax.jit
+    def macro_to_local(uvw):
+        """
+        Maps [u, v, w] coordinates in the macro-cube [0-1, 0-1, 0-1]
+        to the local element index (e) and its local [x, y, z] coordinates.
+        """
+        # Ensure uvw is clamped to the valid domain
+        uvw_clamped = jnp.clip(uvw, 0.0, 1.0)
+        
+        # Scale by grid size to find macro indices
+        scaled = uvw_clamped * N
+        
+        # Determine 3D grid index (handling the 1.0 boundary edge case)
+        indices = jnp.floor(scaled).astype(jnp.int32)
+        indices = jnp.clip(indices, 0, N_ints - 1)
+        
+        # Find exact local coordinates [x, y, z] inside the element
+        local_xyz = scaled - indices
+        
+        # Fetch the element index mapping
+        e = grid_to_e[indices[0], indices[1], indices[2]]
+        # breakpoint()
+        
+        return e, local_xyz
+
+    @jax.jit
+    def local_to_macro(e, local_xyz):
+        """
+        Maps an element index (e) and its local [x, y, z] coordinates [0-1, 0-1, 0-1]
+        back to the macro-cube [u, v, w] coordinates.
+        """
+        grid_pos = e_to_grid[e]
+        
+        # Add local offset and normalize back to [0, 1] range
+        uvw = (grid_pos + local_xyz) / N
+        return uvw
+
+    return macro_to_local, local_to_macro
+
+@jax.jit
+def spherical_to_hex_surface(angles):
+    """
+    Maps (theta, phi) spherical coordinates to the surface of a 
+    hexahedral element with coordinates in [0, 1].
+    
+    Args:
+        angles: A JAX array of shape (..., 2) containing (theta, phi).
+                theta is the polar angle [0, pi].
+                phi is the azimuthal angle [0, 2pi).
+                
+    Returns:
+        A JAX array of shape (..., 3) containing the mapped (xi, eta, zeta)
+        coordinates on the surface of the [0, 1]^3 hexahedron.
+    """
+    # 1. Unpack angles
+    theta = angles[..., 0]
+    phi = angles[..., 1]
+    
+    x = jnp.sin(theta) * jnp.cos(phi)
+    y = jnp.sin(theta) * jnp.sin(phi)
+    z = jnp.cos(theta)
+    
+    points = jnp.stack([x, y, z], axis=-1)
+    max_abs = jnp.max(jnp.abs(points), axis=-1, keepdims=True)
+    cube_coords = points / max_abs
+    xi_coords = (cube_coords + 1.0) / 2.0
+    
+    return xi_coords
+
+@jax.jit
+def hex_surface_to_spherical(xi_coords):
+    """
+    Maps coordinates on the surface of a [0, 1]^3 hexahedral element 
+    back to (theta, phi) spherical coordinates.
+    
+    Args:
+        xi_coords: A JAX array of shape (..., 3) containing (xi, eta, zeta)
+                   coordinates on the surface of the [0, 1]^3 hexahedron.
+                   
+    Returns:
+        A JAX array of shape (..., 2) containing (theta, phi).
+            theta is the polar angle [0, pi].
+            phi is the azimuthal angle [0, 2pi).
+    """
+    # 1. Reverse the mapping from [0, 1]^3 back to the [-1, 1]^3 cube centered at origin
+    cube_coords = xi_coords * 2.0 - 1.0
+    
+    x = cube_coords[..., 0]
+    y = cube_coords[..., 1]
+    z = cube_coords[..., 2]
+    
+    # 2. Compute the radial distance (norm) of the vectors on the cube surface
+    r = jnp.linalg.norm(cube_coords, axis=-1)
+    
+    # 3. Recover theta (polar angle)
+    # Clip z/r to [-1.0, 1.0] to prevent NaN values in arccos due to floating-point imprecision
+    theta = jnp.arccos(jnp.clip(z / r, -1.0, 1.0))
+    
+    # 4. Recover phi (azimuthal angle)
+    phi = jnp.arctan2(y, x)
+    
+    # jnp.arctan2 returns values in [-pi, pi].
+    # Wrap them using modulo to match the original [0, 2pi) domain.
+    phi = jnp.mod(phi, 2.0 * jnp.pi)
+    
+    return jnp.stack([theta, phi], axis=-1)
+
 def skew_symmetric(w):
     """Returns the 3x3 skew-symmetric matrix of a 3D vector."""
     return jnp.array([

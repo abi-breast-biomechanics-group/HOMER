@@ -336,14 +336,17 @@ class MeshElement:
         n_param  = [len(b.weights) for b in self.basis_functions]
 
         
-        if   len(self.basis_functions) == 3:
+        if len(self.basis_functions) == 3:
             w_mat = np.mgrid[:n_param[0], :n_param[1], :n_param[2]].astype(int) # this is the pairing.
         elif len(self.basis_functions) == 2:
             w_mat = np.mgrid[:n_param[0], :n_param[1]].astype(int) # this is the pairing.
+        elif len(self.basis_functions) == 1:
+            w_mat = np.arange(n_param[0]).astype(int)
+            return [(i,) for i in np.arange(n_param[0])] #just cycle the params
         l_mat = np.column_stack([w.flatten() for w in w_mat])
 
         
-        ind_names  = [0] + np.cumsum([np.any([f[:2]=='dx' for f in bparam.weights]) for bparam in self.basis_functions]).tolist()
+        ind_names = [0] + np.cumsum([np.any([f[:2]=='dx' for f in bparam.weights]) for bparam in self.basis_functions]).tolist()
         
         keyvals = []
         for pairing in l_mat:
@@ -1136,7 +1139,7 @@ class MeshField:
         bmap = {}
 
         
-        lookup_arr = np.ones((len(self.elements), self.fdim, 2), dtype=int) * -1
+        lookup_arr = np.ones((len(self.elements), self.ndim, 2), dtype=int) * -1
 
         for idu, cn in enumerate(cnt): #undefined behaviour here, what even is a face for a 2D object
             if cn == 1 and self.ndim == 3: #this region appeared once, so it's a "face"
@@ -1202,6 +1205,33 @@ class MeshField:
         Then uses the xi_weight mat to find the relative weightings of values in the mesh.
         """
         if self.ndim == 2:
+            # find the elements
+            valid_elements = np.where(self._topo_lookup[:, xi_dim, bound_val] == -1)[0]
+
+            # find the nodes along the 1D edge
+            xiq_grid = (np.arange(5) / 4.0).reshape(-1, 1)
+            xiq_pt = np.ones(5) * bound_val
+            xi_query = np.insert(xiq_grid, xi_dim, xiq_pt, axis=1)
+            xi_query = np.tile(xi_query, (len(valid_elements), 1))
+            eles_to_q = np.repeat(valid_elements, 5)
+            mat = self.get_xi_weight_mat(eles_to_q, xi_query) 
+            pams = np.repeat(np.any(mat > 0, axis=0), 3)
+
+            valid_nodes = []
+            for idn, node in enumerate(self.nodes):
+                append = False 
+                sval, pams = pams[:self.fdim], pams[self.fdim:]
+                if np.any(sval):
+                    append = True
+                for key, value in node.items():
+                    l_val = value.flatten().shape[0]
+                    sval, pams = pams[:l_val], pams[l_val:] 
+                    if np.any(sval):
+                        append = True
+                if append:
+                    valid_nodes.append(idn)
+
+            return valid_elements, valid_nodes
             raise ValueError("everything on a 2d mesh is a surface, but requested to find surface elements")
 
         #find the elements
@@ -1318,6 +1348,8 @@ class MeshField:
         list_locs = [b.node_locs for b in bs]
         eval_pts = np.array(all_pairings(*list_locs))
         node_dots = np.array(self.evaluate_embeddings_in_every_element(eval_pts, fit_params=fit_params))
+        node_dots = np.array([n.loc for n in self.nodes])
+
         # grid = self.xi_grid(res=2) #includes the boundary points, so only node values
         # node_dots = np.array(self.evaluate_embeddings_in_every_element(grid, fit_params=fit_params))
 
@@ -1502,7 +1534,7 @@ class MeshField:
         residual = x_target - self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params)
         return (elem_f, xi_f), residual
 
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None, grid_res=40, vis_max_norm=None, scene=None):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None, grid_res=40, vis_max_norm=None, scene: Optional[pv.Plotter]=None, dist_filter_vector=None):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
         Uses an approximate nearest-neighbour search on a coarse xi grid to
@@ -1534,6 +1566,10 @@ class MeshField:
             Restrict the coarse search to the surface faces of a 3-D mesh.
         iterations:
             Number of RK4 refinement iterations.
+        scene:
+            pyvista plotter. 
+        dist_filter_vector:
+            a vector used to project against the distance in a subset of dimensions.
 
         Returns
         -------
@@ -1548,6 +1584,7 @@ class MeshField:
         local_res = np.array([grid_res])
         
         @jax.custom_jvp
+        @jax.jit
         def mesh_embed_points(points, fit_params):
             points = jnp.atleast_2d(points) #ensure correct shape and type
             if init_elexi is None: #do a coarse embedding
@@ -1622,10 +1659,13 @@ class MeshField:
                             mf_bool[:, face[1]] = True #set the value of the face true
                             mf_locs.append(mf_bool)
 
-                        coarse_pts = jnp.concatenate(face_pts, axis=0)
+
+                        coarse_pts = jnp.concatenate(face_pts, axis=0) 
+                        # if dist_filter_vector
                         elems = jnp.concatenate(elem_pts, axis=0)
                         xis = jnp.concatenate(xi_pts, axis=0)
                         mfs = jnp.concatenate(mf_locs, axis=0)
+                        # pv.PolyData(np.array(coarse_pts[:, :3])).plot()
                         test_res, i_data = jax_aknn(points, coarse_pts, k=1)
                         i = i_data[:, 0]
                         elem_num = elems[i]
@@ -1644,8 +1684,6 @@ class MeshField:
                 at_lo = init_xi < 1e-6
                 at_hi = init_xi > 1 - 1e-6
                 mf_pt = at_lo | at_hi
-
-                print(np.sum(test_res))
 
             (elem_num, embedded), res = jax.vmap(
                 lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
@@ -1970,7 +2008,7 @@ class MeshField:
                 target_mask = targets != target_empty
             A = weight_mat[target_mask]
             b = targets[target_mask]
-            assert A.shape[0] > A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
+            assert A.shape[0] >= A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
         else:
             A = weight_mat
             b = targets
@@ -1981,7 +2019,8 @@ class MeshField:
         
         if not skip_bool:
             if rank < A.shape[1]:
-                logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")
+                # logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")
+                pass
 
         # print('residual error:', residual)
         if return_params:
@@ -2027,8 +2066,10 @@ class MeshField:
         """
         assert not(refinement_factor is not None and by_xi_refinement is not None), "Refinement factor and refining by defined xi are mutually exclusive."
 
+        ref_res = 5
+
         new_elements = []
-        spatial_hash = {tuple(np.round(node.loc, 6).tolist()):idn for idn, node in enumerate(self.nodes)}
+        spatial_hash = {tuple(np.round(node.loc, ref_res).tolist()):idn for idn, node in enumerate(self.nodes)} 
         
         for ide, e in enumerate(self.elements): #MAKE THE POINTS TO EVAL AT
             intermediate_node_number = np.array(e.n_in_dim) - 2
@@ -2050,7 +2091,7 @@ class MeshField:
                     n_points = (len(b)-1) * (intermediate_node_number[idb] + 1) + 1 
                     lr.append(n_points)
                     new_xi_refinement.append(np.interp(np.linspace(0,1, n_points), np.linspace(0,1, len(b)), b))
-                eval_pts = np.column_stack([x.flatten() for x in np.meshgrid(*by_xi_refinement, indexing='ij')])
+                eval_pts = np.column_stack([x.flatten() for x in np.meshgrid(*new_xi_refinement, indexing='ij')])
                 if self.ndim == 2:
                     ref_array = np.array([len(by_xi_refinement[i]) for i in [0,1]]) - 1
                 else:
@@ -2070,7 +2111,8 @@ class MeshField:
             #check the generated points against the element hashmap.
             pt_index_array = [] 
             for idpt, pt in enumerate(pts):
-                ind = spatial_hash.get(hashp:=tuple(np.round(np.asarray(pt), 6)), None) 
+                ind = spatial_hash.get(hashp:=tuple(np.round(np.asarray(pt), ref_res)), None) 
+                # print(hashp, "hit: ", not ind is None)
                 new_vals = {k:np.array(v) for k, v in zip(e.used_node_fields, [a[idpt] for a in additional_pts])}
                 if ind is None:
                     node = MeshNode(pt, **new_vals)
@@ -2080,6 +2122,7 @@ class MeshField:
                 else:
                     pt_index_array.append(ind)
                     self.nodes[ind].update(new_vals)
+                # print("lptindex ", len(pt_index_array), len(self.nodes))
 
             if refinement_factor is not None:
                 if e.ndim==2:
@@ -2097,6 +2140,7 @@ class MeshField:
                 i_loc = i * (e.n_in_dim[0] -1) 
                 for j in range(n_new[1]):
                     j_loc = j * (e.n_in_dim[1] -1)
+
                     if e.ndim == 2:
                         points = pt_inds[i_loc:i_loc + e.n_in_dim[0], j_loc:j_loc + e.n_in_dim[1]]
 
@@ -2107,6 +2151,7 @@ class MeshField:
                         new_e = MeshElement(node_indexes=points.T.flatten().tolist(), basis_functions=e.basis_functions, id=elem_id)
                         new_elements.append(new_e)
                         continue
+
                     for k in range(n_new[2]): 
                         k_loc = k * (e.n_in_dim[2] - 1)
                         points = pt_inds[
@@ -2533,18 +2578,31 @@ class Mesh(MeshField):
             normal_field = mesh['normals']
             values_at_xis = normal_field.evaluate_embeddings(elem_ids, xis)
         """
+
         if new_basis is None:
             new_basis = self.elements[0].basis_functions
         list_locs = [b.node_locs for b in new_basis]
         eval_pts = np.array(all_pairings(*list_locs))
         used_fields = MeshElement(node_ids=[np.arange(eval_pts.shape[0])], basis_functions=new_basis).used_node_fields
 
-        s_hash = {}
 
         new_elements = []
         new_pts = []
 
-        for ide, elem in enumerate(self.elements):
+        #so a base mesh should have fundamentally the same topology as it's parent.
+        #i.e. a solution over the domain of the parent mesh should be a valid parameterisation of a child domain.
+        # as far as this is possible - e.g. parent field obvs cannot solve to a child field.
+        #parameterisation is a function of the node order, so we pre
+        s_hash = {}
+        #so we start the spatial hash off with an embedding of all the parent nodes.
+        for node in self.nodes:
+            ind = s_hash.get(hashp:=tuple(np.round(np.asarray(node.loc), 6)), None) 
+            if ind is None:
+                ind = len(new_pts)
+                new_pts.append(MeshNode(loc=[0] * field_dimension, **{uf:np.zeros(field_dimension) for uf in used_fields}))
+                s_hash[hashp] = ind
+
+        for ide, _ in enumerate(self.elements):
             node_locs = self.evaluate_embeddings([ide], eval_pts)
             node_ids = []
             for node in node_locs:
@@ -2567,6 +2625,20 @@ class Mesh(MeshField):
             self[field_name].true_param_array = field_params.copy()
             self[field_name].optimisable_param_bool = np.ones(field_params.shape[0], dtype=bool)
             self[field_name].optimisable_param_array = field_params.copy()
+
+        #certain things should be inhereted:
+        #the below values reflect that the field should share the same topology as the overall mesh
+        self[field_name].faces = self.faces
+        self[field_name].bmap = self.bmap
+        self[field_name]._topo_lookup = self._topo_lookup
+        self[field_name].topomap = self.topomap
+
+        ############################### the base mesh needs the fields
+        self[field_name]._generate_elem_functions()
+        self[field_name]._generate_elem_deriv_functions()
+        self[field_name]._generate_eval_function()
+        self[field_name]._generate_deriv_function()
+        self[field_name]._generate_weight_function()
 
         if field_locs is None or field_values is None:
             return
