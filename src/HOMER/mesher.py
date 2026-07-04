@@ -34,6 +34,8 @@ from jaxlib.mlir._mlir_libs import append_load_on_create_dialect
 import numpy as np
 import jax.numpy as jnp
 import jax
+from jax.scipy.sparse.linalg import cg, gmres
+from jax.experimental.sparse import BCOO
 import pyvista as pv
 from matplotlib import pyplot as plt
 from copy import deepcopy
@@ -47,7 +49,8 @@ from scipy.sparse import coo_array
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import jacobian
-from HOMER.utils import spheres_to_polydata, vol_hexahedron, make_tiling, h_tform, all_pairings, block_diagonal_jacobian, jax_aknn
+from HOMER.utils import spheres_to_polydata, vol_hexahedron, make_tiling, h_tform, all_pairings, block_diagonal_jacobian, jax_aknn, all_pairings
+from HOMER.topomap_operations import global_nodes_from_ele_localnodes, refine_connectivity
 from HOMER.mesh_decorators import expand_wide_evals, wide_eval
 
 pv.global_theme.allow_empty_mesh = True
@@ -1105,7 +1108,7 @@ class MeshField:
 
         return mesh
 
-    def _explore_topology(self, rounding_res=10):
+    def _explore_topology(self, rounding_res=5):
         """
         Explores the mesh topology, finding how neighbouring points connet to each other"""
         if self.ndim == 2:
@@ -1266,7 +1269,7 @@ class MeshField:
         return valid_elements, valid_nodes
 
 
-    def get_faces(self, rounding_res = 10) -> list[tuple[int]]:
+    def get_faces(self, rounding_res = 5) -> list[tuple[int]]:
         """
         Returns all external faces of the current mesh.
         Faces are indicated as tuples (elem_id, dim, {0,1}).
@@ -1486,6 +1489,191 @@ class MeshField:
         coarse_pts = jnp.concatenate(face_pts, axis=0)
         return coarse_pts
 
+    # @partial(jax.jit, static_argnames=("self", "max_iterations"))
+    def _xis_to_points_nr(self, elem, xi0, x_target, init_err, lbound, iterations=20, tol=1e-5, fit_params=None):
+        """
+        Newton-Raphson update in xi-space with backtracking line search.
+        JAX-optimized for jit/vmap. Breaks early on convergence.
+        """
+
+        def cond_fun(state):
+            iteration, _, _, _, _, _, _, active = state
+            # active is a boolean. When this function is vmapped, JAX handles 
+            # continuing the loop until ALL batch elements resolve to False.
+            return (iteration < iterations) & active
+
+        def body_fun(state):
+            iteration, elem, xi, r, r_mag, delta_xi, stepsize, active = state
+
+            # 1. Propose new state along the Newton direction
+            xi_prop = xi + stepsize * delta_xi
+            elem_prop, xi_mapped, _ = self.topomap(elem, xi_prop)
+
+            # 2. Evaluate proposed state
+            x_prop = self.evaluate_embeddings(elem_prop, xi_mapped, fit_params=fit_params)[0]
+            r_prop = x_target - x_prop
+            r_mag_prop = jnp.linalg.norm(r_prop)
+
+            # 3. Check for descent (did our step improve the residual?)
+            lowered = r_mag_prop < r_mag
+
+            # 4. Conditionally update variables 
+            next_elem = jnp.where(lowered, elem_prop, elem)
+            next_xi = jnp.where(lowered, xi_mapped, xi)
+            next_r = jnp.where(lowered, r_prop, r)
+            next_r_mag = jnp.where(lowered, r_mag_prop, r_mag)
+
+            # 5. Compute next Newton direction ONLY if we accepted the step.
+            # lax.cond prevents wasted Jacobian evaluations during backtracking.
+            def compute_new_dir():
+                J = self.evaluate_jacobians(next_elem, next_xi, fit_params=fit_params)[0]
+                # J_free = J * jnp.where(lbound, 0.0, 1.0)
+                J_free = jnp.where(lbound, 0.0, J)
+                Jt = J_free.T
+                delta_xi = jax.scipy.linalg.solve(Jt @ J_free, Jt @ r, assume_a='pos')
+                return jnp.where(lbound, 
+                                 jnp.zeros_like(next_xi), 
+                                 # _pseudoinverse_matvec(J_free, next_r)
+                                 delta_xi
+                                 )
+
+            def keep_old_dir():
+                return delta_xi
+
+            next_delta_xi = jax.lax.cond(lowered, compute_new_dir, keep_old_dir)
+
+            # 6. Update stepsize (grow slightly if successful, halve if failed)
+            next_stepsize = jnp.where(lowered, jnp.minimum(stepsize * 1.5, 1.0), stepsize * 0.5)
+
+            # 7. Check convergence
+            next_active = next_r_mag > tol
+
+            return (iteration + 1, next_elem, next_xi, next_r, next_r_mag, next_delta_xi, next_stepsize, next_active)
+
+        # --- Initial State Setup ---
+        init_x = self.evaluate_embeddings(elem, xi0, fit_params=fit_params)[0]
+        init_r = x_target - init_x
+        init_r_mag = jnp.linalg.norm(init_r)
+
+        init_J = self.evaluate_jacobians(elem, xi0, fit_params=fit_params)[0]
+        init_J_free = init_J * jnp.where(lbound, 0.0, 1.0)
+        init_delta_xi = jnp.where(lbound, jnp.zeros_like(xi0), _pseudoinverse_matvec(init_J_free, init_r))
+
+        init_active = init_r_mag > tol
+        init_state = (0, elem.astype(int), xi0, init_r, init_r_mag, init_delta_xi, 1.0, init_active)
+
+        # --- Execute Dynamic Loop ---
+        final_state = jax.lax.while_loop(cond_fun, body_fun, init_state)
+        _, elem_f, xi_f, r_f, _, _, _, _ = final_state
+
+        return (elem_f, xi_f), r_f
+
+    def _xis_to_points_nr_strided(self, elem, xi0, x_target, init_err, lbound, iterations=20, stride=2, tol=1e-5, fit_params=None):
+        """
+        Strided Newton-Raphson with Explicit Cholesky decomposition.
+        Uses shape-safe masking to handle scalar bounds across N-dimensional space.
+        """
+
+        def inner_body_fun(i, state):
+            iteration, elem, xi, r, r_mag, delta_xi, stepsize, active = state
+
+            def do_step():
+                # 1. Propose & Topomap
+                xi_prop = xi + stepsize * delta_xi
+                elem_prop, xi_mapped, _ = self.topomap(elem, xi_prop)
+
+                # 2. Evaluate
+                x_prop = self.evaluate_embeddings(elem_prop, xi_mapped, fit_params=fit_params)[0]
+                r_prop = x_target - x_prop
+                r_mag_prop = jnp.linalg.norm(r_prop)
+
+                # 3. Descent check
+                lowered = r_mag_prop < r_mag
+
+                next_elem = jnp.where(lowered, elem_prop, elem)
+                next_xi = jnp.where(lowered, xi_mapped, xi)
+                next_r = jnp.where(lowered, r_prop, r)
+                next_r_mag = jnp.where(lowered, r_mag_prop, r_mag)
+
+                # 4. Explicit Cholesky Jacobian Update
+                def compute_new_dir():
+                    J = self.evaluate_jacobians(next_elem, next_xi, fit_params=fit_params)[0]
+                    
+                    # Normal Equations: A = J^T J, b = J^T r
+                    Jt = J.T
+                    A = Jt @ J
+                    b = Jt @ next_r
+                    
+                    # Jitter for strict positive-definiteness
+                    A = A + jnp.eye(A.shape[0]) * 1e-7
+
+                    # Shape-safe mask using next_xi
+                    mask = jnp.where(lbound, jnp.zeros_like(next_xi), jnp.ones_like(next_xi))
+                    diag_mask = jnp.where(lbound, jnp.ones_like(next_xi), jnp.zeros_like(next_xi))
+                    
+                    A_masked = A * mask[:, None] * mask[None, :]  # Zero out bounded rows & cols
+                    A_free = A_masked + jnp.diag(diag_mask)  # Put 1.0 on bounded diagonals
+                    b_free = b * mask  # Zero out bounded targets
+                    
+                    # Force Explicit Cholesky Factorization and Solve
+                    c, lower = jax.scipy.linalg.cho_factor(A_free, lower=True)
+                    return jax.scipy.linalg.cho_solve((c, lower), b_free)
+
+                def keep_old_dir():
+                    return delta_xi
+
+                next_delta_xi = jax.lax.cond(lowered, compute_new_dir, keep_old_dir)
+                next_stepsize = jnp.where(lowered, jnp.minimum(stepsize * 1.5, 1.0), stepsize * 0.5)
+                next_active = next_r_mag > tol
+
+                return (iteration + 1, next_elem, next_xi, next_r, next_r_mag, next_delta_xi, next_stepsize, next_active)
+
+            def skip_step():
+                # If the point has converged, burn the loop iteration doing nothing
+                return state
+
+            # Only compute the heavy step if this specific point is still active
+            return jax.lax.cond(active, do_step, skip_step)
+
+
+        def outer_cond_fun(state):
+            iteration, _, _, _, _, _, _, active = state
+            return (iteration < iterations) & active
+
+        def outer_body_fun(state):
+            # Run `stride` number of iterations purely inside the fused block
+            return jax.lax.fori_loop(0, stride, inner_body_fun, state)
+
+        # --- Initial State Setup ---
+        init_x = self.evaluate_embeddings(elem, xi0, fit_params=fit_params)[0]
+        init_r = x_target - init_x
+        init_r_mag = jnp.linalg.norm(init_r)
+
+        init_J = self.evaluate_jacobians(elem, xi0, fit_params=fit_params)[0]
+        
+        # Apply the same Cholesky masking to the initial state
+        init_Jt = init_J.T
+        init_A = init_Jt @ init_J + jnp.eye(init_J.shape[1]) * 1e-7
+        
+        # Shape-safe mask using xi0
+        init_mask = jnp.where(lbound, jnp.zeros_like(xi0), jnp.ones_like(xi0))
+        init_diag_mask = jnp.where(lbound, jnp.ones_like(xi0), jnp.zeros_like(xi0))
+        
+        init_A_free = (init_A * init_mask[:, None] * init_mask[None, :]) + jnp.diag(init_diag_mask)
+        init_b_free = (init_Jt @ init_r) * init_mask
+        
+        init_c, init_lower = jax.scipy.linalg.cho_factor(init_A_free, lower=True)
+        init_delta_xi = jax.scipy.linalg.cho_solve((init_c, init_lower), init_b_free)
+
+        init_active = init_r_mag > tol
+        init_state = (0, elem.astype(int), xi0, init_r, init_r_mag, init_delta_xi, 1.0, init_active)
+
+        # --- Execute Dynamic Loop ---
+        final_state = jax.lax.while_loop(outer_cond_fun, outer_body_fun, init_state)
+        _, elem_f, xi_f, r_f, _, _, _, _ = final_state
+
+        return (elem_f, xi_f), r_f
+
     def _solve_RHS(self, el, xi, r, stepsize, lbound, fit_params=None):
         J = self.evaluate_jacobians(el, xi, fit_params=fit_params)[0]  # (fdim, ndim)
         J_free = J * jnp.where(lbound, 0.0, 1.0)
@@ -1534,7 +1722,9 @@ class MeshField:
         residual = x_target - self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params)
         return (elem_f, xi_f), residual
 
-    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False, surface_embed=False, iterations=15, max_c=None, grid_res=40, vis_max_norm=None, scene: Optional[pv.Plotter]=None, dist_filter_vector=None):
+    def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False,
+                     surface_embed=False, iterations=15, max_c=None, grid_res=40, 
+                     vis_max_norm=None, scene: Optional[pv.Plotter]=None, dist_filter_vector=None):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
         Uses an approximate nearest-neighbour search on a coarse xi grid to
@@ -1686,7 +1876,8 @@ class MeshField:
                 mf_pt = at_lo | at_hi
 
             (elem_num, embedded), res = jax.vmap(
-                lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
+                lambda elem, xi, target, rmag, lbound : self._xis_to_points_nr_strided(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
+                # lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
             )(elem_num, init_xi, points, mf_pt, jnp.linalg.norm(test_res, axis=-1))
 
             # elem_num, embedded, res = elem_num, init_xi, test_res
@@ -1730,7 +1921,7 @@ class MeshField:
             points, params = primal
             point_dot, param_dot = tangent
             xi_dot, r_dot = jax.vmap(lambda e, x, w, w_dot: embed_single_jvp(e, x, w, params, w_dot, param_dot))(ele, xi, points, point_dot)
-            tangent_out = ((jnp.zeros_like(ele, dtype=jax.float0), xi_dot), (r_dot)[:, None])
+            tangent_out = ((jnp.zeros_like(ele, dtype=jax.float0), xi_dot), (r_dot))
             return primal_out, tangent_out
 
 
@@ -1758,7 +1949,7 @@ class MeshField:
                 errors = errors[mask]
 
             line_segs = np.concatenate(
-                (np.atleast_2d(locs)[:, None], np.atleast_2d(points)[:, None]), axis=1
+                (np.atleast_2d(locs), np.atleast_2d(points)), axis=-1
             ).reshape(-1, self.fdim)
             if scene is not None:
                 s = scene
@@ -1780,10 +1971,6 @@ class MeshField:
             return (elem_num, embedded), residual
 
         return elem_num, embedded
-
-
-
-
 
     def evaluate_sobolev(self, weights=None, fit_params=None,flatten=True):
         """
@@ -1965,14 +2152,29 @@ class MeshField:
         numpy.ndarray
             Weight matrix, shape ``(n_pts, n_nodes)``.
         """
-        out_weight = np.zeros((len(eles), len(self.true_param_array)//self.fdim)) #
-        unique_elem, inv = jnp.unique_inverse(eles)
-        for ide, e in enumerate(unique_elem):
-            mask = ide == inv
-            weight_mat = self.generate_weight_matrix(xis[mask]).T #weights associated with each of the parameters for the input matrix.
-            relevant_weight_locs = (self.ele_map[e, ::self.fdim]//self.fdim).astype(int)
-            out_weight[np.ix_(mask, relevant_weight_locs)] = weight_mat
-        return out_weight
+        # out_weight = np.zeros((len(eles), len(self.true_param_array)//self.fdim)) #
+        # unique_elem, inv = jnp.unique_inverse(eles)
+        # for ide, e in enumerate(unique_elem):
+        #     mask = ide == inv
+        #     weight_mat = self.generate_weight_matrix(xis[mask]).T #weights associated with each of the parameters for the input matrix.
+        #     relevant_weight_locs = (jnp.atleast_2d(self.ele_map)[e, ::self.fdim]//self.fdim).astype(int)
+        #     out_weight[np.ix_(mask, relevant_weight_locs)] = weight_mat
+        # return out_weight
+        num_rows = eles.shape[0]
+        num_cols = self.true_param_array.shape[0] // self.fdim
+        weight_mat_all = self.generate_weight_matrix(xis).T
+        K = weight_mat_all.shape[1]
+        ele_map_2d = jnp.atleast_2d(self.ele_map)
+        all_relevant_weight_locs = (ele_map_2d[eles, ::self.fdim] // self.fdim).astype(int)  # Shape: (num_rows, K)
+        rows = jnp.repeat(jnp.arange(num_rows), K)
+        cols = all_relevant_weight_locs.ravel()
+        indices = jnp.column_stack([rows, cols])
+        data = jnp.squeeze(weight_mat_all.ravel())
+        
+        # 4. Instantiate the sparse BCOO matrix
+        out_weight = jnp.zeros((num_rows, num_cols))
+        # jax.experimental.sparse.BCOO((data, indices), shape=(num_rows, num_cols))       
+        return out_weight.at[(rows, cols)].add(data)
 
     def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, skip_bool=False):
         """Fit nodal parameters by solving a linear least-squares problem.
@@ -2013,14 +2215,11 @@ class MeshField:
             A = weight_mat
             b = targets
 
-        # cond_a = np.linalg.cond(A, p=None)
-        # new_params, residual, rank, s = jnp.linalg.lstsq(np.asarray(A).astype(np.double), np.asarray(b).astype(np.double))
         new_params, residual, rank, s = jnp.linalg.lstsq(A,b)
-        
-        if not skip_bool:
-            if rank < A.shape[1]:
-                # logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")
-                pass
+        # if not skip_bool:
+        #     if rank < A.shape[1]:
+        #         logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")
+        #         pass
 
         # print('residual error:', residual)
         if return_params:
@@ -2032,8 +2231,8 @@ class MeshField:
 
 
     ################################# REFINEMENT
-    def refine(self, refinement_factor: Optional[int]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
-               clean_nodes = True):
+    def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
+               clean_nodes = True, plot=False):
         """Subdivide every element, increasing the mesh resolution.
 
         Each existing element is replaced by ``refinement_factor ** ndim``
@@ -2066,115 +2265,63 @@ class MeshField:
         """
         assert not(refinement_factor is not None and by_xi_refinement is not None), "Refinement factor and refining by defined xi are mutually exclusive."
 
-        ref_res = 5
+        #input handling, map both refinement factors and values to the same array. 
+        if refinement_factor is not None:
+            if isinstance(refinement_factor, int):
+                refinement_factor = [refinement_factor] * self.ndim
+            xi_locs = [np.linspace(0,1,rf+1) for rf in refinement_factor]
+        elif by_xi_refinement is not None:
+            refinement_factor = [len(xival) - 1 for xival in by_xi_refinement]
+            xi_locs = by_xi_refinement
+        else:
+            raise ValueError("one of refinement factor and by_xi_refinement must be defined")
+        xi_locs = [np.array(x) for x in xi_locs]
+        scales = [np.diff(x) for x in xi_locs]
 
-        new_elements = []
-        spatial_hash = {tuple(np.round(node.loc, ref_res).tolist()):idn for idn, node in enumerate(self.nodes)} 
-        
-        for ide, e in enumerate(self.elements): #MAKE THE POINTS TO EVAL AT
-            intermediate_node_number = np.array(e.n_in_dim) - 2
-            if refinement_factor is not None:
-                if refinement_factor < 2:
-                    raise ValueError("Refining by less than 2 will not change the mesh")
-                lr = (intermediate_node_number + 1) * refinement_factor + 1 
-                if e.ndim==2:
-                    eval_pts = np.column_stack([x.flatten() for x in np.array(np.mgrid[:lr[0], :lr[1]])/(lr[:, None, None]-1)])
-                elif e.ndim==3:
-                    eval_pts = np.column_stack([x.flatten() for x in np.array(np.mgrid[:lr[0], :lr[1], :lr[2]])/(lr[:, None, None, None]-1)])
-                ref_array = np.ones(e.ndim) * refinement_factor
-            if by_xi_refinement is not None:
-                for b in by_xi_refinement:
-                    assert b[0]==0 and b[-1] == 1, "Provided b arrays must start with 0 and and with 1"
-                new_xi_refinement = []
-                lr = []
-                for idb, b in enumerate(by_xi_refinement):
-                    n_points = (len(b)-1) * (intermediate_node_number[idb] + 1) + 1 
-                    lr.append(n_points)
-                    new_xi_refinement.append(np.interp(np.linspace(0,1, n_points), np.linspace(0,1, len(b)), b))
-                eval_pts = np.column_stack([x.flatten() for x in np.meshgrid(*new_xi_refinement, indexing='ij')])
-                if self.ndim == 2:
-                    ref_array = np.array([len(by_xi_refinement[i]) for i in [0,1]]) - 1
-                else:
-                    ref_array = np.array([len(by_xi_refinement[i]) for i in [0,1, 2]]) - 1
-        
-            pts = self.evaluate_embeddings(np.array([ide]), eval_pts)
-            additional_pts = []
-            deriv_bound = np.where([np.any([st[:2] == 'dx' for st in b.weights]) for b in e.basis_functions] )[0]
-            for d_val in EVAL_PATTERN[len(e.used_node_fields)]:
-                #calculate the additional derivatives in the directions that need them
-                derivs = [0,0,0]
-                for dl, di in zip(deriv_bound, d_val): 
-                    derivs[dl] = di
-                d_scale = np.mean(ref_array[np.where(np.array(d_val))])
-                additional_pts.append(self.evaluate_deriv_embeddings(np.array([ide]), eval_pts, derivs=derivs)/d_scale)
+        basis = self.elements[0].basis_functions
+        used_fields = self.elements[0].used_node_fields
 
-            #check the generated points against the element hashmap.
-            pt_index_array = [] 
-            for idpt, pt in enumerate(pts):
-                ind = spatial_hash.get(hashp:=tuple(np.round(np.asarray(pt), ref_res)), None) 
-                # print(hashp, "hit: ", not ind is None)
-                new_vals = {k:np.array(v) for k, v in zip(e.used_node_fields, [a[idpt] for a in additional_pts])}
-                if ind is None:
-                    node = MeshNode(pt, **new_vals)
-                    self.add_node(node)
-                    pt_index_array.append(len(self.nodes)-1)
-                    spatial_hash[hashp] = len(self.nodes)-1
-                else:
-                    pt_index_array.append(ind)
-                    self.nodes[ind].update(new_vals)
-                # print("lptindex ", len(pt_index_array), len(self.nodes))
+        new_topo_lookup, parent_connectivity = refine_connectivity(self._topo_lookup, refinement_factor)
+        eval_pts = np.array(all_pairings(*[b.node_locs for b in basis]))
+        unique_nodes, ele_indexes = global_nodes_from_ele_localnodes(local_points=eval_pts, connectivity=new_topo_lookup)
 
-            if refinement_factor is not None:
-                if e.ndim==2:
-                    n_new = [refinement_factor, refinement_factor]
-                elif e.ndim==3:
-                    n_new = [refinement_factor] * 3
-            elif by_xi_refinement is not None:
-                n_new = [len(b) - 1 for b in by_xi_refinement]
-            
-            #lr now defines the total number of points per dimension of this elementlet
-            pt_inds = np.array(pt_index_array).reshape(lr)
+        new_pts = [MeshNode(loc=np.zeros(self.fdim), **{uf:np.zeros(self.fdim) for uf in used_fields}) for _ in unique_nodes]
+        new_elements = [MeshElement(node_indexes=ele_pts, basis_functions=basis) for ele_pts in ele_indexes]
+        new_mesh = MeshField(nodes=new_pts, elements=new_elements)
+        new_mesh.generate_mesh()
 
+        to_eval = [b.order+2 for b in basis]
+        xi_grid = np.column_stack([xi.ravel() for xi in np.mgrid[*[slice(0.1, 0.9, e*1j) for e in to_eval]]])
 
-            for i in range(n_new[0]):
-                i_loc = i * (e.n_in_dim[0] -1) 
-                for j in range(n_new[1]):
-                    j_loc = j * (e.n_in_dim[1] -1)
+        new_eles = np.repeat(np.arange(ele_indexes.shape[0]), xi_grid.shape[0])
+        new_xi = np.tile(xi_grid, (ele_indexes.shape[0], 1))
+        old_eles = new_eles // np.prod(refinement_factor)
+        S = np.column_stack([x[p] for x, p in zip(xi_locs, parent_connectivity.T)])
+        D = np.column_stack([x[p] for x, p in zip(scales, parent_connectivity.T)])
 
-                    if e.ndim == 2:
-                        points = pt_inds[i_loc:i_loc + e.n_in_dim[0], j_loc:j_loc + e.n_in_dim[1]]
+        offsets = S[:, None] + xi_grid[None] * D[:, None]
+        old_xis = offsets.reshape(-1, self.ndim)
+        #new_eles and shape need to line up
 
-                        elem_id = None
-                        if e.id is not None:
-                            elem_id = str(e.id) + f"_subelem_{i}_{j}"
+        targets = self.evaluate_embeddings_ele_xi_pair(old_eles, old_xis)
 
-                        new_e = MeshElement(node_indexes=points.T.flatten().tolist(), basis_functions=e.basis_functions, id=elem_id)
-                        new_elements.append(new_e)
-                        continue
+        if plot:
+            test = pv.lines_from_points(np.array(targets))
+            test['data'] = np.arange(targets.shape[0])
+            test.plot(render_lines_as_tubes=True, cmap='jet', line_width=15)
 
-                    for k in range(n_new[2]): 
-                        k_loc = k * (e.n_in_dim[2] - 1)
-                        points = pt_inds[
-                            i_loc:i_loc + e.n_in_dim[0],
-                            j_loc:j_loc + e.n_in_dim[1],
-                            k_loc:k_loc + e.n_in_dim[2],
-                        ]
-                        # points = points.transpose((0,2,1))
-                        points = points.flatten(order="F").astype(int)
+        w_mat = new_mesh.get_xi_weight_mat(new_eles, new_xi)
+        # plt.imshow(w_mat);plt.show()
+        new_mesh.linear_fit(targets, w_mat) 
+        self.elements = new_mesh.elements
 
-                        elem_id = None
-                        if e.id is not None:
-                            elem_id = str(e.id) + f"_subelem_{i}_{j}_{k}"
+         
+        # spatial_hash = {tuple(np.round(node.loc, ref_res).tolist()):idn for idn, node in enumerate(self.nodes)} 
 
-                        new_e = MeshElement(node_indexes=points.tolist(), basis_functions=e.basis_functions, BP_inds=e.BasisProductInds, id=elem_id)
-                        new_elements.append(new_e)
-          
-
-        self.elements = new_elements
-        if clean_nodes:
-            self._clean_pts()
+        self.nodes = new_mesh.nodes
         self.generate_mesh()
-            
+        return
+
     def _update_id_mappings(self):
         self.node_id_to_ind = {}
         self.element_id_to_ind = {}
@@ -2281,9 +2428,6 @@ class MeshField:
         new_mesh = deepcopy(self)
 
         s_hash = {}
-        def all_pairings(*lists):
-            return [t[::-1] for t in itertools.product(*reversed(copy(lists)))]
-
         list_locs = [b.node_locs for b in new_basis]
         eval_pts = np.array(all_pairings(*list_locs))
         new_elements = []
@@ -2291,20 +2435,15 @@ class MeshField:
 
         used_fields = MeshElement(node_ids=[np.arange(eval_pts.shape[0])], basis_functions=new_basis).used_node_fields
 
-        for ide, elem in enumerate(self.elements):
-            node_locs = self.evaluate_embeddings([ide], eval_pts)
-            node_ids = []
-            for node in node_locs:
-                ind = s_hash.get(hashp:=tuple(np.round(np.asarray(node), 6)), None) 
-                if ind is None:
-                    ind = len(new_pts)
-                    new_pts.append(MeshNode(loc=node, **{uf:np.zeros(self.fdim) for uf in used_fields}))
-                    s_hash[hashp] = ind
-                node_ids.append(ind)
-            element = MeshElement(node_indexes=node_ids, basis_functions=new_basis)
-            new_elements.append(element)
+        eval_pts = np.array(eval_pts)
 
+        unique_nodes, ele_indexes = global_nodes_from_ele_localnodes(eval_pts, self._topo_lookup)
+        for _ in unique_nodes:
+            new_pts.append(MeshNode(loc=np.zeros(self.fdim), **{uf:np.zeros(self.fdim) for uf in used_fields}))
+        for ele_pts in ele_indexes:
+            new_elements.append(MeshElement(node_indexes=ele_pts, basis_functions=new_basis))
         new_mesh = MeshField(nodes=new_pts, elements=new_elements)
+
         egrid = self.xi_grid(res=res, boundary_points=False)
         el = (np.ones((1, res**self.ndim)) * np.arange(len(self.elements))[:, None]).flatten().astype(int)
         xi = np.tile(egrid.reshape(-1, self.ndim), (len(self.elements), 1))
@@ -2375,7 +2514,7 @@ class Mesh(MeshField):
         assert self.elements[0].ndim == value.elements[0].ndim, 'Feilds must share the same dimensionality of basis components'
         self.fields[key] = value
 
-    def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True):
+    def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True, plot=False):
         """Refine the primary geometry *and* all secondary fields simultaneously.
 
         Calls :meth:`MeshField.refine` on the coordinate mesh and on every
@@ -2390,9 +2529,9 @@ class Mesh(MeshField):
         clean_nodes:
             Remove unreferenced nodes after refinement.
         """
-        super().refine(refinement_factor, by_xi_refinement, clean_nodes)
+        super().refine(refinement_factor, by_xi_refinement, clean_nodes, plot)
         for field in self.fields.values():
-            field.refine(refinement_factor, by_xi_refinement, clean_nodes)
+            field.refine(refinement_factor, by_xi_refinement, clean_nodes, plot)
 
     def rebase(self, new_basis: BasisGroup, in_place=False, res=10) -> 'Mesh':
         """ Rebases self, capturing the rebase of the underlying mesh field.
@@ -2585,7 +2724,6 @@ class Mesh(MeshField):
         eval_pts = np.array(all_pairings(*list_locs))
         used_fields = MeshElement(node_ids=[np.arange(eval_pts.shape[0])], basis_functions=new_basis).used_node_fields
 
-
         new_elements = []
         new_pts = []
 
@@ -2596,7 +2734,7 @@ class Mesh(MeshField):
         s_hash = {}
         #so we start the spatial hash off with an embedding of all the parent nodes.
         for node in self.nodes:
-            ind = s_hash.get(hashp:=tuple(np.round(np.asarray(node.loc), 6)), None) 
+            ind = s_hash.get(hashp:=tuple(np.round(np.asarray(node.loc).astype(float), 5)), None) 
             if ind is None:
                 ind = len(new_pts)
                 new_pts.append(MeshNode(loc=[0] * field_dimension, **{uf:np.zeros(field_dimension) for uf in used_fields}))
@@ -2606,11 +2744,13 @@ class Mesh(MeshField):
             node_locs = self.evaluate_embeddings([ide], eval_pts)
             node_ids = []
             for node in node_locs:
-                ind = s_hash.get(hashp:=tuple(np.round(np.asarray(node), 6)), None) 
+                ind = s_hash.get(hashp:=tuple(np.round(np.asarray(node).astype(float), 5)), None) 
                 if ind is None:
                     ind = len(new_pts)
                     new_pts.append(MeshNode(loc=[0] * field_dimension, **{uf:np.zeros(field_dimension) for uf in used_fields}))
                     s_hash[hashp] = ind
+                # else:
+                #     print('hash hit')
                 node_ids.append(ind)
             element = MeshElement(node_indexes=node_ids, basis_functions=new_basis)
             new_elements.append(element)

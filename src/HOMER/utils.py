@@ -20,6 +20,9 @@ from scipy.sparse import csr_array
 import jax
 import functools
 
+def all_pairings(*lists):
+    return [t[::-1] for t in itertools.product(*reversed(copy(lists)))]
+
 def validate_and_extract_topology_2d(m):
     """
     Validates if the mapping array m represents a valid 2D grid homotopic to a square,

@@ -41,7 +41,7 @@ pts[:, 0] = 0.6
 normal = mesh.evaluate_normals_ele_xi_pair(ele, xi)
 n_normal = normal/np.linalg.norm(normal, axis=-1, keepdims=True)
 r_normal = res/np.linalg.norm(res, axis=-1, keepdims=True)
-product = np.abs(np.sum(n_normal*r_normal[:, 0], axis=-1))
+product = np.abs(np.sum(n_normal*r_normal, axis=-1))
 print("mean normal similarity: ", np.mean(product), "This should essentially be 1")
 
 
@@ -56,8 +56,8 @@ point7 = MeshNode(loc=([1,1,0]), du=[0,0,0], dv=[0,0,0], dw = ([1,0.5,-0.5]),   
 
 
 element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=(H3Basis, H3Basis, H3Basis))
-
 mesh1 = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1).rebase([H3Basis]*3)
+mesh1.refine(2)
 
 pts = np.random.rand(1000, 3) * 1.5 - 0.25
 

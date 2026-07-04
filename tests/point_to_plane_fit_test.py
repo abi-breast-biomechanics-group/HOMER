@@ -34,8 +34,13 @@ point0.fix_parameter('loc')
 point1.fix_parameter('loc')
 point2.fix_parameter('loc')
 point3.fix_parameter('loc')
-mesh.refine(6)
+# mesh.refine(1)
+# mesh.plot(labels=True)
+
+# for n in [0, 17, 38, 48]:
+#     mesh.nodes[n].fix_parameter('loc')
 mesh.generate_mesh()
+
 
 
 s = pv.Plotter()
@@ -59,7 +64,7 @@ def loc_dist(params):
 jac_base = np.zeros((np.prod(pts.shape), mesh.true_param_array.shape[0]))
 out_ind = 0
 for e in eles:
-    local_map = mesh.ele_map[e]
+    local_map = mesh.ele_map[e].astype(int)
     jac_base[out_ind:out_ind+3, local_map] = 1; 
     out_ind+=3
 jac_base = jac_base[:, mesh.optimisable_param_bool]
@@ -77,7 +82,7 @@ def build_jacobian(ele_indices, ele_map, param_locs, total_params):
     rows_flat = jnp.broadcast_to(rows, (E, 3, K)).flatten()
     cols_flat = jnp.broadcast_to(cols, (E, 3, K)).flatten()
     jac_base = jnp.zeros((E * 3, total_params))
-    jac_base = jac_base.at[rows_flat, cols_flat].set(1.0)
+    jac_base = jac_base.at[rows_flat.astype(int), cols_flat.astype(int)].set(1.0)
     masked_jac = jac_base[:, param_locs]
     return masked_jac
 
@@ -106,7 +111,7 @@ ts2 = time.time()
 print(f"Dynamic took {(ts1-ts0)/1} seconds, Static took {(ts2 - ts1)/1} seconds")
 
 
-res = least_squares(fitting_function, x0=mesh.optimisable_param_array, jac=jacobian_dynamic, verbose=2, max_nfev=30)
+res = least_squares(fitting_function, x0=mesh.optimisable_param_array, jac=jacobian_static, verbose=2, max_nfev=30)
 
 mesh.update_from_params(res.x)
 

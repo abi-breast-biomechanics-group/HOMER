@@ -147,6 +147,7 @@ def N2_weights(w0, w1, bp_inds):
     def one_pair(ind):
         i, j = ind[0], ind[1]
         return w0[:, i] * w1[:, j]   # (n_pts,)
+
     return jax.vmap(one_pair, in_axes=0)(bp_inds)
 
 @jax.jit
@@ -184,11 +185,11 @@ def B3(x) -> jnp.ndarray:
     :return: basis weights
     """
 
-    return jnp.concatenate((
-        (1 - x)**3,
-        3*x*((1 - x)**2),
-        3*(x**2) * (1 - x),
-        x**3,
+    return jnp.column_stack((
+        (1 - x)**3/6,
+        (3*x**3 - 6*x**2 + 4)/6,
+        (-3*(x**3) + 3*x**2 + 3 * x + 1)/6,
+        (x**3)/6,
     ))
 
 def B3d1(x) -> jnp.ndarray:
@@ -200,7 +201,7 @@ def B3d1(x) -> jnp.ndarray:
     :return: basis weights
     """
 
-    return jnp.concatenate((
+    return jnp.column_stack((
         (1 - x)**3,
         3*x*((1 - x)**2),
         3*(x**2) * (1 - x),
@@ -216,7 +217,7 @@ def B3d1d1(x) -> jnp.ndarray:
     :return: basis weights
     """
 
-    return jnp.concatenate((
+    return jnp.column_stack((
         (1 - x)**3,
         3*x*((1 - x)**2),
         3*(x**2) * (1 - x),
@@ -482,3 +483,14 @@ class L4Basis(AbstractBasis):
     deriv = [L4, L4d1]
     order = 4
     node_locs = [0/4, 1/4, 2/4, 3/4, 4/4]
+
+@dataclass
+class B3Basis(AbstractBasis):
+    """Quartic Lagrange basis (C2 continuity, 4 nodes per element per direction, but all shared accross multiple nodes.).
+    """
+
+    fn = B3
+    weights = ['x0', 'x1', 'x2', 'x3']
+    deriv = [B3, B3d1, B3d1d1]
+    order = 3
+    node_locs = [-1, 0, 1, 2] #hat t do this # yeah buddy get down with this.

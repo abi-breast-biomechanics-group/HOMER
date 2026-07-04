@@ -17,13 +17,11 @@ mesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, poi
 mesh_ref = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1)
 
 s = pv.Plotter()
-# mesh.plot(scene=s, node_colour='b', node_size=20)
-# objMesh_refine.refine(refinement_factor=2)
-mesh_ref.refine(refinement_factor=2)
-mesh_ref = mesh_ref.rebase([H3Basis]*3)
+mesh_ref.refine(2)
+# mesh_ref = mesh_ref.rebase([H3Basis]*3)
 # objMesh_refine.plot(scene=s, node_colour='g', node_size=15)
 # objMesh_refine.refine(by_xi_refinement=([0, 1/4, 2/4, 3/4, 1], [0, 1/3, 2/3, 1], [0, 1/2, 1]))
 # objMesh_refine.refine(by_xi_refinement=([0, 2/4, 1], [0, 1/2, 1], [0, 1/2, 1]))
-mesh_ref.plot(scene=s, node_colour='r', node_size=10, mesh_opacity=0.01, labels=True)
+mesh_ref.plot(scene=s, node_colour='r')
 s.show()
 
