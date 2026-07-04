@@ -191,38 +191,21 @@ def B3(x) -> jnp.ndarray:
         (-3*(x**3) + 3*x**2 + 3 * x + 1)/6,
         (x**3)/6,
     ))
-
 def B3d1(x) -> jnp.ndarray:
-    """
-    First derivative with respect to x of the Cubic Bezier basis function.
-    :param x: points to interpolaet
-
-    :param x: points to interpolate
-    :return: basis weights
-    """
-
     return jnp.column_stack((
-        (1 - x)**3,
-        3*x*((1 - x)**2),
-        3*(x**2) * (1 - x),
-        3*x**2,
+        -(1 - x)**2 / 2,
+        (3*x**2 - 4*x) / 2,
+        (-3*x**2 + 2*x + 1) / 2,
+        (x**2) / 2,
     ))
-
 def B3d1d1(x) -> jnp.ndarray:
-    """
-    Second derivative with respect to x of the Cubic Bezier basis function.
-    :param x: points to interpolaet
-
-    :param x: points to interpolate
-    :return: basis weights
-    """
-
     return jnp.column_stack((
-        (1 - x)**3,
-        3*x*((1 - x)**2),
-        3*(x**2) * (1 - x),
-        6*x,
+        1 - x,
+        3 * x - 2,
+        -3 * x + 1,
+        x,
     ))
+
 
 def L1(x) -> jnp.ndarray:
     """

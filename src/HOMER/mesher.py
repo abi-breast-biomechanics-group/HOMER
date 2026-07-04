@@ -50,8 +50,10 @@ from scipy.sparse import coo_array
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import jacobian
 from HOMER.utils import spheres_to_polydata, vol_hexahedron, make_tiling, h_tform, all_pairings, block_diagonal_jacobian, jax_aknn, all_pairings
+from HOMER.utils import approx_closest_indices_Morton_nd
 from HOMER.topomap_operations import global_nodes_from_ele_localnodes, refine_connectivity
 from HOMER.mesh_decorators import expand_wide_evals, wide_eval
+from HOMER.closed_form_matrix_solves import explicit_solve_2x2, explicit_solve_3x3
 
 pv.global_theme.allow_empty_mesh = True
 
@@ -1489,86 +1491,7 @@ class MeshField:
         coarse_pts = jnp.concatenate(face_pts, axis=0)
         return coarse_pts
 
-    # @partial(jax.jit, static_argnames=("self", "max_iterations"))
-    def _xis_to_points_nr(self, elem, xi0, x_target, init_err, lbound, iterations=20, tol=1e-5, fit_params=None):
-        """
-        Newton-Raphson update in xi-space with backtracking line search.
-        JAX-optimized for jit/vmap. Breaks early on convergence.
-        """
-
-        def cond_fun(state):
-            iteration, _, _, _, _, _, _, active = state
-            # active is a boolean. When this function is vmapped, JAX handles 
-            # continuing the loop until ALL batch elements resolve to False.
-            return (iteration < iterations) & active
-
-        def body_fun(state):
-            iteration, elem, xi, r, r_mag, delta_xi, stepsize, active = state
-
-            # 1. Propose new state along the Newton direction
-            xi_prop = xi + stepsize * delta_xi
-            elem_prop, xi_mapped, _ = self.topomap(elem, xi_prop)
-
-            # 2. Evaluate proposed state
-            x_prop = self.evaluate_embeddings(elem_prop, xi_mapped, fit_params=fit_params)[0]
-            r_prop = x_target - x_prop
-            r_mag_prop = jnp.linalg.norm(r_prop)
-
-            # 3. Check for descent (did our step improve the residual?)
-            lowered = r_mag_prop < r_mag
-
-            # 4. Conditionally update variables 
-            next_elem = jnp.where(lowered, elem_prop, elem)
-            next_xi = jnp.where(lowered, xi_mapped, xi)
-            next_r = jnp.where(lowered, r_prop, r)
-            next_r_mag = jnp.where(lowered, r_mag_prop, r_mag)
-
-            # 5. Compute next Newton direction ONLY if we accepted the step.
-            # lax.cond prevents wasted Jacobian evaluations during backtracking.
-            def compute_new_dir():
-                J = self.evaluate_jacobians(next_elem, next_xi, fit_params=fit_params)[0]
-                # J_free = J * jnp.where(lbound, 0.0, 1.0)
-                J_free = jnp.where(lbound, 0.0, J)
-                Jt = J_free.T
-                delta_xi = jax.scipy.linalg.solve(Jt @ J_free, Jt @ r, assume_a='pos')
-                return jnp.where(lbound, 
-                                 jnp.zeros_like(next_xi), 
-                                 # _pseudoinverse_matvec(J_free, next_r)
-                                 delta_xi
-                                 )
-
-            def keep_old_dir():
-                return delta_xi
-
-            next_delta_xi = jax.lax.cond(lowered, compute_new_dir, keep_old_dir)
-
-            # 6. Update stepsize (grow slightly if successful, halve if failed)
-            next_stepsize = jnp.where(lowered, jnp.minimum(stepsize * 1.5, 1.0), stepsize * 0.5)
-
-            # 7. Check convergence
-            next_active = next_r_mag > tol
-
-            return (iteration + 1, next_elem, next_xi, next_r, next_r_mag, next_delta_xi, next_stepsize, next_active)
-
-        # --- Initial State Setup ---
-        init_x = self.evaluate_embeddings(elem, xi0, fit_params=fit_params)[0]
-        init_r = x_target - init_x
-        init_r_mag = jnp.linalg.norm(init_r)
-
-        init_J = self.evaluate_jacobians(elem, xi0, fit_params=fit_params)[0]
-        init_J_free = init_J * jnp.where(lbound, 0.0, 1.0)
-        init_delta_xi = jnp.where(lbound, jnp.zeros_like(xi0), _pseudoinverse_matvec(init_J_free, init_r))
-
-        init_active = init_r_mag > tol
-        init_state = (0, elem.astype(int), xi0, init_r, init_r_mag, init_delta_xi, 1.0, init_active)
-
-        # --- Execute Dynamic Loop ---
-        final_state = jax.lax.while_loop(cond_fun, body_fun, init_state)
-        _, elem_f, xi_f, r_f, _, _, _, _ = final_state
-
-        return (elem_f, xi_f), r_f
-
-    def _xis_to_points_nr_strided(self, elem, xi0, x_target, init_err, lbound, iterations=20, stride=2, tol=1e-5, fit_params=None):
+    def _xis_to_points_nr_strided(self, elem, xi0, x_target, init_err, lbound, iterations=20, stride=5, tol=1e-5, fit_params=None):
         """
         Strided Newton-Raphson with Explicit Cholesky decomposition.
         Uses shape-safe masking to handle scalar bounds across N-dimensional space.
@@ -1595,29 +1518,29 @@ class MeshField:
                 next_r = jnp.where(lowered, r_prop, r)
                 next_r_mag = jnp.where(lowered, r_mag_prop, r_mag)
 
-                # 4. Explicit Cholesky Jacobian Update
                 def compute_new_dir():
                     J = self.evaluate_jacobians(next_elem, next_xi, fit_params=fit_params)[0]
-                    
-                    # Normal Equations: A = J^T J, b = J^T r
                     Jt = J.T
                     A = Jt @ J
                     b = Jt @ next_r
                     
-                    # Jitter for strict positive-definiteness
                     A = A + jnp.eye(A.shape[0]) * 1e-7
 
-                    # Shape-safe mask using next_xi
                     mask = jnp.where(lbound, jnp.zeros_like(next_xi), jnp.ones_like(next_xi))
                     diag_mask = jnp.where(lbound, jnp.ones_like(next_xi), jnp.zeros_like(next_xi))
                     
-                    A_masked = A * mask[:, None] * mask[None, :]  # Zero out bounded rows & cols
-                    A_free = A_masked + jnp.diag(diag_mask)  # Put 1.0 on bounded diagonals
-                    b_free = b * mask  # Zero out bounded targets
+                    A_masked = A * mask[:, None] * mask[None, :]  
+                    A_free = A_masked + jnp.diag(diag_mask)       
+                    b_free = b * mask                             
                     
-                    # Force Explicit Cholesky Factorization and Solve
-                    c, lower = jax.scipy.linalg.cho_factor(A_free, lower=True)
-                    return jax.scipy.linalg.cho_solve((c, lower), b_free)
+                    # Dimension-routed explicit solve
+                    if self.ndim == 2:
+                        return explicit_solve_2x2(A_free, b_free)
+                    elif self.ndim == 3:
+                        return explicit_solve_3x3(A_free, b_free)
+                    else:
+                        c, lower = jax.scipy.linalg.cho_factor(A_free, lower=True)
+                        return jax.scipy.linalg.cho_solve((c, lower), b_free)
 
                 def keep_old_dir():
                     return delta_xi
@@ -1634,6 +1557,7 @@ class MeshField:
 
             # Only compute the heavy step if this specific point is still active
             return jax.lax.cond(active, do_step, skip_step)
+            # return do_step
 
 
         def outer_cond_fun(state):
@@ -1674,56 +1598,108 @@ class MeshField:
 
         return (elem_f, xi_f), r_f
 
-    def _solve_RHS(self, el, xi, r, stepsize, lbound, fit_params=None):
-        J = self.evaluate_jacobians(el, xi, fit_params=fit_params)[0]  # (fdim, ndim)
-        J_free = J * jnp.where(lbound, 0.0, 1.0)
-        return jnp.where(lbound, jnp.zeros(xi.shape[0]), _pseudoinverse_matvec(J_free, r)) * stepsize
-
-    # @partial(jax.jit, static_argnames=("self", "iterations"))
-    def _xis_to_points(self, elem, xi0, x_target, init_err, lbound, iterations, fit_params=None):
+    def _xis_to_points_nr_static(self, elem, xi0, x_target, init_err, lbound, iterations=20, tol=1e-5, fit_params=None):
         """
-        RK4-like fixed-iteration update in xi-space, JAX-optimized for jit/vmap.
-        Uses a basic descent check to garuntee convergence.
-        Returns: ((elem, xi), residual)
+        Newton-Raphson 'Solid Brick' version.
+        Uses jax.lax.fori_loop for 100% fixed execution paths.
+        Eliminates all dynamic control flow (no jax.lax.cond, no while_loop).
         """
+        tol_sq = jnp.array(tol, dtype=x_target.dtype) ** 2
 
-        def body(_, state):
-            elem_prev, xi_prev, elem, xi, r_mag, stepsize = state
-            # jax.debug.print("elem {elem}, xi {xi}, stepsize {stp}", elem=elem, xi=xi, stp=stepsize)
-            current_x = self.evaluate_embeddings(elem, xi, fit_params=fit_params)[0]
-            r = x_target - current_x
-            r_dist = jnp.linalg.norm(r)
-            # check if it was actually lowered, if not, just decrease stepsize
-            lowered = r_dist < r_mag
+        def body_fun(i, state):
+            # Note: fori_loop passes the loop index 'i' as the first argument
+            elem, xi, r, r_mag_sq, delta_xi, stepsize = state
+
+            # 1. Propose & Topomap (Unconditional computation)
+            xi_prop = xi + stepsize * delta_xi
+            elem_prop, xi_mapped, _ = self.topomap(elem, xi_prop)
+
+            # 2. Evaluate (Unconditional computation)
+            x_prop = self.evaluate_embeddings(elem_prop, xi_mapped, fit_params=fit_params)[0]
+            r_prop = x_target - x_prop
+            r_mag_prop_sq = jnp.sum(jnp.square(r_prop))
+
+            # 3. Masking Logic: Did it lower? Is it still active?
+            lowered = r_mag_prop_sq < r_mag_sq
+            active = r_mag_sq > tol_sq
             
-            # if not lowered, switch on the bound
+            # We only accept the step if the error lowered AND the point hasn't converged
+            accept = lowered & active
+
+            next_elem = jnp.where(accept, elem_prop, elem)
+            next_xi = jnp.where(accept, xi_mapped, xi)
+            next_r = jnp.where(accept, r_prop, r)
+            next_r_mag_sq = jnp.where(accept, r_mag_prop_sq, r_mag_sq)
+
+            # 4. Compute New Direction (Unconditional computation)
+            J = self.evaluate_jacobians(next_elem, next_xi, fit_params=fit_params)[0]
+            Jt = J.T
+            A = Jt @ J
+            b = Jt @ next_r
             
-            elem = jnp.where(lowered, elem, elem_prev)
-            xi = jnp.where(lowered, xi, xi_prev)
-            stepsize = jnp.where(lowered, stepsize, stepsize/2)
-            r_mag = jnp.where(lowered, r_dist, r_mag)
+            A = A + jnp.eye(A.shape[0]) * 1e-5
 
-            # RK4 stages
-            k1 = self._solve_RHS(elem, xi, r, stepsize, lbound, fit_params=fit_params)
-            k2 = self._solve_RHS(elem, xi + 0.5 * k1, r, stepsize, lbound, fit_params=fit_params)
-            k3 = self._solve_RHS(elem, xi + 0.5 * k2, r, stepsize, lbound, fit_params=fit_params)
-            k4 = self._solve_RHS(elem, xi + k3, r, stepsize, lbound, fit_params=fit_params)
+            mask = jnp.where(lbound, jnp.zeros_like(next_xi), jnp.ones_like(next_xi))
+            diag_mask = jnp.where(lbound, jnp.ones_like(next_xi), jnp.zeros_like(next_xi))
+            
+            A_masked = A * mask[:, None] * mask[None, :]  
+            A_free = A_masked + jnp.diag(diag_mask)       
+            b_free = b * mask                             
+            
+            # Dimension-routed explicit solve
+            if self.ndim == 2:
+                new_delta_xi = explicit_solve_2x2(A_free, b_free)
+            elif self.ndim == 3:
+                new_delta_xi = explicit_solve_3x3(A_free, b_free)
+            else:
+                c, lower = jax.scipy.linalg.cho_factor(A_free, lower=True)
+                new_delta_xi = jax.scipy.linalg.cho_solve((c, lower), b_free)
 
-            xi_new = xi + (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
-            elem_new, xi_mapped, _ = self.topomap(elem, xi_new)
+            # 5. State Updates
+            # Only overwrite the direction if we accepted the step
+            next_delta_xi = jnp.where(accept, new_delta_xi, delta_xi)
+            
+            # If accepted, grow stepsize. If rejected, shrink it.
+            # If the point is converged (!active), this will just shrink to 0 safely.
+            next_stepsize = jnp.where(accept, jnp.minimum(stepsize * 1.5, 1.0), stepsize * 0.5)
 
+            return (next_elem, next_xi, next_r, next_r_mag_sq, next_delta_xi, next_stepsize)
 
-            return (elem, xi, elem_new, xi_mapped, r_mag, stepsize)
+        # --- Initial State Setup ---
+        init_x = self.evaluate_embeddings(elem, xi0, fit_params=fit_params)[0]
+        init_r = x_target - init_x
+        init_r_mag_sq = jnp.sum(jnp.square(init_r))
 
-        _, _, elem_f, xi_f, _, _ = jax.lax.fori_loop(
-            0, iterations, body, (elem.astype(int), xi0, elem.astype(int), xi0, init_err, 1)
-        )
+        init_J = self.evaluate_jacobians(elem, xi0, fit_params=fit_params)[0]
+        
+        init_Jt = init_J.T
+        init_A = init_Jt @ init_J + jnp.eye(init_J.shape[1]) * 1e-7
+        
+        init_mask = jnp.where(lbound, jnp.zeros_like(xi0), jnp.ones_like(xi0))
+        init_diag_mask = jnp.where(lbound, jnp.ones_like(xi0), jnp.zeros_like(xi0))
+        
+        init_A_free = (init_A * init_mask[:, None] * init_mask[None, :]) + jnp.diag(init_diag_mask)
+        init_b_free = (init_Jt @ init_r) * init_mask
+        
+        if self.ndim == 2:
+            init_delta_xi = explicit_solve_2x2(init_A_free, init_b_free)
+        elif self.ndim == 3:
+            init_delta_xi = explicit_solve_3x3(init_A_free, init_b_free)
+        else:
+            init_c, init_lower = jax.scipy.linalg.cho_factor(init_A_free, lower=True)
+            init_delta_xi = jax.scipy.linalg.cho_solve((init_c, init_lower), init_b_free)
 
-        residual = x_target - self.evaluate_embeddings(elem_f, xi_f, fit_params=fit_params)
-        return (elem_f, xi_f), residual
+        # Note: 'active' tracker is removed from the state tuple, handled internally via r_mag_sq
+        init_state = (elem.astype(int), xi0, init_r, init_r_mag_sq, init_delta_xi, 1.0)
+
+        # --- Execute Static Loop ---
+        final_state = jax.lax.fori_loop(0, iterations, body_fun, init_state)
+        elem_f, xi_f, r_f, _, _, _ = final_state
+
+        return (elem_f, xi_f), r_f
 
     def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, return_residual=False,
-                     surface_embed=False, iterations=15, max_c=None, grid_res=40, 
+                     surface_embed=False, iterations=15, max_c=None, grid_res=20, 
                      vis_max_norm=None, scene: Optional[pv.Plotter]=None, dist_filter_vector=None):
         """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
@@ -1783,8 +1759,10 @@ class MeshField:
                     xis = jnp.asarray(self.xi_grid(res, 2, boundary_points=False))
                     ndim = 2
                     coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
-                    test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-                    i = i_data[:, 0]
+                    # test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+                    # i = i_data[:, 0]
+                    i = approx_closest_indices_Morton_nd(coarse_pts, points)
+                    test_res = points - coarse_pts[i]
                     elem_num = i // xis.shape[0]
                     init_xi = xis[i % xis.shape[0]]
 
@@ -1801,6 +1779,8 @@ class MeshField:
                         coarse_pts = self.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
                         test_res, i_data = jax_aknn(points, coarse_pts, k=1)
                         i = i_data[:, 0]
+                        
+
                         elem_num = jnp.array(i // xis.shape[0])
                         init_xi = xis[i % jnp.array(xis.shape[0])]
                         
@@ -1856,8 +1836,10 @@ class MeshField:
                         xis = jnp.concatenate(xi_pts, axis=0)
                         mfs = jnp.concatenate(mf_locs, axis=0)
                         # pv.PolyData(np.array(coarse_pts[:, :3])).plot()
-                        test_res, i_data = jax_aknn(points, coarse_pts, k=1)
-                        i = i_data[:, 0]
+                        # test_res, i_data = jax_aknn(points, coarse_pts, k=1)
+                        # i = i_data[:, 0]
+                        i = approx_closest_indices_Morton_nd(coarse_pts, points)
+                        test_res = points - coarse_pts[i]
                         elem_num = elems[i]
                         init_xi  = xis[i]
                         mf_pt = mfs[i]
@@ -1875,8 +1857,10 @@ class MeshField:
                 at_hi = init_xi > 1 - 1e-6
                 mf_pt = at_lo | at_hi
 
+
             (elem_num, embedded), res = jax.vmap(
-                lambda elem, xi, target, rmag, lbound : self._xis_to_points_nr_strided(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
+                # lambda elem, xi, target, rmag, lbound : self._xis_to_points_nr_strided(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
+                lambda elem, xi, target, rmag, lbound : self._xis_to_points_nr_static(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
                 # lambda elem, xi, target, rmag, lbound : self._xis_to_points(elem, xi, target, lbound, rmag, iterations=iterations, fit_params=fit_params)
             )(elem_num, init_xi, points, mf_pt, jnp.linalg.norm(test_res, axis=-1))
 
@@ -1949,20 +1933,21 @@ class MeshField:
                 errors = errors[mask]
 
             line_segs = np.concatenate(
-                (np.atleast_2d(locs), np.atleast_2d(points)), axis=-1
-            ).reshape(-1, self.fdim)
+                (np.atleast_2d(locs)[:, None], np.atleast_2d(points)[:, None]), axis=1
+            )
+
             if scene is not None:
                 s = scene
             else:
                 s = pv.Plotter()
-            self.plot(s, fit_params=fit_params, node_size=0.001, line_opacity=0.05, mesh_opacity=0.05)
+            self.plot(s, fit_params=fit_params, node_size=0.001, line_opacity=0.1, mesh_opacity=0.05)
             data = pv.PolyData(np.asarray(points))
             data['err'] = errors
-            lines = pv.line_segments_from_points(line_segs)
-            lines['err'] = errors
+            lines = pv.line_segments_from_points(line_segs.reshape(-1, 3))
+            lines['err'] = np.repeat(errors, 2).copy()
             if max_c is None:
-                max_c = np.max(errors)
-            s.add_mesh(lines, line_width=4, render_lines_as_tubes=True, clim=[0, max_c])
+                max_c = np.percentile(errors, 99) * 1.1
+            s.add_mesh(lines, line_width=4, clim=[0, max_c], render_lines_as_tubes=True)
             s.add_mesh(data, render_points_as_spheres=True, point_size=20, clim=[0, max_c])
             if scene is None:
                 s.show()

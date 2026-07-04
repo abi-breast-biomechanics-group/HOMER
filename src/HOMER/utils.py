@@ -19,6 +19,7 @@ from copy import copy
 from scipy.sparse import csr_array
 import jax
 import functools
+from functools import partial
 
 def all_pairings(*lists):
     return [t[::-1] for t in itertools.product(*reversed(copy(lists)))]
@@ -396,6 +397,210 @@ def spheres_to_polydata(verts: np.ndarray, faces: np.ndarray) -> pv.PolyData:
     all_verts = verts.reshape(-1, 3)
 
     return pv.PolyData(all_verts, all_faces)
+
+
+@jax.jit
+def morton_nd_32bit(pts, bbox_min, bbox_max):
+    """
+    Converts ND points into 1D Morton codes using a strict 32-bit budget.
+    """
+    N = pts.shape[-1]
+    # Total budget is 32 bits distributed across N dimensions
+    bits_per_dim = 32 // N
+    resolution = 2 ** bits_per_dim
+    
+    # 1. Normalize points to [0, 1]
+    normalized_pts = (pts - bbox_min) / jnp.maximum(bbox_max - bbox_min, 1e-7)
+    
+    # 2. Scale to integer grid and cast strictly to uint32
+    grid_pts = jnp.clip(
+        jnp.floor(normalized_pts * resolution), 
+        0, 
+        resolution - 1
+    ).astype(jnp.uint32)
+    
+    # 3. Create an array of bit shifts [0, 1, ..., bits_per_dim - 1]
+    shifts = jnp.arange(bits_per_dim, dtype=jnp.uint32)
+    
+    # 4. Extract bits (Shape: M, N, bits_per_dim)
+    bits = jnp.bitwise_and(jnp.right_shift(grid_pts[..., None], shifts), 1)
+    
+    # 5. Calculate target shifts for interleaving
+    dims = jnp.arange(N, dtype=jnp.uint32)
+    target_shifts = dims[:, None] + shifts[None, :] * N
+    
+    # 6. Shift bits to their unique interleaved positions
+    interleaved_bits = jnp.left_shift(bits, target_shifts)
+    
+    return jnp.sum(interleaved_bits, axis=(1, 2), dtype=jnp.uint32)
+
+
+def _single_tree_search(A, B, bbox_min, bbox_max, window_size):
+    """
+    Internal helper: Builds a radix tree, searches it, and performs a local 
+    Euclidean window search. Returns the best original indices and their distances.
+    """
+    # 1. Morton codes & Sorting
+    codes_A = morton_nd_32bit(A, bbox_min, bbox_max)
+    sort_indices_A = jnp.argsort(codes_A)
+    sorted_codes_A = codes_A[sort_indices_A]
+    sorted_A = A[sort_indices_A]
+    
+    codes_B = morton_nd_32bit(B, bbox_min, bbox_max)
+    
+    # 2. Binary search insertion
+    insert_idx = jnp.searchsorted(sorted_codes_A, codes_B)
+    
+    # 3. Apply window offsets
+    half_window = window_size // 2
+    offsets = jnp.arange(-half_window, window_size - half_window)
+    window_indices = jnp.clip(insert_idx[:, None] + offsets, 0, len(sorted_codes_A) - 1)
+    
+    # 4. Fetch candidates and compute true squared Euclidean distance
+    candidates = sorted_A[window_indices]
+    diff = candidates - B[:, None, :]
+    sq_distances = jnp.sum(diff ** 2, axis=-1)
+    
+    # 5. Find the local minimum in the window
+    best_local_idx = jnp.argmin(sq_distances, axis=-1)
+    num_queries = B.shape[0]
+    
+    # 6. Extract global sorted index and the corresponding squared distance
+    best_sorted_idx = window_indices[jnp.arange(num_queries), best_local_idx]
+    best_original_indices = sort_indices_A[best_sorted_idx]
+    best_sq_dist = sq_distances[jnp.arange(num_queries), best_local_idx]
+    
+    return best_original_indices, best_sq_dist
+
+@partial(jax.jit, static_argnames=['window_size'])
+def approx_closest_indices_Morton_nd(A, B, window_size=32):
+    """
+    Queries two offset Morton-code radix trees and returns the closest index 
+    in A for each point in B, eliminating Z-curve spatial discontinuities.
+    """
+    # --- TREE 1: Standard Bounding Box ---
+    bbox_min_1 = jnp.min(A, axis=0)
+    bbox_max_1 = jnp.max(A, axis=0) + 1e-5
+    
+    idx_1, dist_1 = _single_tree_search(A, B, bbox_min_1, bbox_max_1, window_size)
+    
+    # --- TREE 2: Shifted Bounding Box ---
+    # We apply a large, asymmetric fractional shift to misalign the root octree planes.
+    # Shifting by an irrational or prime-like fraction (e.g., 0.137) ensures that 
+    # the major division lines fall in completely different locations.
+    shift = (bbox_max_1 - bbox_min_1) * 0.137 
+    bbox_min_2 = bbox_min_1 - shift
+    bbox_max_2 = bbox_max_1 + shift
+    
+    idx_2, dist_2 = _single_tree_search(A, B, bbox_min_2, bbox_max_2, window_size)
+    
+    # --- COMBINATION ---
+    # Compare the true Euclidean distances from both trees and pick the winner
+    final_best_idx = jnp.where(dist_1 < dist_2, idx_1, idx_2)
+    
+    return final_best_idx
+# @jax.jit
+# def approx_closest_indices_Morton_nd(A, B):
+#     """
+#     Strictly 32-bit JAX compliant proximity index matching for ND arrays.
+#     A: Reference points (M, N)
+#     B: Query points (K, N)
+#     """
+#     # 1. Establish the bounding box based strictly on A (using float32)
+#     bbox_min = jnp.min(A, axis=0)
+#     bbox_max = jnp.max(A, axis=0) + 1e-5
+#     
+#     # 2. Compute 32-bit Morton codes for A
+#     codes_A = morton_nd_32bit(A, bbox_min, bbox_max)
+#     
+#     # 3. Sort A's codes and track the original indices
+#     sort_indices_A = jnp.argsort(codes_A)
+#     sorted_codes_A = codes_A[sort_indices_A]
+#     
+#     # 4. Compute 32-bit Morton codes for query points B
+#     codes_B = morton_nd_32bit(B, bbox_min, bbox_max)
+#     
+#     # 5. Batched binary search
+#     insert_idx = jnp.searchsorted(sorted_codes_A, codes_B)
+#     
+#     # 6. Handle edge cases by clipping to array bounds
+#     idx_current = jnp.clip(insert_idx, 0, len(sorted_codes_A) - 1)
+#     idx_prev = jnp.maximum(0, idx_current - 1)
+#     
+#     # 7. Compare 1D distances 
+#     # Because we are limited to uint32, standard subtraction can underflow.
+#     # We use jnp.where to safely compute absolute differences without casting to int64.
+#     val_curr = sorted_codes_A[idx_current]
+#     dist_current = jnp.where(val_curr > codes_B, val_curr - codes_B, codes_B - val_curr)
+#     
+#     val_prev = sorted_codes_A[idx_prev]
+#     dist_prev = jnp.where(val_prev > codes_B, val_prev - codes_B, codes_B - val_prev)
+#     
+#     best_sorted_idx = jnp.where(dist_current < dist_prev, idx_current, idx_prev)
+#     
+#     # 8. Map back to the ORIGINAL indices in A
+#     original_indices = sort_indices_A[best_sorted_idx]
+#     
+#     return original_indices
+
+@jax.jit
+def expand_bits(v):
+    """Expands a 10-bit integer into 30 bits for Morton interleaving."""
+    v = jnp.bitwise_and(jnp.bitwise_or(v, jnp.left_shift(v, 16)), 0x030000FF)
+    v = jnp.bitwise_and(jnp.bitwise_or(v, jnp.left_shift(v, 8)),  0x0300F00F)
+    v = jnp.bitwise_and(jnp.bitwise_or(v, jnp.left_shift(v, 4)),  0x030C30C3)
+    v = jnp.bitwise_and(jnp.bitwise_or(v, jnp.left_shift(v, 2)),  0x09249249)
+    return v
+
+@jax.jit
+def morton_3d(pts, bbox_min, bbox_max, resolution=1024):
+    """Converts 3D points into 1D Morton codes."""
+    normalized_pts = (pts - bbox_min) / (bbox_max - bbox_min)
+    grid_pts = jnp.clip(jnp.floor(normalized_pts * resolution), 0, resolution - 1).astype(jnp.uint32)
+    x = expand_bits(grid_pts[:, 0])
+    y = expand_bits(grid_pts[:, 1])
+    z = expand_bits(grid_pts[:, 2])
+    return jnp.bitwise_or(jnp.bitwise_or(jnp.left_shift(z, 2), jnp.left_shift(y, 1)), x)
+
+@jax.jit
+def approx_closest_Morton(A, B):
+    """
+    Given a reference point cloud A (N, 3) and a query point cloud B (M, 3),
+    returns an array of shape (M,) containing the index of the approximate 
+    closest point in A for each point in B.
+    """
+    # 1. Establish the bounding box based strictly on A
+    bbox_min = jnp.min(A, axis=0)
+    bbox_max = jnp.max(A, axis=0) + 1e-5
+    
+    # 2. Compute Morton codes for A
+    codes_A = morton_3d(A, bbox_min, bbox_max)
+    
+    # 3. Sort A's codes and track the original indices
+    sort_indices_A = jnp.argsort(codes_A)
+    sorted_codes_A = codes_A[sort_indices_A]
+    
+    # 4. Compute Morton codes for query points B
+    codes_B = morton_3d(B, bbox_min, bbox_max)
+    
+    # 5. Batched binary search to find where B's codes fall in sorted A
+    # searchsorted naturally handles arrays, doing binary search for every element in B
+    insert_idx = jnp.searchsorted(sorted_codes_A, codes_B)
+    
+    # 6. Handle edge cases by clipping to array bounds
+    idx_current = jnp.clip(insert_idx, 0, len(sorted_codes_A) - 1)
+    idx_prev = jnp.maximum(0, idx_current - 1)
+    
+    # 7. Compare which Morton code is closer in 1D Z-curve space
+    dist_current = jnp.abs(sorted_codes_A[idx_current].astype(jnp.int64) - codes_B.astype(jnp.int64))
+    dist_prev = jnp.abs(sorted_codes_A[idx_prev].astype(jnp.int64) - codes_B.astype(jnp.int64))
+    
+    best_sorted_idx = jnp.where(dist_current < dist_prev, idx_current, idx_prev)
+    
+    # 8. Map the winning sorted indices back to the ORIGINAL indices in A
+    original_indices = sort_indices_A[best_sorted_idx]
+    
+    return original_indices
 
 @functools.partial(jax.jit, static_argnames=["k"])
 def jax_aknn(d0, d1, k):
