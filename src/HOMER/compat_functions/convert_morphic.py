@@ -1,4 +1,4 @@
-# import numpy as np
+import numpy as np
 import pyvista as pv
 
 from morphic import Mesh as mMesh
@@ -52,9 +52,6 @@ def convert_morphic(morphic_mesh:mMesh, basis_functions, plot=False):
 
     if plot:
         objMesh.plot()
-
-    breakpoint()
-
 
     return objMesh
 
