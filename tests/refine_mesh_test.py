@@ -1,4 +1,5 @@
 from HOMER import Mesh, MeshNode, MeshElement, H3Basis, L1Basis, L3Basis, L2Basis
+from HOMER.geometry import cube
 import numpy as np
 import pyvista as pv
 import jax
@@ -13,16 +14,20 @@ point6 = MeshNode(loc=[1,1,1], du=[0,0,0], dv=[0,0,0], dw = [1,0.5, 0.5], dudv=[
 point7 = MeshNode(loc=[1,1,0], du=[0,0,0], dv=[0,0,0], dw = [1,0.5,-0.5], dudv=[0,0,0], dudw=[0,0,0], dvdw=[0,0,0], dudvdw=[0,0,0])
 
 element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=(H3Basis, H3Basis, H3Basis))
-objMesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1)
-objMesh_refine = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1)
+mesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1)
+mesh_ref = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1)
 
 s = pv.Plotter()
-objMesh.plot(scene=s, node_colour='b', node_size=20)
+mesh.plot(scene=s, node_colour='b', node_size=20)
 # objMesh_refine.refine(refinement_factor=2)
-objMesh_refine.refine(refinement_factor=2)
+# mesh_ref.refine(refinement_factor=2)
 # objMesh_refine.plot(scene=s, node_colour='g', node_size=15)
-# objMesh_refine.refine(by_xi_refinement=([0, 1/4, 2/4, 3/4, 1], [0, 1/3, 2/3, 1], [0, 1/2, 1]))
+mesh_ref.refine(by_xi_refinement=([0, 1/4, 2/4, 3/4, 1], [0, 1/3, 2/3, 1], [0, 1/2, 1]))
 # objMesh_refine.refine(by_xi_refinement=([0, 2/4, 1], [0, 1/2, 1], [0, 1/2, 1]))
-objMesh_refine.plot(scene=s, node_colour='r', node_size=10, mesh_opacity=0.01)
+mesh_ref.plot(scene=s, node_colour='r', node_size=10, mesh_opacity=0.01)
 s.show()
 
+
+mesh2 = cube(basis=[L3Basis]*3)
+mesh2.refine(by_xi_refinement=([0, 1/4, 2/4, 3/4, 1], [0, 1/3, 2/3, 1], [0, 1/2, 1]))
+mesh2.plot()

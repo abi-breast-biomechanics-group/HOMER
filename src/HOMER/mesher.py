@@ -2027,9 +2027,10 @@ class MeshField:
                 lr = []
                 for idb, b in enumerate(by_xi_refinement):
                     n_points = (len(b)-1) * (intermediate_node_number[idb] + 1) + 1 
+                    to_interp = np.interp(np.linspace(0,1, n_points), np.linspace(0,1, len(b)), b)
                     lr.append(n_points)
-                    new_xi_refinement.append(np.interp(np.linspace(0,1, n_points), np.linspace(0,1, len(b)), b))
-                eval_pts = np.column_stack([x.flatten() for x in np.meshgrid(*by_xi_refinement, indexing='ij')])
+                    new_xi_refinement.append(to_interp)
+                eval_pts = np.column_stack([x.flatten() for x in np.meshgrid(*new_xi_refinement, indexing='ij')])
                 if self.ndim == 2:
                     ref_array = np.array([len(by_xi_refinement[i]) for i in [0,1]]) - 1
                 else:
