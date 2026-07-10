@@ -39,9 +39,9 @@ mesh.refine(2)
 # get point locations by embedding in the mesh.
 
 mesh.new_field('vec_dir', field_dimension=3, field_locs=data, field_values=normal_field, new_basis=[H3Basis]*3)
-mesh.new_field('vec_mag', field_dimension=1, field_locs=data, field_values=z2field, new_basis=[L1Basis]*3)
+mesh.new_field('vec_mag', field_dimension=1, field_locs=data, field_values=z2field, new_basis=[L3Basis]*3)
 
-
+#page 78 Martyn's thesis.
 s = pv.Plotter()
 
 

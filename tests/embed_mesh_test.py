@@ -59,7 +59,7 @@ element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=(H3Basis,
 mesh1 = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1).rebase([H3Basis]*3)
 mesh1.refine(2)
 
-pts = np.random.rand(500_000, 3) * 1.5 - 0.25
+pts = np.random.rand(1_000, 3) * 1.5 - 0.25
 
 
 # pts = np.array( [
@@ -79,8 +79,8 @@ pts = np.random.rand(500_000, 3) * 1.5 - 0.25
                             # init_elexi=([0], [(0.25,0.25, 0.1)]), 
                             verbose=3, return_residual=True,
                             # iterations=20,
-                            iterations=0,
-                            vis_max_norm=0.1,
+                            iterations=15,
+                            # vis_max_norm=0.1,
                             )
 
 

@@ -316,6 +316,7 @@ class MeshElement:
         self.id = id
         self.num_nodes = int(np.prod([len(b.node_locs) for b in self.basis_functions]))
 
+        self.scale_factors = None #classic H3 representation. 
 
     def get_used_fields(self):
         """
@@ -482,6 +483,10 @@ class MeshField:
         
         ######### field stuff
         self.fdim = None
+
+        ######### support for element scales
+        self.ele_scales = None
+
         ######### Compilation flags
         self.compile = jax_compile
         if not len(self.nodes) == 0 and not len(self.elements) == 0 and not skip_generate:
@@ -899,12 +904,19 @@ class MeshField:
         self.ele_map = np.array(ele_maps)
         self.update_from_params(self.true_param_array, generate=False)
 
+        self.ele_scales = None #get this done so it's captured in the closure
+        if self.elements[0].scale_factors is not None:
+            self.ele_scales = np.array([e.scale_factors for e in self.elements])
+
+
         self._generate_elem_functions()
         self._generate_elem_deriv_functions()
         self._generate_eval_function()
         self._generate_deriv_function()
         self._generate_weight_function()
         self._explore_topology()
+        
+        #adding scalar mapping support.
 
     def add_node(self, node:MeshNode) -> None:
         """
@@ -1423,7 +1435,7 @@ class MeshField:
             Code is structured so that the result can express custom derivatives
         """
         @wide_eval 
-        def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
+        def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array, ele_map = self.ele_map, scalars = self.ele_scales):
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(jnp.array(xis))
 
@@ -1435,7 +1447,11 @@ class MeshField:
                 fit_params = param_data
 
             map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
-            params = jnp.asarray(fit_params)[map]
+            if scalars is not None:
+                scalar_factor = jnp.array(scalars)[jnp.asarray(element_ids)]
+            else:
+                scalar_factor = 1
+            params = jnp.asarray(fit_params)[map] * scalar_factor
             outputs = jax.vmap(lambda x: self.elem_evals(x, jnp.asarray(xis)).reshape(-1,self.fdim))
             res = outputs(
                 params
@@ -1450,7 +1466,7 @@ class MeshField:
             Code is structured so that the result can express custom derivatives
         """
         @wide_eval
-        def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, ele_map= self.ele_map):
+        def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, ele_map= self.ele_map, scalars = self.ele_scales):
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(jnp.array(xis))
 
@@ -1462,7 +1478,11 @@ class MeshField:
                 fit_params = param_data
                     
             map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
-            params = jnp.asarray(fit_params)[map]
+            if scalars is not None:
+                scalar_factor = jnp.array(scalars)[jnp.asarray(element_ids)]
+            else:
+                scalar_factor = 1
+            params = jnp.asarray(fit_params)[map] * scalar_factor
 
             outputs = jax.vmap(lambda x: self.elem_deriv_evals(x, jnp.asarray(xis), derivs).reshape(-1,self.fdim))
             res = outputs(params)
@@ -2614,7 +2634,7 @@ class Mesh(MeshField):
         f_values = self[field_to_draw].evaluate_embeddings_in_every_element(field_xi)
 
         if field_artist is None:
-            def field_artist(lscene, locs, values):
+            def field_artist(lscene, locs, values, field_xi):
                 if self[field_to_draw].fdim == 3:
                     #rather than arrows, create a line object.
                     ldata = np.concatenate((locs[:, None], (locs + values)[:, None]), axis=1).reshape(-1, 3)
@@ -2628,7 +2648,7 @@ class Mesh(MeshField):
                 else:
                     raise ValueError(f"Default field artist doesn't support {self[field_to_draw].fdim} dimension fields, create a custom artist")
                     
-        field_artist(scene, f_locs, f_values)
+        field_artist(scene, f_locs, f_values, field_xi)
 
         if s_flag:
             scene.show()
@@ -2742,6 +2762,13 @@ class Mesh(MeshField):
 
         self[field_name] = MeshField(nodes=new_pts, elements=new_elements, skip_generate=True)
 
+        n_vals_per_node = len(self[field_name].elements[0].used_node_fields) + 1
+        total_vals = n_vals_per_node * len(self.nodes)
+        self[field_name].true_param_array = np.zeros(total_vals) #instantiate a null parameter array
+        self[field_name].optimisable_param_bool = np.ones(total_vals, dtype=bool)
+        self[field_name].optimisable_param_array = np.zeros(total_vals)
+        self[field_name].generate_mesh()
+
         if field_params is not None:
             self[field_name].true_param_array = field_params.copy()
             self[field_name].optimisable_param_bool = np.ones(field_params.shape[0], dtype=bool)
@@ -2757,6 +2784,7 @@ class Mesh(MeshField):
         self[field_name].bmap = self.bmap
         self[field_name]._topo_lookup = self._topo_lookup
         self[field_name].topomap = self.topomap
+    
 
         ############################### the base mesh needs the fields
         self[field_name]._generate_elem_functions()
@@ -2765,8 +2793,11 @@ class Mesh(MeshField):
         self[field_name]._generate_deriv_function()
         self[field_name]._generate_weight_function()
 
+        self[field_name].fdim = field_dimension
         if field_locs is None or field_values is None:
             return
+
+        # need to make a guess at how many values are necessary.
 
         locs = self.embed_points(field_locs)
         w_mat = self[field_name].get_xi_weight_mat(*locs)
@@ -2826,14 +2857,14 @@ def make_eval(basis_funcs: BasisGroup, bp_inds:list[tuple[int]]):
     """
     if len(basis_funcs) == 2:
         def xi_eval(elem_params, xis, b_inds = bp_inds):
-            w0 = basis_funcs[0].fn(xis[:, 0])  
-            w1 = basis_funcs[1].fn(xis[:, 1])
+            w0 = basis_funcs[0].fn(xis[:, 0])
+            w1 = basis_funcs[1].fn(xis[:, 1]) 
             weights = N2_weights(w0, w1, b_inds)
             output = jnp.sum(elem_params.reshape(weights.shape[0],-1)[:, None] * weights[..., None], axis=0).flatten()
             return output
     elif len(basis_funcs) == 3:
         def xi_eval(elem_params, xis, b_inds = bp_inds):
-            w0 = basis_funcs[0].fn(xis[:, 0])  
+            w0 = basis_funcs[0].fn(xis[:, 0])
             w1 = basis_funcs[1].fn(xis[:, 1])
             w2 = basis_funcs[2].fn(xis[:, 2])
             weights = N3_weights(w0, w1, w2, b_inds)
