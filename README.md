@@ -4,7 +4,7 @@
 
 High Order MEsh Representations.
 
-![Python version](https://img.shields.io/badge/python-3.10-blue)
+![Python version](https://img.shields.io/badge/python-3.11-blue)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 
@@ -12,16 +12,16 @@ High Order MEsh Representations.
 
 ---
 # Overview
-HOMER is an open-source, Python-based (v3.10+) library using [JAX](https://github.com/jax-ml/jax) to define and optimise high order meshes.
+HOMER is an open-source, Python-based (v3.11+) library using [JAX](https://github.com/jax-ml/jax) to define and optimise high order meshes.
 It leverages JAX autodifferentiation for efficient fitting and modelling, while keeping the flexibility of python in loss function definitions.
 Fix that mesh parameter - constrain a node to lie on a plane - express another as a combination of PCA components - HOMER handles your derivatives.
 
-**Example application** HOMER helps [MobSTR3D](https://github.com/UOA-Heart-Mechanics-Research/mobstr3D) with flexible geometric and freeform fits for DENSE CMR data 
+**Example application:** HOMER helps [MobSTR3D](https://github.com/UOA-Heart-Mechanics-Research/mobstr3D) with flexible geometric and freeform fits for DENSE CMR data 
 
 ## Features
-- Cubic Hermite, Linear, Quadratic, Cubic and Quartic Lagrange elements
+- Cubic Hermite, Cubic B-spline, Linear, Quadratic, Cubic and Quartic Lagrange elements
 - Automatic Jacobian sparsity evaluation
-- JAX-friendly implementations of KDTree evaluations
+- JAX-friendly implementations of KDTree evaluations, and subsecond projection operations for 1_000_000 points
 - Secondary mesh fields for fibre directions, stresses, and arbitrary vector/scalar data
 - Mesh refinement and basis conversion (rebase)
 - JSON serialisation/deserialisation
@@ -38,6 +38,7 @@ Fix that mesh parameter - constrain a node to lie on a plane - express another a
 | Class | Type | Nodes per direction | Continuity | Derivative fields on node |
 |---|---|---|---|---|
 | `H3Basis` | Cubic Hermite | 2 | C¹ | `du`, `dv`, … |
+| `B3Basis` | Cubic-Bspline | 4 | C² | - |
 | `L1Basis` | Linear Lagrange | 2 | C⁰ | – |
 | `L2Basis` | Quadratic Lagrange | 3 | C⁰ | – |
 | `L3Basis` | Cubic Lagrange | 4 | C⁰ | – |
