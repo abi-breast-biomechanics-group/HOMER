@@ -7,21 +7,25 @@ import time
 mesh = cube()
 mesh.refine(3)
 
-pts = np.random.random((1000, 3))
+n_iters = 10
+
+np.random.seed(42)
+
+pts = np.random.random((2_00_000, 3)) #1_000_000 causes OOM errors, TODO: implement chunking
 mesh.evaluate_embeddings_in_every_element(pts)
 
 start = time.time()
-for _ in range(100):
+for _ in range(n_iters):
     mesh.evaluate_embeddings_in_every_element(pts)
 end = time.time()
-print(f"took {(end - start)/100} seconds")
+print(f"took {(end - start)/n_iters} seconds")
 
 
 mesh.evaluate_embeddings_in_every_element = jax.jit(mesh.evaluate_embeddings_in_every_element, static_argnames='self')
 mesh.evaluate_embeddings_in_every_element(pts)
 
 start = time.time()
-for _ in range(100):
+for _ in range(n_iters):
     mesh.evaluate_embeddings_in_every_element(pts)
 end = time.time()
-print(f"compiled eval took {(end - start)/100} seconds")
+print(f"compiled eval took {(end - start)/n_iters} seconds")
