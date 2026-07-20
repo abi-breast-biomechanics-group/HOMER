@@ -22,7 +22,7 @@ def model_track(params, plot=False):
     # R0 = jnp.eye(3)
     T0 = params[3:]
     new_params = init_struct.reshape(-1, 3) @ R0.T + T0
-    _, residual = base_mesh.embed_points(surface, fit_params=new_params.ravel(), return_residual=True, verbose=3 if plot else 0, surface_embed=True)
+    _, residual = base_mesh.embed_points(surface, fit_params=new_params.ravel(), return_residual=True, verbose=3 if plot else 0, surface_embed=True, grid_res=50, iterations=10, robust_init_est=False)
     return residual.ravel()
 fmodel_track = jax.jit(model_track)
 
@@ -32,9 +32,6 @@ init_params = jnp.zeros(6)
 
 deriv = jax.jacfwd(model_track)(init_params)
 # breakpoint()
-
-
-
 
 # a comparison, but this gets slower and slower as the models get bigger.
 brute_jac = jax.jacfwd(model_track)
@@ -75,7 +72,7 @@ def model_track_jac(params, plot=False):
     R0 = rodrigues_exp(params[:3])
     T0 = params[3:]
     new_params = init_struct.reshape(-1, 3) @ R0.T + T0
-    embed_locs, _ = base_mesh.embed_points(surface, fit_params=new_params.ravel(), return_residual=True, verbose=3 if plot else 0, surface_embed=True)
+    embed_locs, _ = base_mesh.embed_points(surface, fit_params=new_params.ravel(), return_residual=True, verbose=3 if plot else 0, surface_embed=True, grid_res=50, iterations=50)
 
     jac_mp0 =  jac_model_nodes_given_tform(params)
 

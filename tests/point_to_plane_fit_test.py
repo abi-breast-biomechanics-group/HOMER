@@ -52,7 +52,7 @@ pnorm = pts[:, 1] **2 + pts[:, 2] **2
 pts[:, 0] = 0.3 + pnorm/20
 
 #look at an initial embedding:
-eles, xis = mesh.embed_points(pts, verbose=3, grid_res=1, iterations=1)
+eles, xis = mesh.embed_points(pts, verbose=3, grid_res=3, iterations=5)
 
 def loc_dist(params):
     _, res = mesh.embed_points(pts, fit_params=params, return_residual=True)
@@ -87,7 +87,7 @@ def build_jacobian(ele_indices, ele_map, param_locs, total_params):
     return masked_jac
 
 inds = np.where(mesh.optimisable_param_bool)[0]
-approx_ele_embed = jax.jit(lambda p: mesh.embed_points(pts, fit_params=p, iterations=0, grid_res=3)[0]) # needs recalcing - jit compile for 2x speedup.
+approx_ele_embed = jax.jit(lambda p: mesh.embed_points(pts, fit_params=p, iterations=3, grid_res=5)[0]) # needs recalcing - jit compile for 2x speedup.
 # 0 iterations is okay here because the estimate is probably good enough! Because you only need to get the ele correct, you can also reduce the grid res.
 def get_sparsity(params):
     ele = approx_ele_embed(params)

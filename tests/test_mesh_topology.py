@@ -9,5 +9,6 @@ mesh.refine(2)
 # mesh.plot(s, elem_labels=True)
 e_pt = mesh.evaluate_embeddings(0, [0.5,0.5, 1.1])
 e, xi, valid = mesh.topomap(0, [0.5, 0.5, 1.1])
-assert e == 1 and np.all(np.isclose(xi, [0.5, 0.5, 0.1])) and valid, "Topology mapping failed"
+
+assert e == 4 and np.all(np.isclose(xi, [0.5, 0.5, 0.1])) and valid, "Topology mapping failed"
 

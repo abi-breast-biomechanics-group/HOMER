@@ -15,7 +15,7 @@ import pyvista as pv
 base_test = cube(basis=([L3Basis]*3))
 # breakpoint()
 
-def test_shift(p):
+def shift(p):
     base_params = jnp.array(base_test.true_param_array.reshape(-1,3))
     base_params = base_params.at[:, -1].add(p)
     # base_params = base_params.at[:, -2].add(-p)
@@ -26,8 +26,8 @@ def test_shift(p):
                                    )
     return xi
 
-print('test_shift result: ', test_shift(0.0)) #does it decrease it?
-jac = jax.jacfwd(test_shift)
+print('test_shift result: ', shift(0.0)) #does it decrease it?
+jac = jax.jacfwd(shift)
 res = jac(0.0)
 print(res)
 

@@ -21,6 +21,57 @@ import jax
 import functools
 from functools import partial
 
+@partial(jax.jit, static_argnums=(1,))
+def _build_full_lookup_jax(lookup_arr, ndim):
+    """
+    JIT-compiled kernel to build the 3^ndim topological map.
+    """
+    N = lookup_arr.shape[0]
+    
+    # Construct the shift grid: 0 (low), 1 (inside), 2 (high).
+    grids = jnp.meshgrid(*[jnp.array([0, 1, 2])] * ndim, indexing='ij')
+    shifts = jnp.stack(grids, axis=-1)
+    
+    #  Broadcast base element IDs to match the shift grid dimensions
+    curr_base = jnp.broadcast_to(
+        jnp.arange(N).reshape((N,) + (1,) * ndim), 
+        (N,) + shifts.shape[:-1]
+    )
+    
+    all_final, all_valid = [], []
+    
+    for perm in itertools.permutations(range(ndim)):
+        curr = curr_base
+        valid = jnp.ones_like(curr, dtype=jnp.bool_)
+        
+        for axis in perm:
+            trans = shifts[..., axis] != 1
+            side = shifts[..., axis] // 2
+            
+            next_ele = lookup_arr[jnp.maximum(curr, 0), axis, side]
+            valid = valid & ~(trans & (next_ele == -1))
+            curr = jnp.where(trans, next_ele, curr)
+            
+        all_final.append(curr)
+        all_valid.append(valid)
+        
+    #Resolve permutations and detect conflicts
+    st_eles = jnp.stack(all_final)
+    st_valids = jnp.stack(all_valid)
+    
+    first_valid_idx = jnp.argmax(st_valids, axis=0, keepdims=True)
+    first_valid = jnp.take_along_axis(st_eles, first_valid_idx, axis=0).squeeze(0)
+   
+    #returns a mapping if the paths are different
+    has_conflict = jnp.any(st_valids & (st_eles != first_valid), axis=0)
+    return jnp.where(jnp.any(st_valids, axis=0) & ~has_conflict, first_valid, -1)
+
+def build_full_lookup(lookup_arr):
+    """
+    Wrapper to extract static ndim before dispatching to JIT.
+    """
+    return _build_full_lookup_jax(lookup_arr, lookup_arr.shape[1])
+
 def all_pairings(*lists):
     return [t[::-1] for t in itertools.product(*reversed(copy(lists)))]
 
