@@ -21,11 +21,13 @@ end = time.time()
 print(f"took {(end - start)/n_iters} seconds")
 
 
-mesh.evaluate_embeddings_in_every_element = jax.jit(mesh.evaluate_embeddings_in_every_element, static_argnames='self')
-mesh.evaluate_embeddings_in_every_element(pts)
+emb = jax.jit(mesh.evaluate_embeddings_in_every_element, static_argnames='self')
+emb(pts)
 
 start = time.time()
 for _ in range(n_iters):
-    mesh.evaluate_embeddings_in_every_element(pts)
+    emb(pts)
 end = time.time()
 print(f"compiled eval took {(end - start)/n_iters} seconds")
+
+mesh.embed_points(pts, verbose=3)

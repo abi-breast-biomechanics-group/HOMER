@@ -51,12 +51,12 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     mesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1).rebase(basis)
     return mesh
 
-def cubeMNO(res, basis=None):
+def cubeMNO(res, basis=None, loc=None, scale=None):
     """
     Creates a multi-element unit cube mesh.
     Then re-orders the cube to have sane elements.
     """
-    base_cube = cube(basis=basis) 
+    base_cube = cube(basis=basis, centre=loc, scale=scale) 
     base_cube.refine(by_xi_refinement=[np.linspace(0, 1, r+1) for r in res])
 
     def sort_grid_numpy(points_array):
