@@ -35,14 +35,16 @@ import jax
 import pyvista as pv
 from matplotlib import pyplot as plt
 from copy import deepcopy
+import networkx as nx
+from scipy.sparse import csr_array, coo_array
 
 from functools import reduce, partial
 from itertools import groupby, combinations_with_replacement, product
 
 from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
-from HOMER.jacobian_evaluator import jacobian
+from HOMER.jacobian_evaluator import estimate_sparsity, jacobian
 from HOMER.utils import spheres_to_polydata, vol_hexahedron, make_tiling, h_tform, all_pairings, block_diagonal_jacobian, jax_aknn, all_pairings
-from HOMER.utils import approx_closest_indices_Morton_nd, build_full_lookup
+from HOMER.utils import approx_closest_indices_Morton_nd, build_full_lookup, bcoo_repeat_scalar
 from HOMER.topomap_operations import global_nodes_from_ele_localnodes, refine_connectivity
 from HOMER.mesh_decorators import expand_wide_evals, wide_eval
 from HOMER.closed_form_matrix_solves import explicit_solve_2x2, explicit_solve_3x3
@@ -926,6 +928,19 @@ class MeshField:
         if generate_mesh:
             self.generate_mesh()
 
+    def drop_elements(self, inds_to_drop, generate_mesh=True, clean_points=True) -> None:
+        """
+        Drops the specified elements.
+        """
+        if not isinstance(inds_to_drop, list):
+            inds_to_drop = [inds_to_drop]
+        self.elements = [val for i, val in enumerate(self.elements) if i not in inds_to_drop]
+
+        if clean_points:
+            self._clean_pts()
+        if generate_mesh:
+            self.generate_mesh()
+
     def get_element(self, element_ids: list) -> list[MeshElement]:
         """
         Returns the element with the associated id.
@@ -1450,7 +1465,7 @@ class MeshField:
         if isinstance(node_colour, np.ndarray):
             node_dots_m[node_col_scalar_name] = node_colour
         
-        s.add_mesh(node_dots_m, render_points_as_spheres=True, color=node_colour if not isinstance(node_colour, np.ndarray) else None, point_size=node_size, name=n_tag)
+        s.add_mesh(node_dots_m, render_points_as_spheres=False, color=node_colour if not isinstance(node_colour, np.ndarray) else None, point_size=node_size, name=n_tag, cmap='tab10')
 
         # tri_surf, tris = self.get_triangle_surface(res=res)
         hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling, fit_params=fit_params)
@@ -2424,6 +2439,82 @@ class MeshField:
             self = new_mesh
         else:
             return new_mesh
+
+    def __add__(self, othr:'MeshField'): #TODO, robustify this function, as it has only basic functionality.
+        """
+        A quick function to enable adding meshes together by fusing the element and basis definititions.
+        """
+        shared_nodes = self.nodes + othr.nodes
+        len_self_nodes = len(self.nodes)
+        updated_other_elements = [MeshElement(basis_functions=e.basis_functions, node_indexes=[n+len_self_nodes for n in e.nodes]) for e in othr.elements] 
+        shared_elements = self.elements + updated_other_elements
+        return Mesh(nodes=shared_nodes, elements=shared_elements)
+
+
+    ############ Colouring utils:
+    def get_colouring_dict(self, fields_seperable=False, seed_matrix=False):
+        """
+        Returns a colouring dict which describes which mesh parameters will never effect the same output variable.
+        The fields seperable option notes if the output of fields produce seperate responses. (e.g. embedding evaluation is seperable, but local jac det is not).
+        """
+        from sparsejac.sparsejac import _greedy_color, _input_connectivity_from_sparsity
+        from jax.experimental.sparse import BCOO
+        import scipy
+
+        sf = self.fdim if fields_seperable else 1
+
+        graph_struct = np.zeros((len(self.elements) * sf, len(self.true_param_array)))
+        for ide, emap in enumerate(self.ele_map):
+            for i in range(sf):
+                graph_struct[ide * sf + i, emap.astype(int)[i::sf]] = 1
+        graph_struct = graph_struct[:, self.optimisable_param_bool] #remove non-optimisable params
+        jax_sparse = BCOO.fromdense(graph_struct)
+        
+        graph_struct = scipy.sparse.csr_array(
+                    (jax_sparse.data, (jax_sparse.indices[:, 0], jax_sparse.indices[:, 1])),
+                    shape=jax_sparse.shape,
+                    )
+
+        jacobian = graph_struct #csr_array(graph_struct)
+        adj_matrix = (jacobian.T @ jacobian).tocsr()
+        adj_matrix.setdiag(0) # Remove self-loops for coloring
+        adj_matrix.eliminate_zeros()
+
+        G = nx.from_scipy_sparse_array(adj_matrix)
+        colouring_dict = nx.coloring.greedy_color(G, strategy="largest_first")
+        num_colours = max(colouring_dict.values()) + 1
+
+        if not seed_matrix:
+            return colouring_dict
+
+        num_vars = max(colouring_dict.keys()) + 1
+        nodes = np.array(list(colouring_dict.keys()))
+        colours = np.array(list(colouring_dict.values()))
+        
+        # The coordinates (row, color) remain identical for both matrices
+        indices = jnp.column_stack((nodes, colours))
+        
+        # 1. Standard Value Seed Matrix (S1) - Data is all 1s
+        data_vals = jnp.ones(len(nodes), dtype=jnp.float32)
+        seed_matrix_vals = jax.experimental.sparse.BCOO(
+            (data_vals, indices), shape=(num_vars, num_colours)
+        )
+        
+        # 2. Index-Weighted Seed Matrix (S2) - Data is the node indices
+        data_idxs = jnp.array(nodes, dtype=jnp.float32)
+        seed_matrix_idxs = jax.experimental.sparse.BCOO(
+            (data_idxs, indices), shape=(num_vars, num_colours)
+        )
+
+        return colouring_dict, seed_matrix_vals, seed_matrix_idxs
+        # td = seed_matrix.todense()
+        # breakpoint()
+        # seed_matrix = BCOO.fromdense(basis)
+        return colouring_dict, seed_matrix
+        
+        
+
+
 
 class Mesh(MeshField):
     """A coordinate mesh that can also carry named secondary fields.

@@ -121,6 +121,7 @@ def estimate_sparsity(callable_fn, init_estimate) -> jax.experimental.sparse.BCO
         (jnp.ones(inds.shape[0]), inds), 
         shape=(M, N)
     )
+
 def _next_power_of_2(x):
     """Returns the smallest power of 2 greater than or equal to x."""
     return 1 if x == 0 else 2**(x - 1).bit_length()

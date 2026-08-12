@@ -21,6 +21,32 @@ import jax
 import functools
 from functools import partial
 
+from jax.experimental import sparse
+
+def bcoo_repeat_scalar(mat: sparse.BCOO, repeats: int, axis: int) -> sparse.BCOO:
+    """
+    Repeats an unbatched BCOO sparse array along a specified axis by a scalar integer.
+    """
+    # Ensure this handles standard unbatched, fully sparse arrays
+    if mat.n_batch > 0 or mat.n_dense > 0:
+        raise NotImplementedError("This implementation currently supports fully sparse, unbatched BCOO arrays.")
+        
+    if axis < 0:
+        axis += len(mat.shape)
+        
+    nnz = mat.data.shape[0]
+    new_data = jnp.repeat(mat.data, repeats, axis=0)
+    new_indices = jnp.repeat(mat.indices, repeats, axis=0)
+    offsets = jnp.tile(jnp.arange(repeats), nnz)
+    updated_coords = new_indices[:, axis] * repeats + offsets
+    
+    new_indices = new_indices.at[:, axis].set(updated_coords)
+    
+    new_shape = list(mat.shape)
+    new_shape[axis] *= repeats
+    
+    return sparse.BCOO((new_data, new_indices), shape=tuple(new_shape))
+
 @partial(jax.jit, static_argnums=(1,))
 def _build_full_lookup_jax(lookup_arr, ndim):
     """
