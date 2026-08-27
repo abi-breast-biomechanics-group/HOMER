@@ -49,7 +49,10 @@ from HOMER.topomap_operations import global_nodes_from_ele_localnodes, refine_co
 from HOMER.mesh_decorators import expand_wide_evals, wide_eval
 from HOMER.closed_form_matrix_solves import explicit_solve_2x2, explicit_solve_3x3
 
-pv.global_theme.allow_empty_mesh = True
+try:
+    pv.global_theme.allow_empty_mesh = True
+except ImportError:
+    pass
 
 class MeshNode(dict):
     """A mesh node that stores a physical location and associated derivative data.
