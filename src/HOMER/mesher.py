@@ -21,6 +21,7 @@ Typical import::
     from HOMER import Mesh, MeshNode, MeshElement
     from HOMER.basis_definitions import H3Basis, L1Basis
 """
+from __future__ import annotations
 
 import logging
 from copy import copy
