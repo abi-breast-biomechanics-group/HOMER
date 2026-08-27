@@ -13,6 +13,7 @@ working; the definitions moved into a module per concern when the original
 
 New code should import from :mod:`HOMER` or :mod:`HOMER.mesh` directly.
 """
+from __future__ import annotations
 
 from HOMER.mesh import (MeshNode, MeshElement, MeshField, Mesh, make_eval,
                         make_deriv_eval, make_weight_eval, quadrature_order,
