@@ -62,7 +62,7 @@ mesh1 = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, po
 mesh1.refine(2)
 # mesh1.plot()
 
-pts = np.random.rand(1_00_000, 3) * 1.5 - 0.25
+pts = np.random.rand(1_000, 3) * 1.5 - 0.25
 # pts = pts[4156]
 # pts = pts[1469]
 

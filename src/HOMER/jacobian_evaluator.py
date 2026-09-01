@@ -25,8 +25,6 @@ import jax.numpy as jnp
 import sparsejac
 import numpy as np
 import scipy
-from scipy.sparse import csr_matrix
-from collections import defaultdict
 
 def jacobian(
     cost_function: Optional[Callable] = None, 
@@ -59,14 +57,8 @@ def jacobian(
 
     if sparse:
         if isinstance(sparsity, Callable):
-            def scipy_sparse_jac(params, **kwargs):
-                # t0 = time()
-                sparse_csr = sparsity(params)
-                # t1 = time()
-                # print(t1 - t0)
-                # update_csr_jacobian(partial(fwd_func, **kwargs), params, sparse_csr)
-                sparse_csr = update_csr_jacobian_hybrid(partial(fwd_func, **kwargs), params, sparse_csr)
-                return sparse_csr
+            raise ValueError("Non-static sparsities are not yet supported")
+
         else:
             if sparsity is None:
                 sparsity = estimate_sparsity(partial(fwd_func, **further_args), init_estimate)
@@ -122,144 +114,3 @@ def estimate_sparsity(callable_fn, init_estimate) -> jax.experimental.sparse.BCO
         shape=(M, N)
     )
 
-def _next_power_of_2(x):
-    """Returns the smallest power of 2 greater than or equal to x."""
-    return 1 if x == 0 else 2**(x - 1).bit_length()
-
-def update_csr_jacobian(f, params, sparsity_csr, MAX_BATCH_SIZE=128):
-    # ts0 = time()
-    M, N = sparsity_csr.shape
-    indptr = sparsity_csr.indptr
-    indices = sparsity_csr.indices
-    
-    if not np.issubdtype(sparsity_csr.data.dtype, np.floating):
-        sparsity_csr.data = sparsity_csr.data.astype(np.float32)
-
-    pattern_to_rows = defaultdict(list)
-    exact_max_deps = 0
-    
-    for i in range(M):
-        start, end = indptr[i], indptr[i+1]
-        deps = indices[start:end]
-        if len(deps) == 0:
-            continue
-            
-        pattern_to_rows[tuple(deps)].append(i)
-        if len(deps) > exact_max_deps:
-            exact_max_deps = len(deps)
-
-    if exact_max_deps == 0:
-        sparsity_csr.data[:] = 0.0
-        return sparsity_csr
-
-    exact_max_groups = sum((len(rows) + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE 
-                           for rows in pattern_to_rows.values())
-
-    # --- 2. Bucket to powers of 2 ---
-    MAX_DEPS = _next_power_of_2(exact_max_deps)
-    MAX_GROUPS = _next_power_of_2(exact_max_groups)
-
-    # --- 3. Prepare static arrays ---
-    row_indices = np.zeros((MAX_GROUPS, MAX_BATCH_SIZE), dtype=np.int32)
-    row_masks = np.zeros((MAX_GROUPS, MAX_BATCH_SIZE), dtype=bool)
-    col_indices = np.zeros((MAX_GROUPS, MAX_DEPS), dtype=np.int32)
-    col_masks = np.zeros((MAX_GROUPS, MAX_DEPS), dtype=bool)
-    data_loc_mapping = np.zeros((MAX_GROUPS, MAX_BATCH_SIZE, MAX_DEPS), dtype=np.int32)
-    group_idx = 0
-    
-    # --- 4. FAST Vectorized Array Population ---
-    for deps_tuple, rows in pattern_to_rows.items():
-        deps_len = len(deps_tuple)
-        deps_arr = np.array(deps_tuple, dtype=np.int32)
-        rows_arr = np.array(rows, dtype=np.int32)
-        n_rows = len(rows_arr)
-        
-        # Calculate chunks and padding
-        num_chunks = (n_rows + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE
-        pad_len = num_chunks * MAX_BATCH_SIZE - n_rows
-        
-        if pad_len > 0:
-            rows_padded = np.pad(rows_arr, (0, pad_len), constant_values=0)
-            masks_padded = np.pad(np.ones(n_rows, dtype=bool), (0, pad_len), constant_values=False)
-        else:
-            rows_padded = rows_arr
-            masks_padded = np.ones(n_rows, dtype=bool)
-            
-        # Reshape to 2D blocks
-        rows_chunked = rows_padded.reshape(num_chunks, MAX_BATCH_SIZE)
-        masks_chunked = masks_padded.reshape(num_chunks, MAX_BATCH_SIZE)
-        
-        # Target indices in the static arrays
-        g_start = group_idx
-        g_end = group_idx + num_chunks
-        
-        row_indices[g_start:g_end, :] = rows_chunked
-        row_masks[g_start:g_end, :] = masks_chunked
-        
-        col_indices[g_start:g_end, :deps_len] = deps_arr
-        col_masks[g_start:g_end, :deps_len] = True
-        
-        starts = indptr[rows_chunked][..., np.newaxis] # Shape: (num_chunks, MAX_BATCH_SIZE, 1)
-        offsets = np.arange(deps_len)[np.newaxis, np.newaxis, :] # Shape: (1, 1, deps_len)
-        
-        data_loc_mapping[g_start:g_end, :, :deps_len] = starts + offsets
-        
-        group_idx += num_chunks
-    # ts1 = time()
-    # print(f" to0k {ts1-ts0} s")
-    batched_grads = extract_vmapped_sparse_jacobian(
-        f, params, row_indices, row_masks, col_indices, col_masks
-    )
-    
-    grads_np = np.asarray(batched_grads)
-    combined_mask = row_masks[:, :, np.newaxis] & col_masks[:, np.newaxis, :]
-    valid_grads = grads_np[combined_mask]
-    valid_locs = data_loc_mapping[combined_mask]
-    
-    sparsity_csr.data[valid_locs] = valid_grads
-
-    return sparsity_csr
-
-@partial(jax.jit, static_argnums=0)
-def extract_vmapped_sparse_jacobian(f, x_full, row_indices, row_masks, col_indices, col_masks):
-    """
-    row_indices/masks shape: (MAX_GROUPS, MAX_BATCH_SIZE)
-    col_indices/masks shape: (MAX_GROUPS, MAX_DEPS)
-    """
-    def group_fn(r_idx, r_mask, c_idx, c_mask):
-        # 1. Build tangents for the dependencies in this group
-        # Shape: (MAX_DEPS, N)
-        tangents = jnp.zeros((c_idx.shape[0], x_full.shape[0]), dtype=jnp.float32)
-        # Place 1.0s at the target column indices, applying the column mask
-        tangents = tangents.at[jnp.arange(c_idx.shape[0]), c_idx].set(c_mask.astype(jnp.float32))
-        
-        push_forward = lambda t: jax.jvp(f, (x_full,), (t,))[1]
-        jvp_out = jax.vmap(push_forward)(tangents)
-        sparse_batch = jvp_out.T[r_idx]
-        
-        # 4. Mask out the invalid rows (padding)
-        sparse_batch = jnp.where(r_mask[:, None], sparse_batch, 0.0)
-        return sparse_batch
-
-    # Vectorize the group function across the MAX_GROUPS dimension
-    batched_sparse_grads = jax.vmap(group_fn)(row_indices, row_masks, col_indices, col_masks)
-    return batched_sparse_grads
-
-@partial(jax.jit, static_argnums=0)
-def extract_csr_data(f, x_full, row_indices, col_indices):
-    J_dense = jax.jacfwd(f)(x_full)
-    # return J_dense
-    return J_dense[row_indices, col_indices]
-
-def update_csr_jacobian_hybrid(f, x_full, sparsity_csr):
-    row_indices = np.repeat(np.arange(sparsity_csr.shape[0]), np.diff(sparsity_csr.indptr))
-    col_indices = sparsity_csr.indices
-    csr_data_jax = extract_csr_data(f, x_full, row_indices, col_indices)
-    # return csr_data_jax
-    sparsity_csr.data = np.asarray(csr_data_jax)
-    return sparsity_csr
-
-# @partial(jax.jit, static_argnums=0)
-# def update_csr_jacobian_hybrid(f, x_full): #, row_indices):
-#     J_dense = jax.jacfwd(f)(x_full)
-#     return J_dense

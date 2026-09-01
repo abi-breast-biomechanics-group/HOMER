@@ -87,7 +87,7 @@ def model_track_jac(params, plot=False):
 
 fmodel_track_jac = jax.jit(model_track_jac)
 
-res = least_squares(fmodel_track, init_params, verbose=2, max_nfev=60, 
+res = least_squares(fmodel_track, init_params, verbose=2, max_nfev=100, 
                     jac=fmodel_track_jac,
                     # jac=brute_jac,
                     )

@@ -58,7 +58,7 @@ def loc_dist(ps):
     return res.flatten()                 
 
 # loc_dist(pts)
-ele_xi = mesh.embed_points(pts())
+ele_xi = mesh.embed_points(pts(), verbose=3)
 
 @jax.jit
 def loc_dist_init(ps):
