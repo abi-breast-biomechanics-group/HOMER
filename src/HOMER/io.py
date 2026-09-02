@@ -42,8 +42,9 @@ def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
 
     The resulting dict has two top-level keys:
 
-    * ``'nodes'`` – ordered dict of node definitions, each with ``'loc'``
-      and any derivative arrays (``'du'``, ``'dv'``, …).
+    * ``'nodes'`` – ordered dict of node definitions, each with ``'loc'``,
+      any derivative arrays (``'du'``, ``'dv'``, …), and ``'fixed_params'``
+      for nodes carrying fixed (non-optimisable) parameters.
     * ``'elements'`` – ordered dict of element definitions, each with
       ``'nodes'`` (list of node indexes/ids), ``'basis'`` (list of basis
       class name strings), and ``'used_index'`` (bool).
@@ -65,6 +66,11 @@ def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
         node_def.update({k: v.tolist() for k, v in node.items()})
         if node.id is not None:
             node_def['id'] = node.id
+        if node.fixed_params:
+            node_def['fixed_params'] = {
+                k: np.asarray(v).astype(int).tolist()
+                for k, v in node.fixed_params.items()
+            }
         nodes[idn] = node_def
     dict_rep["nodes"] = nodes
 
@@ -100,8 +106,15 @@ def _parse_field_from_dict(dict_rep: dict, field_cls: type[MeshField]) -> MeshFi
         node_def = dict(node_def)
         loc = node_def.pop('loc')
         node_id = node_def.pop('id', None)
-        obj_field.add_node(
-            MeshNode(loc, **{k: np.array(v) for k, v in node_def.items()}, id=node_id))
+        fixed_params = node_def.pop('fixed_params', None)
+        node = MeshNode(
+            loc, **{k: np.array(v) for k, v in node_def.items()}, id=node_id)
+        if fixed_params:
+            # restored before generate_mesh, so the optimisable mask accounts for it
+            node.fixed_params = {
+                k: np.asarray(v).astype(int) for k, v in fixed_params.items()
+            }
+        obj_field.add_node(node)
 
     elem_dict = dict_rep.get('elements', {})
     for elem_def in elem_dict.values():
