@@ -12,7 +12,7 @@ from copy import deepcopy
 
 import numpy as np
 
-from HOMER.mesher import Mesh, MeshField, MeshNode, MeshElement
+from HOMER.mesh import Mesh, MeshField, MeshNode, MeshElement
 from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis, L3Basis, B3Basis
 from HOMER.geometry import basic_surface, cube
 

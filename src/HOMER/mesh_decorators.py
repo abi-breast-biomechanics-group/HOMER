@@ -14,7 +14,7 @@ Provides:
 * Helper functions for generating and caching ``.pyi`` stub files alongside
   the decorated class (``_get_class_hash``, ``_write_pyi``, etc.).
 
-The ``@expand_wide_evals`` decorator is applied to :class:`~HOMER.mesher.MeshField`
+The ``@expand_wide_evals`` decorator is applied to :class:`~HOMER.mesh.field.MeshField`
 to automatically extend its API without boilerplate.
 """
 

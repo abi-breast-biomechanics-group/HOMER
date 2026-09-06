@@ -46,7 +46,7 @@ through JSON – including any basis a user defines.
 Typical usage::
 
     from HOMER.basis_definitions import H3Basis, L1Basis
-    from HOMER.mesher import MeshElement
+    from HOMER.mesh import MeshElement
 
     # 2-D cubic-Hermite surface element
     elem = MeshElement(node_indexes=[0,1,2,3], basis_functions=H3Basis * 2)
@@ -326,7 +326,7 @@ class BasisGroup(tuple):
     Constructing one from a list, a tuple, or a bare :class:`Basis` normalises
     all three, which is how the mesh entry points accept every spelling.  The
     group itself does not cap the number of directions - a partial expression
-    is free to be any length - :class:`~HOMER.mesher.MeshElement` is what
+    is free to be any length - :class:`~HOMER.mesh.element.MeshElement` is what
     requires 1, 2 or 3.
     """
 
@@ -647,7 +647,7 @@ H3Basis = Basis(
 """Cubic Hermite basis (C¹ continuity, 2 nodes, 4 weights per direction).
 
 Each node contributes a *position* and a *tangent derivative*:
-``('x0', 'dx0', 'x1', 'dx1')``.  Requires each :class:`~HOMER.mesher.MeshNode`
+``('x0', 'dx0', 'x1', 'dx1')``.  Requires each :class:`~HOMER.mesh.node.MeshNode`
 to carry Hermite derivative fields (``du``, ``dv``, … depending on the element
 dimensionality).
 
@@ -666,10 +666,10 @@ L1Basis = Basis(
 """Linear Lagrange basis (C⁰ continuity, 2 nodes per direction).
 
 Each node contributes only a *position* weight.  No derivative fields are
-required on the associated :class:`~HOMER.mesher.MeshNode` objects.
+required on the associated :class:`~HOMER.mesh.node.MeshNode` objects.
 
 Useful for coarse linear meshes that are subsequently
-:meth:`~HOMER.mesher.MeshField.rebase`-d to a higher-order basis.
+:meth:`~HOMER.mesh.field.MeshField.rebase`-d to a higher-order basis.
 """
 
 L2Basis = Basis(

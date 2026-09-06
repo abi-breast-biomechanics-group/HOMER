@@ -42,7 +42,8 @@ nav:
     - Topology mapping: how-to/topology.md
     - Node indexing: how-to/node-indexing.md
   - API Reference:
-    - mesher: api/mesher.md
+    - mesh: api/mesh.md
+    - mesh operations: api/mesh_operations.md
     - basis_definitions: api/basis_definitions.md
     - fitting: api/fitting.md
     - io: api/io.md

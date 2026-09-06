@@ -20,7 +20,7 @@ Jacobian for use with ``scipy.optimize.least_squares``::
 import numpy as np
 import jax.numpy as jnp
 
-from HOMER.mesher import Mesh
+from HOMER.mesh import Mesh
 from HOMER.optim import jax_comp_kdtree_distance_query, jax_comp_kdtree_normal_distance_query
 from HOMER.jacobian_evaluator import jacobian
 
@@ -40,7 +40,7 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
     Parameters
     ----------
     mesh:
-        The :class:`~HOMER.mesher.Mesh` to fit.
+        The :class:`~HOMER.mesh.mesh.Mesh` to fit.
     data:
         Target point cloud, shape ``(n_pts, 3)``.
     normals:

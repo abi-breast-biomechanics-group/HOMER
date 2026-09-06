@@ -1,4 +1,4 @@
-from HOMER.mesher import Mesh
+from HOMER.mesh import Mesh
 
 
 

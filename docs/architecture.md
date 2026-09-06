@@ -17,17 +17,45 @@ Basis  (basis_definitions.py)      – one frozen instance per 1-D basis
   └── B3Basis   – cubic B-spline
 BasisGroup(tuple)                  – the bases of one element, one per direction
 
-MeshNode(dict)  (mesher.py)
+MeshNode(dict)  (mesh/node.py)
   └── Physical coordinates + derivative fields
 
-MeshElement     (mesher.py)
+MeshElement     (mesh/element.py)
   └── Links nodes via tensor-product basis
 
-MeshField       (mesher.py)
+MeshField       (mesh/field.py)
   ├── Mesh(MeshField)  – primary coordinate mesh
   │     └── fields : dict[str, MeshField]
   └── Secondary fields (fibre directions, stresses, …)
 ```
+
+`MeshField` owns the state — nodes, elements, the parameter vector, the JAX
+closures compiled from them — and the lifecycle that keeps those in step
+(`generate_mesh`).  What a field *does* lives in a module per concern, whose
+functions take the field as their first argument and are bound into the class
+body by `mesh/field.py`:
+
+```
+HOMER/mesh/
+    node.py  element.py  field.py  mesh.py     the classes
+    evaluation.py    evaluating the field, its derivatives, embedded points
+    parameters.py    the parameter vector, and least-squares fitting it
+    topology.py      shared nodes, faces, surfaces, colouring
+    refinement.py    refine and rebase, and the fixed-parameter transfer
+    plotting.py      drawing; the only module that touches PyVista
+    element_eval.py  per-element evaluation kernels and quadrature rules
+```
+
+Binding rather than inheriting is deliberate: `@expand_wide_evals` reads
+`vars(cls)`, so a method reached through a base class would be invisible to it
+and the generated `*_in_every_element` / `*_ele_xi_pair` variants would
+silently disappear.  Two consequences for anything added to those modules: the
+first parameter is `self`, and a zero-argument `super()` will not work (there
+is no `__class__` cell outside a class body) — call the sibling function
+directly instead.
+
+`HOMER/mesher.py` remains as a re-export shim so `from HOMER.mesher import
+Mesh` keeps working.
 
 ---
 

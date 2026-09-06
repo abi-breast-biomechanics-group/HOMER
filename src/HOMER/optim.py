@@ -21,7 +21,7 @@ from typing import Callable, TYPE_CHECKING
 from functools import partial
 
 if TYPE_CHECKING:
-    from HOMER.mesher import Mesh
+    from HOMER.mesh import Mesh
 
 import scipy
 

@@ -7,7 +7,7 @@ Currently provides:
 """
 
 from typing import Optional
-from HOMER.mesher import MeshNode, MeshElement, Mesh
+from HOMER.mesh import MeshNode, MeshElement, Mesh
 from HOMER.basis_definitions import H3Basis, L1Basis
 
 import numpy as np
@@ -16,7 +16,7 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     """Create a single-element cube mesh.
 
     Constructs a mesh with 8 corner nodes and a single trilinear element
-    (``L1Basis * 3``), then :meth:`~HOMER.mesher.MeshField.rebase`-s
+    (``L1Basis * 3``), then :meth:`~HOMER.mesh.field.MeshField.rebase`-s
     it to the requested *basis* (defaulting to cubic Hermite in all directions).
 
     Parameters
@@ -32,7 +32,7 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     Returns
     -------
     Mesh
-        A :class:`~HOMER.mesher.Mesh` with the requested basis.
+        A :class:`~HOMER.mesh.mesh.Mesh` with the requested basis.
     """
     if centre is None:
         centre = np.zeros(3)

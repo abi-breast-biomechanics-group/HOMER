@@ -18,7 +18,7 @@ import pytest
 from HOMER import Mesh, MeshElement, MeshNode
 from HOMER.basis_definitions import (B3Basis, BasisGroup, H3Basis, L1Basis, L2Basis,
                                      L3Basis, L4Basis)
-from HOMER.mesher import GAUSS, volume_quadrature_order
+from HOMER.mesh import GAUSS, volume_quadrature_order
 
 from _helpers import EXACT, arr, bulged_patch, hermite_cube, node_locs, unit_hex
 

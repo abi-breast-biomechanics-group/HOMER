@@ -110,4 +110,4 @@ See the [How-To Guides](how-to/3d-meshes.md) for detailed walk-throughs.
 
 - [Architecture overview](architecture.md) – understand the class hierarchy.
 - [How-To Guides](how-to/3d-meshes.md) – feature-specific recipes.
-- [API Reference](api/mesher.md) – full docstring reference.
+- [API Reference](api/mesh.md) – full docstring reference.

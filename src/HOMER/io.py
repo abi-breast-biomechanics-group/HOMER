@@ -1,5 +1,5 @@
 """
-io.py – JSON-based serialisation for HOMER :class:`~HOMER.mesher.Mesh` objects.
+io.py – JSON-based serialisation for HOMER :class:`~HOMER.mesh.mesh.Mesh` objects.
 
 Meshes are stored as structured JSON files that capture all node locations,
 derivative fields, element node-lists, and basis function types.  The JSON
@@ -27,7 +27,7 @@ Example round-trip::
 """
 
 from os import PathLike
-from HOMER.mesher import Mesh, MeshNode, MeshElement, MeshField
+from HOMER.mesh import Mesh, MeshNode, MeshElement, MeshField
 from HOMER.basis_definitions import BASIS_REGISTRY, BasisGroup, basis_by_name
 
 from pathlib import Path
@@ -39,7 +39,7 @@ import numpy as np
 STR_LOOKUP = BASIS_REGISTRY  #kept as the old name for the live registry
 
 def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
-    """Serialise a :class:`~HOMER.mesher.MeshField` to a plain Python dictionary.
+    """Serialise a :class:`~HOMER.mesh.field.MeshField` to a plain Python dictionary.
 
     The resulting dict has two top-level keys:
 
@@ -89,7 +89,7 @@ def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
 
 
 def dump_mesh_to_dict(obj_mesh: Mesh | MeshField) -> dict:
-    """Serialise a :class:`~HOMER.mesher.Mesh` (or MeshField) to a dictionary.
+    """Serialise a :class:`~HOMER.mesh.mesh.Mesh` (or MeshField) to a dictionary.
 
     Mesh objects are stored with a ``'main'`` field and optional named
     ``'fields'``.  Passing a :class:`MeshField` returns the legacy
@@ -153,15 +153,15 @@ def _parse_field_from_dict(dict_rep: dict, field_cls: type[MeshField]) -> MeshFi
 
 
 def parse_meshfield_from_dict(dict_rep: dict) -> MeshField:
-    """Deserialise a :class:`~HOMER.mesher.MeshField` from a dictionary."""
+    """Deserialise a :class:`~HOMER.mesh.field.MeshField` from a dictionary."""
     return _parse_field_from_dict(dict_rep, MeshField)
 
 
 def parse_mesh_from_dict(dict_rep: dict) -> Mesh:
-    """Deserialise a :class:`~HOMER.mesher.Mesh` from a plain Python dictionary.
+    """Deserialise a :class:`~HOMER.mesh.mesh.Mesh` from a plain Python dictionary.
 
     Reconstructs nodes (with all derivative arrays), elements (looking up
-    bases by name), and calls :meth:`~HOMER.mesher.MeshField.generate_mesh`
+    bases by name), and calls :meth:`~HOMER.mesh.field.MeshField.generate_mesh`
     before returning.  Accepts both the legacy ``{'nodes','elements'}`` format
     and the newer ``{'main','fields'}`` schema.
     """
@@ -181,7 +181,7 @@ def save_mesh(obj_mesh: Mesh | MeshField, file_location: PathLike):
     Parameters
     ----------
     obj_mesh:
-        The :class:`~HOMER.mesher.Mesh` (or :class:`MeshField`) to save.
+        The :class:`~HOMER.mesh.mesh.Mesh` (or :class:`MeshField`) to save.
     file_location:
         Destination path.  A ``.json`` extension is recommended.
     """
@@ -204,7 +204,7 @@ def load_mesh(file_location: PathLike) -> Mesh:
     Returns
     -------
     Mesh
-        A fully initialised :class:`~HOMER.mesher.Mesh` object.
+        A fully initialised :class:`~HOMER.mesh.mesh.Mesh` object.
     """
     if not isinstance(file_location, Path):
         file_location = Path(file_location)

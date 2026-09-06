@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from functools import reduce
 
-from HOMER.mesher import Mesh, MeshElement, MeshNode
+from HOMER.mesh import Mesh, MeshElement, MeshNode
 from HOMER.basis_definitions import H3Basis, L2Basis, L1Basis
 
 def extract_numbers(text):

@@ -18,7 +18,7 @@ from HOMER.basis_definitions import B3Basis, H3Basis, L1Basis, L2Basis, L3Basis
 from HOMER.fitting import point_cloud_fit
 from HOMER.geometry import basic_surface, cube
 from HOMER.jacobian_evaluator import estimate_sparsity, jacobian
-from HOMER.mesher import column_equilibrated_lstsq
+from HOMER.mesh import column_equilibrated_lstsq
 
 from _helpers import CLOSE, EXACT, arr, bulged_patch, unit_hex
 

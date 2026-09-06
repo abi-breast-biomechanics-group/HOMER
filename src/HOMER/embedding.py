@@ -33,7 +33,7 @@ from HOMER.utils import (approx_closest_indices_Morton_nd, masked_closest_indice
                          aknn_closest_indices)
 
 if TYPE_CHECKING:
-    from HOMER.mesher import MeshField
+    from HOMER.mesh import MeshField
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -474,7 +474,7 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
     Parameters
     ----------
     mesh :
-        The :class:`~HOMER.mesher.MeshField` instance.
+        The :class:`~HOMER.mesh.field.MeshField` instance.
     approx_jac :
         If ``True``, drops the sliding term from the residual gradient
         estimation for the custom JVP (see ``embed_points`` docs).
