@@ -28,14 +28,14 @@ Example round-trip::
 
 from os import PathLike
 from HOMER.mesher import Mesh, MeshNode, MeshElement, MeshField
-from HOMER.basis_definitions import L1Basis, L2Basis, L3Basis, L4Basis, H3Basis
+from HOMER.basis_definitions import L1Basis, L2Basis, L3Basis, L4Basis, H3Basis, B3Basis
 
 from pathlib import Path
 import json
 import numpy as np
 
 #how do we io these files
-STR_LOOKUP = {str(k.__name__):k for k in [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis]}
+STR_LOOKUP = {str(k.__name__):k for k in [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis, B3Basis]}
 
 def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
     """Serialise a :class:`~HOMER.mesher.MeshField` to a plain Python dictionary.
@@ -80,6 +80,8 @@ def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
         ele_def = {"nodes": nodes_sanitised}
         ele_def['basis'] = [str(b.__name__) for b in element.basis_functions]
         ele_def['used_index'] = element.used_index
+        if element.id is not None:
+            ele_def['id'] = element.id
         elements[ide] = ele_def
     dict_rep["elements"] = elements
     return dict_rep
@@ -99,13 +101,24 @@ def dump_mesh_to_dict(obj_mesh: Mesh | MeshField) -> dict:
         }
     return dump_meshfield_to_dict(obj_mesh)
 
+def _rehash_id(node_id):
+    """JSON has no tuples, so a tuple id round-trips as a list.
+
+    Ids are used as dict keys, so a list would be unhashable; anything that
+    was a valid id before the dump is hashable again after this.
+    """
+    if isinstance(node_id, list):
+        return tuple(_rehash_id(x) for x in node_id)
+    return node_id
+
+
 def _parse_field_from_dict(dict_rep: dict, field_cls: type[MeshField]) -> MeshField:
     obj_field = field_cls()
     node_dict = dict_rep.get('nodes', {})
     for node_def in node_dict.values():
         node_def = dict(node_def)
         loc = node_def.pop('loc')
-        node_id = node_def.pop('id', None)
+        node_id = _rehash_id(node_def.pop('id', None))
         fixed_params = node_def.pop('fixed_params', None)
         node = MeshNode(
             loc, **{k: np.array(v) for k, v in node_def.items()}, id=node_id)
@@ -120,15 +133,18 @@ def _parse_field_from_dict(dict_rep: dict, field_cls: type[MeshField]) -> MeshFi
     for elem_def in elem_dict.values():
         elem_def = dict(elem_def)
         basis_functions = [STR_LOOKUP[k] for k in elem_def['basis']]
+        elem_id = _rehash_id(elem_def.get('id', None))
         if elem_def.get('used_index', True):
             obj_field.add_element(MeshElement(
                 node_indexes=elem_def['nodes'],
                 basis_functions=basis_functions,
+                id=elem_id,
             ), generate_mesh=False)
         else:
             obj_field.add_element(MeshElement(
-                node_ids=elem_def['nodes'],
+                node_ids=[_rehash_id(n) for n in elem_def['nodes']],
                 basis_functions=basis_functions,
+                id=elem_id,
             ), generate_mesh=False)
     if obj_field.nodes and obj_field.elements:
         obj_field.generate_mesh()

@@ -8,12 +8,31 @@ dependencies = [
     "pyvista",
     "sparsejac",
     "tqdm",
+    #imported at module scope by HOMER.mesher and HOMER.fitting
+    "matplotlib",
+    "networkx",
 ]
 
 [project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
     "mkdocs-autorefs>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+#`benchmarks/` holds timing scripts with no pass/fail condition; never collect them.
+norecursedirs = ["benchmarks", "applications", "bin", "build", "dev", "docs", "examples", "offline", "site"]
+addopts = "-ra"
+filterwarnings = [
+    #jax leaves numpy's floating-point error state tripped, which surfaces as
+    #spurious over/underflow warnings from unrelated numpy and scipy calls
+    "ignore:overflow encountered:RuntimeWarning",
+    "ignore:invalid value encountered:RuntimeWarning",
+    "ignore:divide by zero encountered:RuntimeWarning",
 ]

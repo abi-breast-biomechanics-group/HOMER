@@ -129,6 +129,13 @@ class AbstractBasis:
         Polynomial order of the basis.
     node_locs : list[float]
         Canonical node positions in [0, 1].
+    interpolatory : bool
+        ``True`` when the nodal parameters *are* the field values at
+        ``node_locs`` (Lagrange and Hermite bases).  ``False`` for control-net
+        bases such as :class:`B3Basis`, whose parameters are control points
+        that do not equal the geometry at the node location.  Used when
+        refining or rebasing to decide whether a fixed nodal value may be
+        carried across verbatim.
     """
 
     fn:Optional[Callable] = None
@@ -137,6 +144,7 @@ class AbstractBasis:
     deriv:Optional[list[Callable]] = None
     order:Optional[int] = None
     node_locs: Optional[list[float]] = None
+    interpolatory: bool = True
 
 BasisGroup = tuple[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]] | list[type[AbstractBasis], type[AbstractBasis]] | tuple[type[AbstractBasis], type[AbstractBasis], type[AbstractBasis]]
 
@@ -477,3 +485,4 @@ class B3Basis(AbstractBasis):
     deriv = [B3, B3d1, B3d1d1]
     order = 3
     node_locs = [-1, 0, 1, 2] #hat t do this # yeah buddy get down with this.
+    interpolatory = False #shared control points, not interpolated nodal values

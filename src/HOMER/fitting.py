@@ -95,7 +95,7 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
         wpts = mesh.evaluate_embeddings(mesh_elements, eval_points, fit_params=params[:])
         dists = data_tree(wpts)
         outputs.append(dists.flatten())
-        outputs.append(mesh.evaluate_sobolev().flatten() * sob_weight)
+        outputs.append(mesh.evaluate_sobolev(fit_params=params[:]).flatten() * sob_weight)
         outputs = jnp.concatenate(outputs)
         return outputs
 

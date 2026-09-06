@@ -7,6 +7,8 @@ Provides:
 * :func:`expand_wide_evals` – class decorator that automatically generates
   ``*_in_every_element`` and ``*_ele_xi_pair`` variants for every
   ``@wide_eval`` method, plus backwards-compatibility aliases.
+* :func:`_chunked_vmap` – the ``jax.lax.scan``-over-chunks batching used by
+  those generated variants so that very wide evaluations don't OOM.
 * :func:`depreciation` – wraps a function to emit a deprecation warning on
   call.
 * Helper functions for generating and caching ``.pyi`` stub files alongside
@@ -19,6 +21,7 @@ to automatically extend its API without boilerplate.
 import ast
 import jax
 import jax.numpy as jnp
+import numpy as np
 import hashlib
 import inspect
 from pathlib import Path
@@ -28,9 +31,84 @@ from functools import partial
 
 _PYI_FORMAT_VERSION = 2
 
+#: Rows (i.e. individual point evaluations) pushed through a single vmapped
+#: chunk by the generated ``*_in_every_element`` / ``*_ele_xi_pair`` wrappers.
+#: Set ``mesh.eval_chunk_size`` (or pass ``chunk_size=``) to override per mesh
+#: or per call; a falsy value restores the old unchunked ``jax.vmap``.
+DEFAULT_EVAL_CHUNK_SIZE = 100_000
+
+#: Whether chunked evaluations rematerialise their intermediates on the
+#: backward pass instead of stacking them (see :func:`_chunked_vmap`).  Off by
+#: default: it only pays under ``jax.grad``.  Override with ``mesh.eval_remat``
+#: or a per-call ``remat=``.
+DEFAULT_EVAL_REMAT = False
+
 def wide_eval(fn):
     fn._is_derived = True
     return fn
+
+def _resolve_chunk_size(obj, chunk_size):
+    """``None`` means "use the mesh default"; anything falsy disables chunking."""
+    if chunk_size is None:
+        return getattr(obj, "eval_chunk_size", DEFAULT_EVAL_CHUNK_SIZE)
+    return chunk_size
+
+def _resolve_remat(obj, remat):
+    """``None`` means "use the mesh default"."""
+    if remat is None:
+        return getattr(obj, "eval_remat", DEFAULT_EVAL_REMAT)
+    return remat
+
+def _n_xi(arg):
+    """Best-effort count of xi points held by a positional argument."""
+    shape = getattr(arg, "shape", None)
+    if shape is None:
+        shape = np.shape(arg)
+    return int(shape[0]) if len(shape) >= 2 else 1
+
+def _chunked_vmap(fn, mapped_args, chunk_size, remat=False):
+    """``jax.vmap(fn)(*mapped_args)``, evaluated ``chunk_size`` rows at a time.
+
+    Every entry of *mapped_args* is mapped over its leading axis (all of equal
+    length).  Batches that already fit in one chunk take the plain
+    :func:`jax.vmap` path; larger ones are padded up to a whole number of
+    chunks and pushed through :func:`jax.lax.scan`, so peak memory scales with
+    *chunk_size* instead of with the full batch.  The returned values are
+    identical either way — only the memory profile changes.
+
+    Under reverse-mode AD the scan still stacks one set of residuals per row,
+    which is O(n_rows) memory.  Setting *remat* wraps the chunk body in
+    :func:`jax.checkpoint`, so the backward pass re-runs each chunk forward to
+    regenerate its intermediates rather than keeping them: residuals collapse
+    to the (already stored) scan inputs at the cost of one extra forward
+    evaluation per chunk.  It costs ~10% on a forward-only evaluation, so it is
+    only worth setting when differentiating a wide evaluation.
+    """
+    mapped_args = tuple(jnp.asarray(a) for a in mapped_args)
+    n = mapped_args[0].shape[0]
+    body = jax.vmap(fn)
+    if remat:
+        # checkpoint the whole vmapped chunk, not fn: one rematerialised
+        # region per chunk keeps the batched kernel fused.
+        body = jax.checkpoint(body)
+    if not chunk_size or n <= chunk_size:
+        return body(*mapped_args)
+
+    n_chunks = -(-n // chunk_size)
+    pad = n_chunks * chunk_size - n
+    if pad:  # repeat the last row: padding then never indexes out of range
+        mapped_args = tuple(
+            jnp.concatenate([a, jnp.repeat(a[-1:], pad, axis=0)], axis=0) for a in mapped_args
+        )
+    stacked = tuple(a.reshape(n_chunks, chunk_size, *a.shape[1:]) for a in mapped_args)
+
+    def scan_body(carry, chunk_args):
+        return carry, body(*chunk_args)
+
+    _, out = jax.lax.scan(scan_body, None, stacked)
+    return jax.tree_util.tree_map(
+        lambda o: o.reshape(n_chunks * chunk_size, *o.shape[2:])[:n], out
+    )
 
 def depreciation(fn):
     def new_fn(*a, **kw):
@@ -41,32 +119,54 @@ def depreciation(fn):
 
 def make_iee(name):
     # @partial(jax.jit, static_argnames=['self' 'othr'])
-    def iee(self, *a, fit_params=None, **kw): 
-        """Evaluates the base function in every element of the mesh"""
+    def iee(self, *a, fit_params=None, chunk_size=None, remat=None, **kw): 
+        """Evaluates the base function in every element of the mesh
+
+        ``chunk_size`` caps how many point evaluations are held in flight at
+        once (``None`` uses ``mesh.eval_chunk_size``, ``0`` disables chunking).
+        Because every element is evaluated at every xi, the elements are
+        scanned over in groups of ``chunk_size // n_xi``.  ``remat`` trades
+        recomputation for memory on the backward pass (``None`` uses
+        ``mesh.eval_remat``).
+        """
 
         if fit_params is None:
             fit_params = self.optimisable_param_array
         new_fn = getattr(self, name)
-        mapped = jax.vmap(
-            lambda e: new_fn(e, *a, fit_params=fit_params, **kw), in_axes=0
-        )(jnp.arange(len(self.elements)))
+        chunk_size = _resolve_chunk_size(self, chunk_size)
+        if chunk_size and a:
+            chunk_size = max(1, chunk_size // _n_xi(a[0]))
+        mapped = _chunked_vmap(
+            lambda e: new_fn(e, *a, fit_params=fit_params, **kw),
+            (jnp.arange(len(self.elements)),),
+            chunk_size,
+            _resolve_remat(self, remat),
+        )
         return mapped.reshape(-1, *mapped.shape[2:])
     return iee
 
 def make_ele_xi_pair(name):  
     # @partial(jax.jit, static_argnames=['self', 'othr'])
-    def ele_xi_pair(self, eles, xis, *a, fit_params=None, **kw):
+    def ele_xi_pair(self, eles, xis, *a, fit_params=None, chunk_size=None, remat=None, **kw):
         """
         Evaluates the base function in pairs of ele_xi_lists
+
+        ``chunk_size`` pairs are evaluated per vmapped chunk (``None`` uses
+        ``mesh.eval_chunk_size``, ``0`` disables chunking), which keeps peak
+        memory flat for very long ele/xi lists.  ``remat`` trades recomputation
+        for memory on the backward pass (``None`` uses ``mesh.eval_remat``).
         """
         if fit_params is None:
             fit_params = self.optimisable_param_array
         new_fn = getattr(self, name)
         eval_e = jnp.atleast_1d(jnp.array(eles))
         eval_xi = jnp.atleast_2d(jnp.array(xis))
-        out_sorted = jax.vmap( #vmap original over every (element, xi) pair in sorted order
-            lambda single_e, single_xi: new_fn(single_e, single_xi, *a, fit_params=fit_params, **kw), (0, 0)
-        )(eval_e, eval_xi).squeeze()
+        out_sorted = _chunked_vmap( #vmap original over every (element, xi) pair in sorted order
+            lambda single_e, single_xi: new_fn(single_e, single_xi, *a, fit_params=fit_params, **kw),
+            (eval_e, eval_xi),
+            _resolve_chunk_size(self, chunk_size),
+            _resolve_remat(self, remat),
+        ).squeeze()
         return out_sorted
 
     return ele_xi_pair

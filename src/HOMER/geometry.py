@@ -36,6 +36,8 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     """
     if centre is None:
         centre = np.zeros(3)
+    if scale is None:
+        scale = 1
     if basis is None:
         basis = [H3Basis] * 3
     bottom_corner = centre - scale/2

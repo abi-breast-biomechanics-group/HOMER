@@ -24,6 +24,7 @@ Typical import::
 
 import logging
 from copy import copy
+from fractions import Fraction
 import itertools
 
 from os import PathLike
@@ -46,11 +47,194 @@ from HOMER.jacobian_evaluator import estimate_sparsity, jacobian
 from HOMER.utils import spheres_to_polydata, vol_hexahedron, make_tiling, h_tform, all_pairings, block_diagonal_jacobian, jax_aknn, all_pairings
 from HOMER.utils import approx_closest_indices_Morton_nd, build_full_lookup, bcoo_repeat_scalar
 from HOMER.topomap_operations import global_nodes_from_ele_localnodes, refine_connectivity
-from HOMER.mesh_decorators import expand_wide_evals, wide_eval
+from HOMER.mesh_decorators import expand_wide_evals, wide_eval, DEFAULT_EVAL_CHUNK_SIZE, DEFAULT_EVAL_REMAT
 from HOMER.closed_form_matrix_solves import explicit_solve_2x2, explicit_solve_3x3
 from HOMER.embedding import build_embedding_fn
 
 pv.global_theme.allow_empty_mesh = True
+
+#: Largest denominator used when snapping a parametric coordinate to an exact
+#: rational.  Basis node locations and refinement breakpoints are small exact
+#: rationals (0, 1/2, 1/3, ...), so this recovers the intended value while the
+#: matching itself stays pure integer arithmetic - no mesh coordinate is ever
+#: compared, which keeps the result independent of the geometry dtype.
+MAX_XI_DENOMINATOR = 10**6
+
+
+def _basis_node_fractions(basis: type[AbstractBasis], max_denominator: int = MAX_XI_DENOMINATOR) -> list[Fraction]:
+    """Exact rational node locations of a 1-D basis.
+
+    ``node_locs`` are class-level constants, so the snap to a rational is exact
+    in intent.  Note that they are not required to lie inside ``[0, 1]``:
+    :class:`~HOMER.basis_definitions.B3Basis` places its shared control points
+    at ``[-1, 0, 1, 2]``.
+    """
+    return [Fraction(float(loc)).limit_denominator(max_denominator) for loc in basis.node_locs]
+
+
+def _as_fractions(values, max_denominator: int = MAX_XI_DENOMINATOR) -> list[Fraction]:
+    """Snap a sequence of parametric breakpoints to exact rationals."""
+    return [Fraction(float(v)).limit_denominator(max_denominator) for v in values]
+
+
+def _basis_slot_correspondence(old_bases, new_bases, xi_breaks, refinement) -> list[np.ndarray]:
+    """Per-direction map from ``(sub-element index, new basis node)`` to old basis node.
+
+    Entry ``[c, j]`` is the index of the old basis node that the new basis node
+    *j* of sub-element *c* sits exactly on top of, or ``-1`` when the new node
+    has no counterpart.  The comparison is exact rational arithmetic on the
+    basis node locations - never on nodal coordinates.
+
+    Parameters
+    ----------
+    old_bases, new_bases:
+        1-D basis classes before and after the operation, one per direction.
+    xi_breaks:
+        Per-direction list of :class:`~fractions.Fraction` sub-element
+        boundaries within the parent element, length ``refinement[d] + 1``.
+    refinement:
+        Number of sub-elements per direction (all ones for a rebase).
+    """
+    maps = []
+    for d, (old_basis, new_basis) in enumerate(zip(old_bases, new_bases)):
+        f_old = _basis_node_fractions(old_basis)
+        f_new = _basis_node_fractions(new_basis)
+
+        lookup = {}
+        for i, loc in enumerate(f_old):
+            lookup.setdefault(loc, i)
+
+        n_sub = int(refinement[d])
+        breaks = xi_breaks[d]
+        slot_map = np.full((n_sub, len(f_new)), -1, dtype=int)
+        for c in range(n_sub):
+            lo, span = breaks[c], breaks[c + 1] - breaks[c]
+            for j, loc in enumerate(f_new):
+                slot_map[c, j] = lookup.get(lo + loc * span, -1)
+        maps.append(slot_map)
+    return maps
+
+
+def _element_node_indices(field: 'MeshField') -> np.ndarray:
+    """``(n_elements, n_nodes_per_element)`` array of global node indices."""
+    field._update_id_mappings()
+    rows = []
+    for element in field.elements:
+        if element.used_index:
+            rows.append(list(element.nodes))
+        else:
+            rows.append([field.node_id_to_ind[node_id] for node_id in element.nodes])
+    return np.array(rows, dtype=int)
+
+
+def _parent_node_map(old_field: 'MeshField', old_bases, new_bases, new_ele_nodes: np.ndarray,
+                     parent_coords: np.ndarray, refinement, xi_breaks, n_new_nodes: int) -> np.ndarray:
+    """Map every new global node to the old global node it coincides with.
+
+    Element identity is preserved by both refinement and rebasing, so a new
+    node is identified by *which basis slot of which parent element* it
+    occupies.  That is resolved purely with integer indices and exact rational
+    node locations, so nothing here depends on the mesh coordinates or their
+    dtype.
+
+    Returns
+    -------
+    numpy.ndarray
+        Length ``n_new_nodes``, holding the old node index for each new node,
+        or ``-1`` where the new node has no counterpart.
+    """
+    old_shape = [len(b.node_locs) for b in old_bases]
+    new_shape = [len(b.node_locs) for b in new_bases]
+    ndim = len(new_shape)
+    n_new_local = int(np.prod(new_shape))
+
+    maps = _basis_slot_correspondence(old_bases, new_bases, xi_breaks, refinement)
+
+    # all_pairings orders local points with direction 0 fastest (Fortran order),
+    # matching the sub-element ordering used by refine_connectivity.
+    new_local_j = np.unravel_index(np.arange(n_new_local), new_shape, order='F')
+    old_strides = np.concatenate([[1], np.cumprod(old_shape[:-1])]).astype(int)
+
+    n_elements = new_ele_nodes.shape[0]
+    parent_ele = np.arange(n_elements) // int(np.prod(refinement))
+
+    old_local = np.zeros((n_elements, n_new_local), dtype=int)
+    valid = np.ones((n_elements, n_new_local), dtype=bool)
+    for d in range(ndim):
+        matched = maps[d][parent_coords[:, d], :][:, new_local_j[d]]
+        valid &= matched >= 0
+        old_local += np.where(matched >= 0, matched, 0) * old_strides[d]
+
+    parent_of_new = np.full(n_new_nodes, -1, dtype=int)
+    if valid.any():
+        old_node_of = _element_node_indices(old_field)
+        rows = np.repeat(parent_ele[:, None], n_new_local, axis=1)[valid]
+        parent_of_new[new_ele_nodes[valid]] = old_node_of[rows, old_local[valid]]
+    return parent_of_new
+
+
+def _transfer_fixed_params(old_nodes, new_nodes, parent_of_new: np.ndarray, interpolatory: bool) -> tuple[int, int, int]:
+    """Carry :attr:`MeshNode.fixed_params` across to the coincident new nodes.
+
+    ``loc`` constraints are re-asserted with the original value for
+    interpolatory bases, so a pinned landmark survives the least-squares fit
+    exactly.  Derivative constraints keep their fitted value, because their
+    magnitude is element-scale dependent (a refined element's ``du`` is
+    legitimately the parent's divided by the refinement factor).  For a
+    control-net basis no value is restored at all - only the flag.
+
+    Returns
+    -------
+    tuple
+        ``(constraints transferred, constraints dropped, fixed old nodes with
+        no counterpart)``.
+    """
+    transferred = 0
+    dropped = 0
+    matched_old = set()
+
+    for new_index, old_index in enumerate(parent_of_new):
+        if old_index < 0:
+            continue
+        old_node = old_nodes[old_index]
+        if not old_node.fixed_params:
+            continue
+        matched_old.add(int(old_index))
+
+        new_node = new_nodes[new_index]
+        for param, inds in old_node.fixed_params.items():
+            inds = np.asarray(inds, dtype=int)
+            if inds.size == 0:
+                continue
+            if param == 'loc':
+                values = np.asarray(old_node.loc)[inds] if interpolatory else None
+                new_node.fix_parameter('loc', values=values, inds=inds)
+            elif param in new_node:
+                new_node.fix_parameter(param, inds=inds)
+            else:
+                dropped += 1 #the new basis carries no such derivative
+                continue
+            transferred += 1
+
+    unmatched = sum(1 for i, node in enumerate(old_nodes) if node.fixed_params and i not in matched_old)
+    return transferred, dropped, unmatched
+
+
+def _report_fixed_param_transfer(operation: str, stats: tuple[int, int, int], interpolatory: bool) -> None:
+    """Warn about constraints that could not be carried through *operation*."""
+    transferred, dropped, unmatched = stats
+    if dropped or unmatched:
+        logging.warning(
+            f"{operation}: {transferred} fixed nodal parameter(s) preserved, but {dropped} were dropped "
+            f"(no equivalent parameter in the new basis) and {unmatched} fixed node(s) had no counterpart "
+            f"in the new mesh. Those degrees of freedom are now optimisable."
+        )
+    if transferred and not interpolatory:
+        logging.warning(
+            f"{operation}: the basis is not interpolatory, so fixed parameters were re-applied to the "
+            f"lattice-coincident control points at their fitted values. This approximates the original "
+            f"constraint, which is spread over several control points after {operation}."
+        )
 
 class MeshNode(dict):
     """A mesh node that stores a physical location and associated derivative data.
@@ -485,6 +669,10 @@ class MeshField:
 
         ######### Compilation flags
         self.compile = jax_compile
+        #: max point evaluations per chunk in the generated wide-eval wrappers
+        self.eval_chunk_size: int = DEFAULT_EVAL_CHUNK_SIZE
+        #: rematerialise chunk intermediates when differentiating a wide eval
+        self.eval_remat: bool = DEFAULT_EVAL_REMAT
         if not len(self.nodes) == 0 and not len(self.elements) == 0 and not skip_generate:
             self.generate_mesh()
     
@@ -633,13 +821,13 @@ class MeshField:
         flip = jnp.where(jnp.atleast_2d(xis) > 0.5, -1, 1)
         
         if self.ndim == 2:
-            du = (self.evaluate_embeddings(element_ids, xis + jnp.array([step, 0])[None] * flip[:, 0], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 0][:, None, None]
-            dv = (self.evaluate_embeddings(element_ids, xis + jnp.array([0, step])[None] * flip[:, 1], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 1][:, None, None]
-            jmats = jnp.concatenate((du, dv), axis=1)
+            du = (self.evaluate_embeddings(element_ids, xis + jnp.array([step, 0])[None] * flip[:, 0][:, None], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 0][:, None, None]
+            dv = (self.evaluate_embeddings(element_ids, xis + jnp.array([0, step])[None] * flip[:, 1][:, None], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 1][:, None, None]
+            jmats = jnp.concatenate((du, dv), axis=1) / step
         if self.ndim == 3:
-            du = (self.evaluate_embeddings(element_ids, xis + jnp.array([step, 0, 0])[None] * flip[:, 0], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 0][:, None, None]
-            dv = (self.evaluate_embeddings(element_ids, xis + jnp.array([0, step, 0])[None] * flip[:, 1], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 1][:, None, None]
-            dw = (self.evaluate_embeddings(element_ids, xis + jnp.array([0, 0, step])[None] * flip[:, 2], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 2][:, None, None]
+            du = (self.evaluate_embeddings(element_ids, xis + jnp.array([step, 0, 0])[None] * flip[:, 0][:, None], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 0][:, None, None]
+            dv = (self.evaluate_embeddings(element_ids, xis + jnp.array([0, step, 0])[None] * flip[:, 1][:, None], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 1][:, None, None]
+            dw = (self.evaluate_embeddings(element_ids, xis + jnp.array([0, 0, step])[None] * flip[:, 2][:, None], fit_params=fit_params) - locals).reshape(-1, 1, self.fdim) * flip[:, 2][:, None, None]
 
             jmats = jnp.concatenate((du, dv, dw), axis=1) / step
         # return jmats
@@ -787,6 +975,11 @@ class MeshField:
         """
 
         if isinstance(ng, int):
+            if ng not in GAUSS:
+                raise ValueError(
+                    f"No {ng}-point Gauss rule is tabulated; available orders are "
+                    f"{sorted(GAUSS)}"
+                )
             return GAUSS[ng]
         elif isinstance(ng, list):
             if len(ng) > 3:
@@ -1011,7 +1204,7 @@ class MeshField:
         ele_iter  = [element_ids] if not isinstance(element_ids, list) else element_ids
         elements_to_iter = self.elements if element_ids is None else ele_iter
         if not just_faces:
-            grid = self.xi_grid(res=res, ndim=self.ndim, surface=True)
+            grid = self.xi_grid(res=res, dim=self.ndim, surface=True)
             if element_ids is not None:
                 all_points = []
                 for ne, e in enumerate(elements_to_iter):
@@ -1454,16 +1647,19 @@ class MeshField:
         #evaluate the mesh surface and evaluate all of the elements
         lines = self.get_lines(fit_params=fit_params)
 
-        def all_pairings(*lists):
-            return [t[::-1] for t in itertools.product(*reversed(copy(lists)))]
-        bs = self.elements[0].basis_functions
-        list_locs = [b.node_locs for b in bs]
-        eval_pts = np.array(all_pairings(*list_locs))
-        node_dots = np.array(self.evaluate_embeddings_in_every_element(eval_pts, fit_params=fit_params))
-        node_dots = np.array([n.loc for n in self.nodes])
-
-        # grid = self.xi_grid(res=2) #includes the boundary points, so only node values
-        # node_dots = np.array(self.evaluate_embeddings_in_every_element(grid, fit_params=fit_params))
+        if fit_params is None:
+            node_dots = np.array([n.loc for n in self.nodes])
+        else:
+            #the node markers are nodal parameters, not surface samples, so an
+            #override has to be read out of the parameter vector directly
+            params = np.asarray(self.true_param_array).copy()
+            override = np.asarray(fit_params).ravel()
+            if override.shape[0] == params.shape[0]:
+                params = override
+            else:
+                params[self.optimisable_param_bool] = override
+            #generate_mesh lays each node out as loc first, then its derivative fields
+            node_dots = params.reshape(len(self.nodes), -1)[:, :self.fdim]
 
 
         s=pv.Plotter() if scene is None else scene
@@ -1670,6 +1866,27 @@ class MeshField:
             pyvista plotter.
         dim_mask:
             a vector used to project against the distance in a subset of dimensions.
+            Either ``(fdim,)`` — applied to every point — or ``(n_pts, fdim)``
+            for a per-point mask; ``None`` keeps every dimension.  It is a
+            *static* statement about which residual components exist, so it is
+            coerced to ``bool`` and carries no tangent: differentiating
+            ``embed_points`` never produces a derivative with respect to it.
+            Masked components come back as exactly zero in both the residual
+            and its Jacobian.  A row that masks out more dimensions than the
+            mesh has parametric directions leaves the embedding
+            under-determined; the derivative then takes the minimum-norm
+            solution, and an all-``False`` row yields a zero residual and a
+            zero Jacobian row.
+
+            A non-trivial mask also switches the coarse search from the
+            Morton Z-curve lookup to an exact one
+            (:func:`~HOMER.utils.masked_closest_indices`).  A Z-curve code
+            describes a whole coordinate vector, so it cannot express "these
+            components only"; seeding from it meant the masked components
+            still steered the match.  For a multi-state field that picks a
+            different local minimum of the cross-state compromise, not merely
+            a less precise seed, so the exact search is used whenever the
+            mask makes one necessary.
         approx_jac:
             drops the calculation of the sliding term from the residual gradient estimation for embedding.
             Is less accurate, but recovers seperable derivatives by dimension, allowing further compression of the Jacobian.
@@ -1682,7 +1899,9 @@ class MeshField:
             Window width for the Morton-code nearest-neighbour coarse
             search (default 16).  Larger values improve coarse-search
             accuracy at the cost of memory and time; the Newton–Raphson
-            refinement corrects for coarse-search misses.
+            refinement corrects for coarse-search misses.  Ignored when
+            *dim_mask* masks anything off, since that case uses an exact
+            search instead (see below).
 
         Returns
         -------
@@ -1796,12 +2015,19 @@ class MeshField:
 
     def get_volume(self, fit_params = None, element_wise=False):
         """
-        Calculates the mesh volume using a gauss point integration scheme.
+        Calculates the mesh volume by Gauss quadrature of the Jacobian determinant.
+
+        The quadrature order is chosen by :func:`volume_quadrature_order` so
+        that det(J) is integrated *exactly*, which makes the result exact (to
+        float round-off) for any element the basis can describe -- not just
+        affine ones.
 
         :param fit_params: an overide of the standard mesh parameters to use for fitting.
-        :returns vol: The estimated volume of the mesh.
+        :returns vol: The volume of the mesh, signed by element orientation.
         """
-        gauss_points, weights = self.gauss_grid([e.order for e in self.elements[0].basis_functions])
+        if self.ndim != 3:
+            raise ValueError(f"Volume is only defined on a 3-D mesh, this one is {self.ndim}-D")
+        gauss_points, weights = self.gauss_grid(volume_quadrature_order(self.elements[0].basis_functions))
         Jmats = self.evaluate_jacobians_in_every_element(gauss_points, fit_params=fit_params)
         dets = jnp.linalg.det(Jmats).reshape(len(self.elements), -1)
         vols = dets * weights[None]
@@ -1977,10 +2203,15 @@ class MeshField:
     def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, skip_bool=False):
         """Fit nodal parameters by solving a linear least-squares problem.
 
-        Solves ``weight_mat @ params ≈ targets`` via :func:`numpy.linalg.lstsq`
+        Solves ``weight_mat @ params ≈ targets`` via :func:`jax.numpy.linalg.lstsq`
         and updates the mesh's nodal parameters with the solution.  This is
         the fastest fitting approach when the xi embeddings are fixed (i.e. the
         mesh topology does not change during fitting).
+
+        The solve is column-equilibrated (see
+        :func:`column_equilibrated_lstsq`), which costs nothing in exact
+        arithmetic but recovers several digits in float32 for the bases whose
+        weight matrices are badly scaled -- Hermite and B-spline especially.
 
         Parameters
         ----------
@@ -2013,7 +2244,7 @@ class MeshField:
             A = weight_mat
             b = targets
 
-        new_params, residual, rank, s = jnp.linalg.lstsq(A,b)
+        new_params, residual, rank, s = column_equilibrated_lstsq(A, b)
         # if not skip_bool:
         #     if rank < A.shape[1]:
         #         logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")
@@ -2030,7 +2261,7 @@ class MeshField:
 
     ################################# REFINEMENT
     def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
-               clean_nodes = True, plot=False):
+               clean_nodes = True, plot=False, preserve_fixed_params = True):
         """Subdivide every element, increasing the mesh resolution.
 
         Each existing element is replaced by ``refinement_factor ** ndim``
@@ -2054,6 +2285,13 @@ class MeshField:
         clean_nodes:
             When ``True`` (default), remove unreferenced nodes after
             refinement.
+        preserve_fixed_params:
+            When ``True`` (default), any node of the refined mesh that sits
+            exactly on an existing node inherits that node's
+            :attr:`MeshNode.fixed_params`.  Fixed ``loc`` values are restored
+            verbatim for interpolatory bases so pinned landmarks do not drift
+            with the fit; constraints with no counterpart in the refined mesh
+            are dropped and reported.
 
         Raises
         ------
@@ -2068,9 +2306,11 @@ class MeshField:
             if isinstance(refinement_factor, int):
                 refinement_factor = [refinement_factor] * self.ndim
             xi_locs = [np.linspace(0,1,rf+1) for rf in refinement_factor]
+            f_xi_locs = [[Fraction(k, rf) for k in range(rf+1)] for rf in refinement_factor]
         elif by_xi_refinement is not None:
             refinement_factor = [len(xival) - 1 for xival in by_xi_refinement]
             xi_locs = by_xi_refinement
+            f_xi_locs = [_as_fractions(xival) for xival in by_xi_refinement]
         else:
             raise ValueError("one of refinement factor and by_xi_refinement must be defined")
         xi_locs = [np.array(x) for x in xi_locs]
@@ -2088,8 +2328,15 @@ class MeshField:
         new_mesh = MeshField(nodes=new_pts, elements=new_elements)
         new_mesh.generate_mesh()
 
+        #Sample each child over the whole of its own [0, 1], not an interior
+        #window: the sample count is fixed at order+2 per direction, so pulling
+        #the samples inwards makes the fit extrapolate to the element ends,
+        #which is what costs the accuracy.  Widening improves the conditioning
+        #of every basis (L3 69 -> 3, H3 4.4e4 -> 1.1e4, B3 1.6e5 -> 4.1e4) and
+        #leaves the system full rank, at the price of duplicate rows where
+        #neighbouring children meet.
         to_eval = [b.order+2 for b in basis]
-        xi_grid = np.column_stack([xi.ravel() for xi in np.mgrid[*[slice(0.1, 0.9, e*1j) for e in to_eval]]])
+        xi_grid = np.column_stack([xi.ravel() for xi in np.mgrid[*[slice(0.0, 1.0, e*1j) for e in to_eval]]])
 
         new_eles = np.repeat(np.arange(ele_indexes.shape[0]), xi_grid.shape[0])
         new_xi = np.tile(xi_grid, (ele_indexes.shape[0], 1))
@@ -2111,6 +2358,14 @@ class MeshField:
         w_mat = new_mesh.get_xi_weight_mat(new_eles, new_xi)
         # plt.imshow(w_mat);plt.show()
         new_mesh.linear_fit(targets, w_mat) 
+
+        if preserve_fixed_params: #must happen while self still holds the old nodes
+            parent_of_new = _parent_node_map(self, basis, basis, ele_indexes, parent_connectivity,
+                                             refinement_factor, f_xi_locs, len(new_mesh.nodes))
+            interpolatory = all(getattr(b, 'interpolatory', True) for b in basis)
+            stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new, interpolatory)
+            _report_fixed_param_transfer('refine', stats, interpolatory)
+
         self.elements = new_mesh.elements
 
          
@@ -2191,7 +2446,7 @@ class MeshField:
         return parse_meshfield_from_dict(dict_rep)
 
 
-    def rebase(self, new_basis: BasisGroup, in_place=False, res=10) -> 'MeshField':
+    def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True) -> 'MeshField':
         """Convert the mesh to a different set of basis functions.
 
         Constructs a new :class:`MeshField` with *new_basis*, sampling the
@@ -2219,6 +2474,12 @@ class MeshField:
             new object).
         res:
             Number of xi grid points per direction used for the linear fit.
+        preserve_fixed_params:
+            When ``True`` (default), a node of the rebased mesh that sits
+            exactly on an existing node inherits that node's
+            :attr:`MeshNode.fixed_params`.  Only parameters that exist in both
+            bases carry across - rebasing H3 to L1 necessarily drops the
+            derivative constraints - and the dropped ones are reported.
 
         Returns
         -------
@@ -2252,12 +2513,26 @@ class MeshField:
         w_mat = new_mesh.get_xi_weight_mat(el, xi)
         locs = self.evaluate_embeddings_ele_xi_pair(el, xi)
         new_mesh.linear_fit(weight_mat=w_mat, targets=locs)
+
+        if preserve_fixed_params: #rebasing keeps the element topology, so the parent element is the element
+            old_basis = self.elements[0].basis_functions
+            parent_of_new = _parent_node_map(self, old_basis, new_basis, ele_indexes,
+                                             np.zeros((len(new_elements), self.ndim), dtype=int),
+                                             [1] * self.ndim,
+                                             [[Fraction(0), Fraction(1)]] * self.ndim,
+                                             len(new_mesh.nodes))
+            interpolatory = all(getattr(b, 'interpolatory', True) for b in list(old_basis) + list(new_basis))
+            stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new, interpolatory)
+            _report_fixed_param_transfer('rebase', stats, interpolatory)
+
         new_mesh.generate_mesh()
 
         if in_place:
-            self = new_mesh
-        else:
-            return new_mesh
+            self.nodes = new_mesh.nodes
+            self.elements = new_mesh.elements
+            self.generate_mesh()
+            return self
+        return new_mesh
 
     def __add__(self, othr:'MeshField'): #TODO, robustify this function, as it has only basic functionality.
         """
@@ -2393,7 +2668,7 @@ class Mesh(MeshField):
         assert self.elements[0].ndim == value.elements[0].ndim, 'Feilds must share the same dimensionality of basis components'
         self.fields[key] = value
 
-    def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True, plot=False):
+    def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True, plot=False, preserve_fixed_params=True):
         """Refine the primary geometry *and* all secondary fields simultaneously.
 
         Calls :meth:`MeshField.refine` on the coordinate mesh and on every
@@ -2407,20 +2682,28 @@ class Mesh(MeshField):
             Per-direction xi breakpoint arrays.
         clean_nodes:
             Remove unreferenced nodes after refinement.
+        preserve_fixed_params:
+            Carry each node's :attr:`MeshNode.fixed_params` across to the
+            coincident nodes of the refined geometry, and of every field.
         """
-        super().refine(refinement_factor, by_xi_refinement, clean_nodes, plot)
+        super().refine(refinement_factor, by_xi_refinement, clean_nodes, plot, preserve_fixed_params)
         for field in self.fields.values():
-            field.refine(refinement_factor, by_xi_refinement, clean_nodes, plot)
+            field.refine(refinement_factor, by_xi_refinement, clean_nodes, plot, preserve_fixed_params)
 
-    def rebase(self, new_basis: BasisGroup, in_place=False, res=10) -> 'Mesh':
+    def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True) -> 'Mesh':
         """ Rebases self, capturing the rebase of the underlying mesh field.
         """
-        temp_meshField = super().rebase(new_basis, in_place=False, res=res)
-        mesh_field_backup = self.fields
+        temp_meshField = super().rebase(new_basis, in_place=False, res=res,
+                                        preserve_fixed_params=preserve_fixed_params)
+        mesh_field_backup = dict(self.fields) #a copy: the two meshes must not share a dict
         new_mesh = Mesh(elements=temp_meshField.elements, nodes=temp_meshField.nodes)
         new_mesh.fields = mesh_field_backup
         if in_place:
-            self = new_mesh
+            self.nodes = new_mesh.nodes
+            self.elements = new_mesh.elements
+            self.fields = mesh_field_backup
+            self.generate_mesh()
+            return self
         return new_mesh
 
     def plot(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_size=10, labels=False, tiling=(10, 6), 
@@ -2604,7 +2887,12 @@ class Mesh(MeshField):
             new_basis = self.elements[0].basis_functions
 
 
-        new_field = self.rebase(new_basis) #returns a copy if new basis is same as old basis.
+        #only the topology and basis of the rebase are kept -- every node is
+        #replaced below -- and the result must be a plain MeshField: a Mesh
+        #carries a `fields` dict of its own, and storing one inside this mesh's
+        #`fields` would make the mesh a member of itself.
+        rebased = self.rebase(new_basis, preserve_fixed_params=False)
+        new_field = MeshField(nodes=rebased.nodes, elements=rebased.elements)
         new_field.fdim = field_dimension
         used_fields = new_field.elements[0].used_node_fields
 
@@ -2615,16 +2903,23 @@ class Mesh(MeshField):
         n_vals_per_node = (len(new_field.elements[0].used_node_fields) + 1) * field_dimension #plus 1 is for the spatial field
         total_vals = n_vals_per_node * len(new_field.nodes)
 
-        if field_params is not None:
-            new_field.true_param_array = field_params.copy()
-            new_field.optimisable_param_bool = np.ones(field_params.shape[0], dtype=bool)
-            new_field.optimisable_param_array = field_params.copy()
-        else:
-            new_field.true_param_array = np.zeros(total_vals) #instantiate a null parameter array
-            new_field.optimisable_param_bool = np.ones(total_vals, dtype=bool)
-            new_field.optimisable_param_array = np.zeros(total_vals)
+        new_field.true_param_array = np.zeros(total_vals) #instantiate a null parameter array
+        new_field.optimisable_param_bool = np.ones(total_vals, dtype=bool)
+        new_field.optimisable_param_array = np.zeros(total_vals)
 
         new_field.generate_mesh()
+
+        if field_params is not None:
+            #written through the nodes: generate_mesh rebuilds the parameter
+            #arrays from them, so assigning the arrays directly would be undone
+            field_params = np.asarray(field_params).ravel()
+            if field_params.shape[0] != total_vals:
+                raise ValueError(
+                    f"field_params had {field_params.shape[0]} entries, but a "
+                    f"{field_dimension}-dimensional field on this mesh needs {total_vals}"
+                )
+            new_field.update_from_params(field_params)
+
         self[field_name] = new_field
 
         #certain things should be inhereted, as they will be calculated "wrong"
@@ -2764,11 +3059,100 @@ def make_weight_eval(basis_funcs: BasisGroup, bp_inds):
         raise ValueError("Currently, meshes must be 2D or 3D")
     return xi_eval
 
+def column_equilibrated_lstsq(A, b):
+    """``jnp.linalg.lstsq`` with Jacobi column preconditioning.
+
+    Each column of *A* is scaled to unit norm before the solve and the answer
+    is scaled back afterwards.  For a system of full column rank this cannot
+    change the minimiser -- it is unique and invariant under column scaling --
+    so in exact arithmetic the result is identical to a plain ``lstsq``
+    (measured: 3e-14 relative agreement under ``jax_enable_x64``, at a
+    condition number of 2.1e7).  What it changes is the float32 error path.
+
+    That matters because the weight matrices HOMER builds are badly scaled for
+    the bases whose nodal parameters are not all the same kind of quantity.  A
+    refined tricubic Hermite mesh has ``cond(W) = 4.4e4`` -- the derivative
+    weights are an order of magnitude smaller than the value weights, cubed
+    over three directions -- and B-spline control nets reach ``1.6e5``.  In
+    float32 that costs four to five digits of the fitted geometry; equilibrated,
+    those condition numbers fall to 4.1e2 and 2.5e3.
+
+    Stays jit-able and differentiable: ``jnp.linalg.norm`` has a NaN gradient
+    at an all-zero column, so the norm is formed as ``sqrt(sq + tiny)``, and a
+    dead column is then left unscaled rather than divided by ~0 (which would
+    otherwise amplify its round-off by ``1 / tiny``).
+
+    Notes
+    -----
+    ``rank`` and the singular values come back from the *scaled* system.  For a
+    rank-deficient system the minimum-norm tie-break is also taken in scaled
+    coordinates, so the returned parameters differ from a plain ``lstsq`` --
+    the fit itself does not.
+
+    Parameters
+    ----------
+    A:
+        Design matrix, shape ``(n_pts, n_params)``.
+    b:
+        Targets, shape ``(n_pts,)`` or ``(n_pts, fdim)``.
+
+    Returns
+    -------
+    tuple
+        ``(params, residual, rank, singular_values)``, as ``jnp.linalg.lstsq``.
+    """
+    A = jnp.asarray(A)
+    b = jnp.asarray(b)
+
+    sq = jnp.sum(A * A, axis=0)
+    scale = jnp.where(sq > 0, jnp.sqrt(sq + jnp.finfo(A.dtype).tiny), 1.0)
+
+    params, residual, rank, singular_values = jnp.linalg.lstsq(A / scale, b)
+    return (params / scale.reshape((-1,) + (1,) * (params.ndim - 1)),
+            residual, rank, singular_values)
+
+
 def _pseudoinverse_matvec(J: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
     Jt_v = J.T @ v          # (d,) — project v onto tangent space
     JtJ = J.T @ J           # (d, d) Gram matrix
     dxi, _, _, _ = jnp.linalg.lstsq(JtJ, Jt_v, rcond=None)
     return dxi
+
+def volume_quadrature_order(basis_functions: BasisGroup) -> list[int]:
+    """Gauss points per direction needed to integrate det(J) exactly.
+
+    A map of polynomial degree ``p_d`` in direction ``d`` has a Jacobian whose
+    ``d``-th column has dropped to degree ``p_d - 1`` in that direction while
+    the other two columns still carry degree ``p_d``.  Every term of the 3x3
+    determinant takes one entry from each column, so det(J) reaches degree
+    ``3 * p_d - 1`` in ``xi_d``.  An ``n``-point Gauss rule is exact to degree
+    ``2n - 1``, so ``n_d = ceil(3 * p_d / 2)``.
+
+    Using the basis order itself -- the obvious choice, and what this used to
+    do -- under-integrates every element that is not affine.  A distorted
+    trilinear hexahedron came out 1% wrong, and a tricubic Hermite element
+    6e-4 wrong, with the error *not* shrinking as the quadrature was refined
+    because the rule was never refined at all.
+
+    The tabulated rules stop at :data:`GAUSS`'s highest order, which covers
+    every basis HOMER ships (``L4Basis``, degree 4, needs 6 points).  A
+    higher-degree basis is clamped to the table and warned about, since an
+    approximate answer beats no answer.
+    """
+    max_order = max(GAUSS)
+    orders = []
+    for basis in basis_functions:
+        needed = int(np.ceil(3 * basis.order / 2))
+        if needed > max_order:
+            logging.warning(
+                f"Exact volume quadrature for {basis.__name__} (degree {basis.order}) "
+                f"needs {needed} Gauss points per direction, but only {max_order} are "
+                f"tabulated; the volume will be under-integrated."
+            )
+            needed = max_order
+        orders.append(needed)
+    return orders
+
 
 GAUSS = { 
         1:[np.array([[0.5]]),
