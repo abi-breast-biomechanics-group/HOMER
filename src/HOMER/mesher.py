@@ -42,7 +42,7 @@ from scipy.sparse import csr_array, coo_array
 from functools import reduce, partial
 from itertools import groupby, combinations_with_replacement, product
 
-from HOMER.basis_definitions import N2_weights, N3_weights, AbstractBasis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
+from HOMER.basis_definitions import N2_weights, N3_weights, Basis, BasisGroup, DERIV_ORDER, EVAL_PATTERN
 from HOMER.jacobian_evaluator import estimate_sparsity, jacobian
 from HOMER.utils import spheres_to_polydata, vol_hexahedron, make_tiling, h_tform, all_pairings, block_diagonal_jacobian, jax_aknn, all_pairings
 from HOMER.utils import approx_closest_indices_Morton_nd, build_full_lookup, bcoo_repeat_scalar
@@ -61,10 +61,10 @@ pv.global_theme.allow_empty_mesh = True
 MAX_XI_DENOMINATOR = 10**6
 
 
-def _basis_node_fractions(basis: type[AbstractBasis], max_denominator: int = MAX_XI_DENOMINATOR) -> list[Fraction]:
+def _basis_node_fractions(basis: Basis, max_denominator: int = MAX_XI_DENOMINATOR) -> list[Fraction]:
     """Exact rational node locations of a 1-D basis.
 
-    ``node_locs`` are class-level constants, so the snap to a rational is exact
+    ``node_locs`` are fixed constants of the basis, so the snap to a rational is exact
     in intent.  Note that they are not required to lie inside ``[0, 1]``:
     :class:`~HOMER.basis_definitions.B3Basis` places its shared control points
     at ``[-1, 0, 1, 2]``.
@@ -88,7 +88,7 @@ def _basis_slot_correspondence(old_bases, new_bases, xi_breaks, refinement) -> l
     Parameters
     ----------
     old_bases, new_bases:
-        1-D basis classes before and after the operation, one per direction.
+        1-D bases before and after the operation, one per direction.
     xi_breaks:
         Per-direction list of :class:`~fractions.Fraction` sub-element
         boundaries within the parent element, length ``refinement[d] + 1``.
@@ -422,9 +422,9 @@ class MeshElement:
     Parameters
     ----------
     basis_functions:
-        A sequence of 1-D basis classes (length 2 or 3) defining the
+        The 1-D bases of the element, one per parametric direction, defining the
         parametric-direction interpolation.  E.g.
-        ``(H3Basis, H3Basis)`` for a 2-D cubic-Hermite element.
+        ``H3Basis * 2`` for a 2-D cubic-Hermite element.
     node_indexes:
         Zero-based integer indices into the parent mesh's ``nodes`` list.
         Exactly one of *node_indexes* or *node_ids* must be given.
@@ -443,7 +443,7 @@ class MeshElement:
     nodes : list
         The ordered node references (indexes or ids).
     basis_functions : BasisGroup
-        The sequence of 1-D basis classes.
+        The 1-D bases, one per parametric direction.
     used_node_fields : list[str]
         Derivative field names (``'du'``, ``'dv'``, …) that each node must
         carry for this element's basis.
@@ -461,7 +461,10 @@ class MeshElement:
         Parameters
         ----------
         basis_functions:
-            A sequence of 1-D basis classes (length 2 or 3).
+            The 1-D bases of the element, one per parametric direction (1, 2
+            or 3 of them).  Accepts a :class:`~HOMER.basis_definitions.BasisGroup`
+            (``H3Basis * 2 + L1Basis``), a list or tuple of bases, or a single
+            basis for a 1-D element.
         node_indexes:
             Zero-based indices into the parent mesh's node list.
         node_ids:
@@ -486,7 +489,11 @@ class MeshElement:
         self.used_index = node_indexes is not None
 
         self.nodes = nodes
-        self.basis_functions = basis_functions
+        #accepts a BasisGroup, a list/tuple of bases, or a bare basis for 1-D
+        self.basis_functions = BasisGroup(basis_functions)
+        if not 1 <= len(self.basis_functions) <= 3:
+            raise ValueError("An element is a tensor product of 1, 2 or 3 bases; "
+                             f"got {len(self.basis_functions)}: {self.basis_functions!r}")
         self.ndim: int = len(self.basis_functions)
         self.n_in_dim = [sum([l[0]=='x' for l in b.weights]) for b in self.basis_functions]
 
@@ -2362,7 +2369,7 @@ class MeshField:
         if preserve_fixed_params: #must happen while self still holds the old nodes
             parent_of_new = _parent_node_map(self, basis, basis, ele_indexes, parent_connectivity,
                                              refinement_factor, f_xi_locs, len(new_mesh.nodes))
-            interpolatory = all(getattr(b, 'interpolatory', True) for b in basis)
+            interpolatory = basis.interpolatory
             stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new, interpolatory)
             _report_fixed_param_transfer('refine', stats, interpolatory)
 
@@ -2468,7 +2475,9 @@ class MeshField:
         Parameters
         ----------
         new_basis:
-            Sequence of new 1-D basis classes, one per parametric direction.
+            The new 1-D bases, one per parametric direction; a
+            :class:`~HOMER.basis_definitions.BasisGroup` such as ``H3Basis * 3``,
+            or any list or tuple of bases.
         in_place:
             Currently unused (future: modify *self* rather than returning a
             new object).
@@ -2486,8 +2495,9 @@ class MeshField:
         MeshField
             New mesh with the requested basis functions.
         """
+        new_basis = BasisGroup(new_basis)
         new_mesh = deepcopy(self)
-        if tuple(new_basis) == tuple(self.elements[0].basis_functions):
+        if new_basis == self.elements[0].basis_functions:
             return new_mesh
 
         s_hash = {}
@@ -2521,7 +2531,7 @@ class MeshField:
                                              [1] * self.ndim,
                                              [[Fraction(0), Fraction(1)]] * self.ndim,
                                              len(new_mesh.nodes))
-            interpolatory = all(getattr(b, 'interpolatory', True) for b in list(old_basis) + list(new_basis))
+            interpolatory = old_basis.interpolatory and new_basis.interpolatory
             stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new, interpolatory)
             _report_fixed_param_transfer('rebase', stats, interpolatory)
 
@@ -2844,7 +2854,7 @@ class Mesh(MeshField):
             * ``1`` – scalar field (e.g. pressure, temperature, Z-coordinate)
             * ``3`` – 3-D vector field (e.g. fibre direction, velocity)
         new_basis:
-            Sequence of 1-D basis classes for the new field, one per
+            The 1-D bases for the new field, one per
             parametric direction.  May differ from the primary mesh basis.
             For example, use ``[H3Basis]*3`` for a smooth vector field or
             ``[L1Basis]*3`` for a piecewise-linear scalar field.
@@ -2868,14 +2878,14 @@ class Mesh(MeshField):
                 field_dimension=3,
                 field_locs=sample_pts,       # shape (N, 3)
                 field_values=normal_vectors, # shape (N, 3)
-                new_basis=[H3Basis, H3Basis, H3Basis],
+                new_basis=H3Basis * 3,
             )
             mesh.new_field(
                 'height',
                 field_dimension=1,
                 field_locs=sample_pts,       # shape (N, 3)
                 field_values=sample_pts[:, 2],  # scalar Z values
-                new_basis=[L1Basis, L1Basis, L1Basis],
+                new_basis=L1Basis * 3,
             )
 
             # Retrieve and evaluate
@@ -3145,7 +3155,7 @@ def volume_quadrature_order(basis_functions: BasisGroup) -> list[int]:
         needed = int(np.ceil(3 * basis.order / 2))
         if needed > max_order:
             logging.warning(
-                f"Exact volume quadrature for {basis.__name__} (degree {basis.order}) "
+                f"Exact volume quadrature for {basis.name} (degree {basis.order}) "
                 f"needs {needed} Gauss points per direction, but only {max_order} are "
                 f"tabulated; the volume will be under-integrated."
             )

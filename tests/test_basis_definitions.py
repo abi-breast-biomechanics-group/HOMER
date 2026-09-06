@@ -10,8 +10,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from HOMER.basis_definitions import (B3Basis, H3Basis, L1Basis, L2Basis,
-                                     L3Basis, L4Basis)
+from dataclasses import replace
+
+from HOMER.basis_definitions import (B3Basis, BasisGroup, H3Basis, L1Basis,
+                                     L2Basis, L3Basis, L4Basis, Lagrange,
+                                     basis_by_name, registered_bases)
 
 ALL_BASES = [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis, B3Basis]
 LAGRANGE = [L1Basis, L2Basis, L3Basis, L4Basis]
@@ -125,3 +128,93 @@ def test_derivative_of_a_constant_field_is_zero(basis):
     else:
         coeffs = np.ones(len(basis.weights))
     np.testing.assert_allclose(np.asarray(basis.deriv[1](SAMPLE)) @ coeffs, 0.0, atol=1e-4)
+
+
+# --------------------------------------------------------------------------
+# Bases as values: the algebra, identity, and the registry.
+# --------------------------------------------------------------------------
+
+def test_multiplication_repeats_a_basis_across_directions():
+    assert tuple(H3Basis * 3) == (H3Basis, H3Basis, H3Basis)
+    assert tuple(3 * H3Basis) == (H3Basis, H3Basis, H3Basis)
+    assert tuple(H3Basis ** 3) == (H3Basis, H3Basis, H3Basis)
+
+
+def test_addition_concatenates_directions_in_order():
+    assert tuple(H3Basis * 2 + B3Basis) == (H3Basis, H3Basis, B3Basis)
+    assert tuple(2 * H3Basis + B3Basis) == (H3Basis, H3Basis, B3Basis)
+    assert tuple(L1Basis + H3Basis) == (L1Basis, H3Basis)
+    assert tuple((H3Basis + L1Basis) * 2) == (H3Basis, L1Basis, H3Basis, L1Basis)
+
+
+def test_a_group_is_a_tuple_so_the_old_list_spelling_still_works():
+    """Everything downstream indexes, iterates and lens the basis group."""
+    group = H3Basis * 2 + B3Basis
+    assert isinstance(group, tuple)
+    assert group == (H3Basis, H3Basis, B3Basis) == BasisGroup([H3Basis, H3Basis, B3Basis])
+    assert group[0] is H3Basis and len(group) == 3 and group.ndim == 3
+    assert list(group) == [H3Basis, H3Basis, B3Basis]
+
+
+def test_group_interpolatory_is_the_and_of_its_directions():
+    assert (H3Basis * 3).interpolatory
+    assert not (H3Basis * 2 + B3Basis).interpolatory
+
+
+def test_a_group_repr_reads_back_as_the_expression_that_built_it():
+    assert repr(H3Basis * 2 + B3Basis) == "H3Basis*2 + B3Basis"
+
+
+def test_bases_are_values_that_survive_copying():
+    """Identity is the name, so a basis stays itself through a round-trip."""
+    import copy
+    import pickle
+    assert copy.deepcopy(H3Basis) is H3Basis
+    assert pickle.loads(pickle.dumps(H3Basis)) is H3Basis
+    assert H3Basis == basis_by_name('H3Basis')
+    assert len({H3Basis, H3Basis, L1Basis}) == 2
+
+
+@pytest.mark.parametrize("basis", ALL_BASES, ids=lambda b: b.__name__)
+def test_every_basis_registers_under_its_own_name(basis):
+    """The registry is what lets HOMER.io resolve a basis out of JSON."""
+    assert registered_bases()[basis.name] is basis
+    assert basis.__name__ == basis.name
+
+
+def test_an_unknown_basis_name_says_what_is_available():
+    with pytest.raises(KeyError, match="L1Basis"):
+        basis_by_name('NoSuchBasis')
+
+
+def test_lagrange_selects_a_basis_by_order():
+    assert Lagrange(1) is L1Basis and Lagrange(4) is L4Basis
+    with pytest.raises(ValueError, match="No Lagrange basis of order 7"):
+        Lagrange(7)
+
+
+def test_a_basis_may_be_varied_without_subclassing():
+    """`replace` is how you get a one-off variant now that bases are values."""
+    degree7 = replace(L4Basis, name='ADegree7Basis', order=7)
+    assert degree7.order == 7 and degree7.fn is L4Basis.fn
+    assert degree7 != L4Basis
+    assert basis_by_name('ADegree7Basis') is degree7
+
+
+def test_a_malformed_basis_fails_where_it_is_defined():
+    """The checks that used to be implicit in "the mesh looked wrong"."""
+    with pytest.raises(ValueError, match="weight names"):
+        replace(L1Basis, name='TooFewWeights', weights=('x0',))
+    with pytest.raises(ValueError, match="deriv\\[0\\] must be fn"):
+        replace(L1Basis, name='WrongDeriv', deriv=(L2Basis.fn,))
+
+
+def test_a_name_may_not_be_reused_for_a_different_basis():
+    """Names are the serialisation key; two meanings would corrupt a load."""
+    with pytest.raises(ValueError, match="already registered"):
+        replace(L1Basis, name='H3Basis')
+
+
+def test_a_group_rejects_anything_that_is_not_a_basis():
+    with pytest.raises(TypeError, match="pass H3Basis, not H3Basis"):
+        BasisGroup([H3Basis, 'H3Basis'])

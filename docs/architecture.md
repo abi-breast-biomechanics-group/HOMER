@@ -8,12 +8,14 @@ other.
 ## Class Hierarchy
 
 ```
-AbstractBasis  (basis_definitions.py)
+Basis  (basis_definitions.py)      – one frozen instance per 1-D basis
   ├── H3Basis   – cubic Hermite
   ├── L1Basis   – linear Lagrange
   ├── L2Basis   – quadratic Lagrange
   ├── L3Basis   – cubic Lagrange
-  └── L4Basis   – quartic Lagrange
+  ├── L4Basis   – quartic Lagrange
+  └── B3Basis   – cubic B-spline
+BasisGroup(tuple)                  – the bases of one element, one per direction
 
 MeshNode(dict)  (mesher.py)
   └── Physical coordinates + derivative fields
@@ -110,19 +112,40 @@ mesh but can use different basis functions.
 
 ---
 
-## Basis Hierarchy
+## Bases and basis groups
 
-All basis classes are frozen dataclasses inheriting from `AbstractBasis`.
-They carry:
+A basis is a *value*, not a type: `H3Basis`, `L1Basis`, … are frozen `Basis`
+instances, interned by name in a registry.  Each carries:
 
 | Attribute | Description |
 |---|---|
+| `name` | Serialisation key and repr, e.g. `'H3Basis'` |
 | `fn` | Evaluation function `fn(x) → (n_pts, n_basis)` |
-| `deriv` | List `[fn, d1, d2, …]` of derivative functions |
-| `weights` | Ordered weight names, e.g. `['x0', 'dx0', 'x1', 'dx1']` |
+| `deriv` | Tuple `(fn, d1, d2, …)` of derivative functions |
+| `weights` | Ordered weight names, e.g. `('x0', 'dx0', 'x1', 'dx1')` |
 | `order` | Polynomial order |
 | `node_locs` | Node positions in `[0, 1]` |
 | `node_fields` | `DerivativeField` instance (Hermite), or `None` (Lagrange) |
+| `interpolatory` | Whether nodal parameters are field values at the nodes |
+
+An element's parametric directions are built with arithmetic — `*` repeats a
+basis across directions, `+` concatenates directions — and the result is a
+`BasisGroup`, a `tuple` subclass, so lists and tuples of bases remain valid
+input everywhere:
+
+```python
+H3Basis * 3                # tricubic-Hermite volume
+H3Basis * 2 + L1Basis      # Hermite surface extruded linearly
+2 * H3Basis + B3Basis      # the same shape, the other way round
+(H3Basis + L1Basis) * 2    # H3, L1, H3, L1
+H3Basis ** 3               # tensor power, a spelling of H3Basis * 3
+```
+
+Equality and hashing are by name, so a basis survives a deepcopy, a pickle
+and a JSON round-trip as the same value.  `Basis` validates itself on
+construction (`deriv[0]` must be `fn`; `fn` must return one column per weight
+name), and registers itself, which is how a user-defined basis round-trips
+through `HOMER.io` without touching the reader.
 
 ---
 

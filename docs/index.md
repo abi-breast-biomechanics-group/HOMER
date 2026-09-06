@@ -30,7 +30,7 @@ node2 = MeshNode(loc=np.array([0., 1., 0.]), du=np.zeros(3), dv=np.zeros(3), dud
 node3 = MeshNode(loc=np.array([1., 1., 0.]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 
 # 2. Link the nodes through a bicubic-Hermite element
-element = MeshElement(node_indexes=[0, 1, 2, 3], basis_functions=(H3Basis, H3Basis))
+element = MeshElement(node_indexes=[0, 1, 2, 3], basis_functions=H3Basis * 2)
 
 # 3. Create the mesh
 mesh = Mesh(nodes=[node0, node1, node2, node3], elements=element)
@@ -95,7 +95,7 @@ The core workflow demonstrated in the test suite is:
 
 1. **Create nodes** – instantiate `MeshNode` objects with physical coordinates
    and (for Hermite bases) derivative vectors.
-2. **Create elements** – combine nodes with a tuple of basis classes.
+2. **Create elements** – combine nodes with a group of bases, e.g. `H3Basis * 3`.
 3. **Build the mesh** – pass nodes and elements to `Mesh(...)`.
 4. **Evaluate** – call `evaluate_embeddings()`, `evaluate_jacobians()`, etc.
 5. **Fit** – use `linear_fit()` or `point_cloud_fit()` to update node parameters.

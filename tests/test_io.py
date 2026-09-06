@@ -205,6 +205,18 @@ def test_save_mesh_and_load_mesh_are_the_module_level_pair(tmp_path):
 
 
 def test_str_lookup_covers_every_exported_basis():
-    """A basis missing from the table cannot be loaded back."""
-    assert set(STR_LOOKUP) == {'L1Basis', 'L2Basis', 'L3Basis', 'L4Basis',
-                               'H3Basis', 'B3Basis'}
+    """A basis missing from the registry cannot be loaded back."""
+    assert {'L1Basis', 'L2Basis', 'L3Basis', 'L4Basis',
+            'H3Basis', 'B3Basis'} <= set(STR_LOOKUP)
+
+
+def test_a_basis_group_round_trips_through_json(tmp_path):
+    """The saved name is what rebuilds the group, direction by direction."""
+    from HOMER.geometry import cube
+
+    mesh = cube(basis=H3Basis * 2 + L1Basis)
+    path = tmp_path / 'group.json'
+    save_mesh(mesh, path)
+    loaded = load_mesh(path)
+
+    assert loaded.elements[0].basis_functions == H3Basis * 2 + L1Basis

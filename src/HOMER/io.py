@@ -28,14 +28,15 @@ Example round-trip::
 
 from os import PathLike
 from HOMER.mesher import Mesh, MeshNode, MeshElement, MeshField
-from HOMER.basis_definitions import L1Basis, L2Basis, L3Basis, L4Basis, H3Basis, B3Basis
+from HOMER.basis_definitions import BASIS_REGISTRY, BasisGroup, basis_by_name
 
 from pathlib import Path
 import json
 import numpy as np
 
-#how do we io these files
-STR_LOOKUP = {str(k.__name__):k for k in [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis, B3Basis]}
+#how do we io these files.  A basis serialises as its name, and the basis
+#registry resolves it back, so a user-defined basis round-trips too.
+STR_LOOKUP = BASIS_REGISTRY  #kept as the old name for the live registry
 
 def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
     """Serialise a :class:`~HOMER.mesher.MeshField` to a plain Python dictionary.
@@ -78,7 +79,7 @@ def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
     for ide, element in enumerate(obj_field.elements):
         nodes_sanitised = [n if not isinstance(n, (np.int64, np.int32)) else int(n) for n in element.nodes]
         ele_def = {"nodes": nodes_sanitised}
-        ele_def['basis'] = [str(b.__name__) for b in element.basis_functions]
+        ele_def['basis'] = [b.name for b in element.basis_functions]
         ele_def['used_index'] = element.used_index
         if element.id is not None:
             ele_def['id'] = element.id
@@ -132,7 +133,7 @@ def _parse_field_from_dict(dict_rep: dict, field_cls: type[MeshField]) -> MeshFi
     elem_dict = dict_rep.get('elements', {})
     for elem_def in elem_dict.values():
         elem_def = dict(elem_def)
-        basis_functions = [STR_LOOKUP[k] for k in elem_def['basis']]
+        basis_functions = BasisGroup(basis_by_name(k) for k in elem_def['basis'])
         elem_id = _rehash_id(elem_def.get('id', None))
         if elem_def.get('used_index', True):
             obj_field.add_element(MeshElement(
@@ -160,7 +161,7 @@ def parse_mesh_from_dict(dict_rep: dict) -> Mesh:
     """Deserialise a :class:`~HOMER.mesher.Mesh` from a plain Python dictionary.
 
     Reconstructs nodes (with all derivative arrays), elements (looking up
-    basis classes by name), and calls :meth:`~HOMER.mesher.MeshField.generate_mesh`
+    bases by name), and calls :meth:`~HOMER.mesher.MeshField.generate_mesh`
     before returning.  Accepts both the legacy ``{'nodes','elements'}`` format
     and the newer ``{'main','fields'}`` schema.
     """

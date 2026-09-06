@@ -16,7 +16,7 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     """Create a single-element cube mesh.
 
     Constructs a mesh with 8 corner nodes and a single trilinear element
-    (``L1Basis`` × ``L1Basis`` × ``L1Basis``), then :meth:`~HOMER.mesher.MeshField.rebase`-s
+    (``L1Basis * 3``), then :meth:`~HOMER.mesher.MeshField.rebase`-s
     it to the requested *basis* (defaulting to cubic Hermite in all directions).
 
     Parameters
@@ -26,8 +26,8 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     centre:
         Centre of the cube, shape ``(3,)``.  Defaults to the origin.
     basis:
-        Sequence of three 1-D basis classes for the resulting mesh.
-        Defaults to ``[H3Basis, H3Basis, H3Basis]``.
+        The three 1-D bases for the resulting mesh, e.g. ``H3Basis * 3``.
+        Defaults to ``H3Basis * 3``.
 
     Returns
     -------
@@ -39,7 +39,7 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     if scale is None:
         scale = 1
     if basis is None:
-        basis = [H3Basis] * 3
+        basis = H3Basis * 3
     bottom_corner = centre - scale/2
     point0 = MeshNode(loc= bottom_corner + scale *np.array([0,0,0]))
     point1 = MeshNode(loc= bottom_corner + scale *np.array([1,0,0]))
@@ -49,7 +49,7 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     point5 = MeshNode(loc= bottom_corner + scale *np.array([1,0,1]))
     point6 = MeshNode(loc= bottom_corner + scale *np.array([0,1,1]))
     point7 = MeshNode(loc= bottom_corner + scale *np.array([1,1,1]))
-    element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=(L1Basis, L1Basis, L1Basis))
+    element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=L1Basis * 3)
     mesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1).rebase(basis)
     return mesh
 
@@ -82,14 +82,14 @@ def basic_surface(corner_locs=None, basis=None):
         corner_locs = np.array([[0,0,0], [0,0,1], [0,1,0], [0,1,1]])
 
     if basis is None:
-        basis = [L1Basis] * 2
+        basis = L1Basis * 2
 
     point0 = MeshNode(loc=corner_locs[0])
     point1 = MeshNode(loc=corner_locs[1])
     point2 = MeshNode(loc=corner_locs[2])
     point3 = MeshNode(loc=corner_locs[3])
 
-    element1 = MeshElement(node_indexes=[0,1,2,3], basis_functions=(L1Basis, L1Basis))
+    element1 = MeshElement(node_indexes=[0,1,2,3], basis_functions=L1Basis * 2)
     mesh = Mesh(nodes = [point0, point1, point2, point3], elements = element1).rebase(basis)
 
     return mesh

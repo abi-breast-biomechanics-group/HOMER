@@ -10,12 +10,13 @@ statable.
 import copy
 import itertools
 import logging
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
 from HOMER import Mesh, MeshElement, MeshNode
-from HOMER.basis_definitions import (B3Basis, H3Basis, L1Basis, L2Basis,
+from HOMER.basis_definitions import (B3Basis, BasisGroup, H3Basis, L1Basis, L2Basis,
                                      L3Basis, L4Basis)
 from HOMER.mesher import GAUSS, volume_quadrature_order
 
@@ -211,11 +212,10 @@ def test_volume_quadrature_order_follows_the_degree_of_det_J():
 
 def test_volume_quadrature_order_warns_rather_than_failing_on_an_exotic_basis(caplog):
     """A degree past the tabulated rules is clamped, loudly."""
-    class Degree7Basis(L4Basis):
-        order = 7
+    degree7 = replace(L4Basis, name='Degree7Basis', order=7)
 
     with caplog.at_level(logging.WARNING):
-        orders = volume_quadrature_order([Degree7Basis] * 3)
+        orders = volume_quadrature_order(degree7 * 3)
 
     assert orders == [max(GAUSS)] * 3
     assert 'under-integrated' in caplog.text
@@ -346,3 +346,23 @@ def test_get_element_params_gathers_the_element_dofs():
     params = arr(mesh.get_element_params(0))
 
     assert params.size == len(mesh.elements[0].nodes) * mesh.fdim
+
+
+def test_an_element_accepts_every_spelling_of_its_basis_group():
+    """A group, a list, a tuple and a bare basis all mean the same element."""
+    spellings = [L1Basis * 3,
+                 [L1Basis, L1Basis, L1Basis],
+                 (L1Basis, L1Basis, L1Basis)]
+    for basis in spellings:
+        element = MeshElement(node_indexes=list(range(8)), basis_functions=basis)
+        assert element.basis_functions == L1Basis * 3
+        assert element.ndim == 3
+
+    line = MeshElement(node_indexes=[0, 1], basis_functions=L1Basis)
+    assert line.basis_functions == BasisGroup([L1Basis]) and line.ndim == 1
+
+
+def test_an_element_rejects_a_dimensionality_it_cannot_build():
+    """Four directions used to fail deep inside the basis-product indices."""
+    with pytest.raises(ValueError, match="1, 2 or 3 bases"):
+        MeshElement(node_indexes=list(range(16)), basis_functions=L1Basis * 4)
