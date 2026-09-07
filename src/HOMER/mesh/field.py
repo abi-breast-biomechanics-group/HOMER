@@ -30,7 +30,8 @@ from HOMER.embedding import build_embedding_fn
 from HOMER.mesh import plotting, evaluation, parameters, topology, refinement
 from HOMER.mesh.node import MeshNode
 from HOMER.mesh.element import MeshElement
-from HOMER.mesh.element_eval import make_eval, make_deriv_eval, make_weight_eval
+from HOMER.mesh.element_eval import (make_eval, make_deriv_eval, make_weight_eval,
+                                    make_value_jac_eval)
 from HOMER.mesh_decorators import (expand_wide_evals, wide_eval,
                                    DEFAULT_EVAL_CHUNK_SIZE, DEFAULT_EVAL_REMAT)
 from HOMER.utils import h_tform
@@ -246,8 +247,10 @@ class MeshField:
 
         self._generate_elem_functions()
         self._generate_elem_deriv_functions()
+        self._generate_elem_value_jac_functions()
         self._generate_eval_function()
         self._generate_deriv_function()
+        self._generate_value_jac_function()
         self._generate_weight_function()
         self._explore_topology()
         self._generate_embedding_function()
@@ -306,6 +309,10 @@ class MeshField:
         redundant XLA retracing.
         """
         self._mesh_embed_points = build_embedding_fn(self)
+        # Variants for non-default approx_jac / robust_init_est, cached by
+        # embed_points.  They close over this mesh's topology and parameter
+        # layout, so regenerating invalidates them.
+        self._embed_fn_variants = {}
 
     def transform(self, tform):
         """
@@ -332,29 +339,23 @@ class MeshField:
         """
         self.elem_deriv_evals = make_deriv_eval(self.elements[0].basis_functions, self.elements[0].BasisProductInds)
 
+    def _generate_elem_value_jac_functions(self):
+        """
+            Creates the fused value-and-Jacobian evaluation structure.
+        """
+        self.elem_value_jac_evals = make_value_jac_eval(self.elements[0].basis_functions,
+                                                        self.elements[0].BasisProductInds)
+
     def _generate_eval_function(self):
         """
             Generates the internal functions that evaluate embeddings.
             Code is structured so that the result can express custom derivatives
         """
         @wide_eval 
-        def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array, ele_map = self.ele_map, scalars = self.ele_scales):
+        def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array):
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(jnp.array(xis))
-
-            param_data = jnp.asarray(self.true_param_array)
-            if fit_params is not None:
-                if not len(fit_params) == len(param_data):
-                    fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
-            else:
-                fit_params = param_data
-
-            map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
-            if scalars is not None:
-                scalar_factor = jnp.array(scalars)[jnp.asarray(element_ids)]
-            else:
-                scalar_factor = 1
-            params = jnp.asarray(fit_params)[map] * scalar_factor
+            params = self._element_params(element_ids, fit_params)
             outputs = jax.vmap(lambda x: self.elem_evals(x, jnp.asarray(xis)).reshape(-1,self.fdim))
             res = outputs(
                 params
@@ -369,29 +370,71 @@ class MeshField:
             Code is structured so that the result can express custom derivatives
         """
         @wide_eval
-        def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, ele_map= self.ele_map, scalars = self.ele_scales):
+        def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array):
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(jnp.array(xis))
-
-            param_data = jnp.asarray(self.true_param_array)
-            if fit_params is not None:
-                if not len(fit_params) == len(param_data):
-                    fit_params = param_data.at[self.optimisable_param_bool].set(fit_params)
-            else:
-                fit_params = param_data
-                    
-            map = jnp.asarray(ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
-            if scalars is not None:
-                scalar_factor = jnp.array(scalars)[jnp.asarray(element_ids)]
-            else:
-                scalar_factor = 1
-            params = jnp.asarray(fit_params)[map] * scalar_factor
-
+            params = self._element_params(element_ids, fit_params)
             outputs = jax.vmap(lambda x: self.elem_deriv_evals(x, jnp.asarray(xis), derivs).reshape(-1,self.fdim))
             res = outputs(params)
             return res.reshape(-1,self.fdim)
         
         self.evaluate_deriv_embeddings = evaluate_deriv_embeddings
+
+    def expand_fit_params(self, fit_params):
+        """Widen *fit_params* to a full parameter vector for this field.
+
+        ``fit_params`` normally holds only the optimisable entries, so every
+        evaluation has to scatter them back into :attr:`true_param_array`
+        before it can gather an element's parameters.  That scatter is over
+        the *whole* mesh and is identical for every evaluation sharing a
+        parameter set, so a caller that evaluates repeatedly -- the
+        Newton-Raphson loop in :mod:`HOMER.embedding`, most obviously --
+        should do it once through this method and pass the result down.  A
+        vector that is already full length is returned unchanged, which is
+        what makes the hoist transparent to the evaluators below.
+        """
+        param_data = jnp.asarray(self.true_param_array)
+        if fit_params is None:
+            return param_data
+        fit_params = jnp.asarray(fit_params)
+        if fit_params.shape[-1] == param_data.shape[-1]:
+            return fit_params
+        return param_data.at[self.optimisable_param_bool].set(fit_params)
+
+    def _element_params(self, element_ids, fit_params):
+        """Gather the parameters of *element_ids*, scaled, shape ``(n_e, n_p)``."""
+        fit_params = self.expand_fit_params(fit_params)
+        emap = jnp.asarray(self.ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
+        params = fit_params[emap]
+        if self.ele_scales is not None:
+            params = params * jnp.asarray(self.ele_scales)[jnp.asarray(element_ids).astype(int)]
+        return params
+
+    def _generate_value_jac_function(self):
+        """
+            Generates the fused evaluator returning both the embedding and its
+            Jacobian at the same parametric coordinates.
+        """
+        def evaluate_embeddings_and_jacobians(element_ids, xis, fit_params=None):
+            """Field values and Jacobians at *xis* in *element_ids*.
+
+            Returns ``(values, jacobians)`` shaped ``(n, fdim)`` and
+            ``(n, fdim, ndim)``, matching :meth:`evaluate_embeddings` and
+            :meth:`evaluate_jacobians` respectively.  Cheaper than calling
+            those two because the tensor-product contraction is shared -- see
+            :func:`~HOMER.mesh.element_eval.make_value_jac_eval`.
+            """
+            element_ids = jnp.atleast_1d(jnp.array(element_ids))
+            xis = jnp.atleast_2d(jnp.array(xis))
+            params = self._element_params(element_ids, fit_params)
+
+            values, jacs = jax.vmap(
+                lambda p: self.elem_value_jac_evals(p, xis)
+            )(params)
+            return (values.reshape(-1, self.fdim),
+                    jacs.reshape(-1, self.fdim, self.ndim))
+
+        self.evaluate_embeddings_and_jacobians = evaluate_embeddings_and_jacobians
 
     def _generate_weight_function(self):
         """

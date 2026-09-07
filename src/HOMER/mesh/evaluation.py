@@ -382,7 +382,7 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
                  vis_max_norm=None, scene: Optional[pv.Plotter]=None,
                  dim_mask=None, robust_init_est=False,
                  approx_jac=False,
-                 chunk_size=None, window_size=16,
+                 chunk_size=None, window_size=16, tol=None,
                  ):
     """Find the parametric coordinates (element, xi) for a set of physical-space points.
 
@@ -456,6 +456,22 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
         refinement corrects for coarse-search misses.  Ignored when
         *dim_mask* masks anything off, since that case uses an exact
         search instead (see below).
+    tol:
+        Residual norm at which the refinement stops, making
+        *iterations* an upper bound rather than a fixed count.
+        ``None`` (the default) uses
+        :data:`~HOMER.embedding.DEFAULT_EMBED_TOL` times the mesh's
+        extent — float32 round-off, which the residual reaches within
+        two or three iterations and then never leaves, so the remaining
+        iterations were recomputing the same bits.  Pass ``0`` to
+        iterate unconditionally.
+
+        The refinement is vectorised over the query points, so the batch
+        runs until its *slowest* point finishes: a point that cannot
+        converge (one lying well off the mesh, say) keeps the whole batch
+        going to *iterations*.  That costs nothing but the saving, and it
+        does not perturb the others — a converged point's state is frozen,
+        so every result is identical to the one it would get on its own.
 
     Returns
     -------
@@ -475,16 +491,25 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
     # Rebuild the compiled embedding function when approx_jac or
     # robust_init_est differ from the defaults baked into the
     # cached function.  This is rare — most callers leave them
-    # False and reuse the function built in generate_mesh().
+    # False and reuse the function built in generate_mesh().  The
+    # variants are cached per flag pair: building one costs a full XLA
+    # retrace, and a caller that wants a non-default flag almost always
+    # wants it on every call (a fitting loop embedding the same points
+    # against moving parameters), which used to retrace every time.
     embed_fn = self._mesh_embed_points
     if approx_jac or robust_init_est:
-        embed_fn = build_embedding_fn(self, approx_jac=approx_jac,
-                                      robust_init_est=robust_init_est)
+        key = (bool(approx_jac), bool(robust_init_est))
+        cache = self.__dict__.setdefault("_embed_fn_variants", {})
+        embed_fn = cache.get(key)
+        if embed_fn is None:
+            embed_fn = build_embedding_fn(self, approx_jac=approx_jac,
+                                          robust_init_est=robust_init_est)
+            cache[key] = embed_fn
 
     (elem_num, embedded), residual = embed_fn(
         points, fit_params, dim_mask,
         init_elexi, surface_embed, grid_res, iterations,
-        chunk_size=chunk_size, window_size=window_size,
+        chunk_size=chunk_size, window_size=window_size, tol=tol,
     )
 
     if verbose > 0:

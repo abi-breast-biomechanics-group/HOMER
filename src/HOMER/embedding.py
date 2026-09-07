@@ -55,30 +55,94 @@ def _linear_solve(A, b, ndim: int):
 # Newton–Raphson single-point solver  (vmap'd over query points)
 # ─────────────────────────────────────────────────────────────────────
 
+#: A step this small cannot move ``xi`` at float32 resolution (``xi`` lives in
+#: ``[0, 1]``, where the spacing is ~1.2e-7), so the refinement has frozen: the
+#: proposal equals the current point, the comparison rejects it, and the step
+#: halves again forever.  Iterating past that point is a provable no-op, which
+#: is what lets :func:`_make_nr_solver` leave the loop without changing the
+#: answer.
+_STEP_FLOOR = 1e-9
+
+#: Default embedding tolerance, as a fraction of the mesh's extent.
+#:
+#: The refinement converges quadratically, so one Newton step takes a coarse
+#: seed from ~1e-2 to float32 round-off in a single jump and there is nothing
+#: in between: sweeping this constant on a 27-element tricubic hexahedral block
+#: and on a bilinear patch, every value from 3e-7 to 1e-5 produces the *same*
+#: answer in the *same* time, and the residual it leaves (~2e-7 of the mesh
+#: extent, against ~9e-8 for running all 15 iterations) is float32 round-off
+#: either way.  1e-6 sits in the middle of that plateau -- an order of
+#: magnitude clear of the noise floor, so a borderline point still trips it,
+#: and an order tighter than the tightest tolerance the test suite calls exact.
+#:
+#: Pass ``tol=0`` to :meth:`~HOMER.mesh.field.MeshField.embed_points` to
+#: iterate unconditionally instead.
+DEFAULT_EMBED_TOL = 1e-6
+
+
+def _reference_length(mesh: MeshField) -> float:
+    """A characteristic length for *mesh*, used to scale the default tolerance.
+
+    Taken from the span of the nodal coordinates, so the tolerance means the
+    same thing on a mesh measured in metres as on one measured in microns.
+    Deliberately read once, at build time, from the stored geometry rather
+    than from each call's ``fit_params``: it is a fixed reference length for
+    interpreting a relative tolerance, not a measurement of the current
+    configuration, and a traced one would make the stopping rule wobble as a
+    fit moved the mesh.  Degenerate cases (a single node, all nodes
+    coincident) fall back to 1.0.
+    """
+    locs = np.asarray([np.asarray(node.loc) for node in mesh.nodes], dtype=float)
+    if locs.size == 0:
+        return 1.0
+    span = float(np.max(np.ptp(locs, axis=0))) if locs.shape[0] > 1 else 0.0
+    if not np.isfinite(span) or span <= 0.0:
+        return float(np.max(np.abs(locs))) or 1.0
+    return span
+
+
 def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
     """Return a single-point NR function closed over *mesh*.
 
     The returned function has signature::
 
         nr_solve(elem, xi0, x_target, lbound, dim_mask,
-                 iterations, fit_params) -> ((elem, xi), residual)
+                 iterations, tol_sq, fit_params) -> ((elem, xi), residual)
 
-    ``iterations`` is a traced ``jnp.int32`` so the XLA trace is
-    reused regardless of the Python-level value (B2).
+    ``iterations`` and ``tol_sq`` are traced values so the XLA trace is
+    reused regardless of their Python-level values (B2).
+
+    ``iterations`` is an upper bound rather than a fixed count: the loop also
+    stops once the squared residual is within ``tol_sq`` or the line search
+    has frozen (see :data:`_STEP_FLOOR`).  Because this runs under
+    :func:`jax.vmap`, the whole batch iterates until its *last* point is
+    finished -- so the saving is real when the points converge together, as
+    they do whenever they lie on or near the mesh, and nil (but not negative)
+    for a batch holding a point that never converges.
     """
     A_size = ndim  # size of the linear system
 
-    def nr_solve(elem, xi0, x_target, lbound, dim_mask, iterations, fit_params):
+    def nr_solve(elem, xi0, x_target, lbound, dim_mask, iterations, tol_sq,
+                 fit_params):
         dim_mask = jnp.asarray(dim_mask, dtype=bool)
 
-        # ── body of fori_loop ────────────────────────────────────
-        def body_fun(i, state):
-            elem, xi, r, r_mag_sq, delta_xi, stepsize = state
+        # ── body of the refinement loop ──────────────────────────
+        def body_fun(state):
+            i, elem, xi, r, r_mag_sq, delta_xi, stepsize = state
             xi_prop = xi + stepsize * delta_xi
 
             elem_prop, xi_mapped, valid = mesh.topomap(elem, xi_prop)
 
-            x_prop = mesh.evaluate_embeddings(elem_prop, xi_mapped, fit_params=fit_params)[0]
+            # The Jacobian is taken at the *proposal*, not at the accepted
+            # point.  It only ever feeds `new_delta_xi`, which is discarded
+            # unless the proposal is accepted -- and when it is accepted the
+            # two points are the same one.  So this is the same arithmetic as
+            # evaluating it at (next_elem, next_xi), with the value and the
+            # Jacobian now sharing one parameter gather and one
+            # tensor-product contraction chain instead of four.
+            x_prop, J = mesh.evaluate_embeddings_and_jacobians(
+                elem_prop, xi_mapped, fit_params=fit_params)
+            x_prop, J = x_prop[0], J[0]
             r_prop = jnp.where(dim_mask, x_target - x_prop, 0.0)
             r_mag_prop_sq = jnp.sum(jnp.square(r_prop))
 
@@ -89,7 +153,6 @@ def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
             next_r = jnp.where(accept, r_prop, r)
             next_r_mag_sq = jnp.where(accept, r_mag_prop_sq, r_mag_sq)
 
-            J = mesh.evaluate_jacobians(next_elem, next_xi, fit_params=fit_params)[0]
             J = jnp.where(dim_mask[:, None], J, 0.0)
 
             Jt = J.T
@@ -99,24 +162,33 @@ def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
             diag_mask = jnp.where(lbound, jnp.ones_like(next_xi), jnp.zeros_like(next_xi))
 
             A_free = A * mask[:, None] * mask[None, :] + jnp.diag(diag_mask)
-            b_free = (Jt @ next_r) * mask
+            b_free = (Jt @ r_prop) * mask
 
             new_delta_xi = _linear_solve(A_free, b_free, ndim)
 
             next_delta_xi = jnp.where(accept, new_delta_xi, delta_xi)
             next_stepsize = jnp.where(accept, 1.0, stepsize * 0.5)
 
-            return (next_elem, next_xi, next_r, next_r_mag_sq, next_delta_xi, next_stepsize)
+            return (i + 1, next_elem, next_xi, next_r, next_r_mag_sq,
+                    next_delta_xi, next_stepsize)
+
+        def cond_fun(state):
+            i, _, _, _, r_mag_sq, _, stepsize = state
+            return ((i < iterations)
+                    & (r_mag_sq > tol_sq)
+                    & (stepsize > _STEP_FLOOR))
 
         # ── initial state ────────────────────────────────────────
-        init_x = mesh.evaluate_embeddings(elem, xi0, fit_params=fit_params)[0]
+        if not robust_init_est:
+            init_x, init_J = mesh.evaluate_embeddings_and_jacobians(
+                elem, xi0, fit_params=fit_params)
+            init_x, init_J = init_x[0], init_J[0]
+        else:
+            init_x = mesh.evaluate_embeddings(elem, xi0, fit_params=fit_params)[0]
+            init_J = mesh.eval_numeric_jac_ele_xi_pair(elem, xi0, fit_params=fit_params, step=1e-2)
         init_r = jnp.where(dim_mask, x_target - init_x, 0.0)
         init_r_mag_sq = jnp.sum(jnp.square(init_r))
 
-        if not robust_init_est:
-            init_J = mesh.evaluate_jacobians_ele_xi_pair(elem, xi0, fit_params=fit_params)
-        else:
-            init_J = mesh.eval_numeric_jac_ele_xi_pair(elem, xi0, fit_params=fit_params, step=1e-2)
         init_J = jnp.where(dim_mask[:, None], init_J, 0.0)
 
         init_Jt = init_J.T
@@ -132,9 +204,10 @@ def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
 
         # B2: iterations is a *traced* jnp.int32 → one XLA trace for
         # any iteration count, instead of recompiling per Python int.
-        init_state = (elem.astype(int), xi0, init_r, init_r_mag_sq, init_delta_xi, 1.0)
-        final_state = jax.lax.fori_loop(0, iterations, body_fun, init_state)
-        elem_f, xi_f, r_f, _, _, _ = final_state
+        init_state = (jnp.int32(0), elem.astype(int), xi0, init_r,
+                      init_r_mag_sq, init_delta_xi, 1.0)
+        final_state = jax.lax.while_loop(cond_fun, body_fun, init_state)
+        _, elem_f, xi_f, r_f, _, _, _ = final_state
 
         return (elem_f, xi_f), r_f
 
@@ -482,6 +555,7 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
         If ``True``, uses a numeric Jacobian for the initial NR step.
     """
     ndim = mesh.ndim
+    reference_length = _reference_length(mesh)
 
     # Build the NR solver (closed over mesh)
     nr_solve = _make_nr_solver(mesh, ndim, robust_init_est)
@@ -497,7 +571,7 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
     # the materialisation boundary that used to separate them.
 
     def _run_coarse_2d(points, fit_params, dim_mask, grid_res, iterations,
-                       window_size, nn_mode):
+                       tol_sq, window_size, nn_mode):
         """C1 fused path for 2-D meshes."""
         xis = jnp.asarray(mesh.xi_grid(grid_res, 2, boundary_points=False))
         coarse_pts = mesh.evaluate_embeddings_in_every_element(xis, fit_params=fit_params)
@@ -513,13 +587,13 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
 
         (en, emb), res = jax.vmap(
             lambda elem, xi, target, lbound, lmask: nr_solve(
-                elem, xi, target, lbound, lmask, iterations, fit_params
+                elem, xi, target, lbound, lmask, iterations, tol_sq, fit_params
             )
         )(elem_num, init_xi, points, mf_pt, dim_mask)
         return (en, emb), res
 
     def _run_coarse_3d(points, fit_params, dim_mask, grid_res, iterations,
-                       surface_embed, window_size, nn_mode):
+                       tol_sq, surface_embed, window_size, nn_mode):
         """Coarse + NR path for 3-D meshes."""
         search_pts = (_coarse_search_points(points, dim_mask)
                       if nn_mode == "morton" else None)
@@ -537,7 +611,7 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
 
         (en, emb), res = jax.vmap(
             lambda elem, xi, target, lbound, lmask: nr_solve(
-                elem, xi, target, lbound, lmask, iterations, fit_params
+                elem, xi, target, lbound, lmask, iterations, tol_sq, fit_params
             )
         )(elem_num, init_xi, points, mf_pt, dim_mask)
         return (en, emb), res
@@ -555,10 +629,18 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
         @jax.custom_jvp
         @jax.jit
         def _embed_jit(points, fit_params, dim_mask,
-                       init_elexi_elem, init_elexi_xi, iterations):
+                       init_elexi_elem, init_elexi_xi, iterations, tol_sq):
             # dim_mask is normalised to a bool (n_pts, fdim) array by
             # `embed` before it ever reaches here (see _as_dim_mask).
             points = jnp.atleast_2d(points)
+
+            # Widen the parameters to a full vector once per call.  Every
+            # evaluator would otherwise scatter the optimisable entries back
+            # into the mesh-wide parameter array on each invocation -- a
+            # scatter over the whole mesh, repeated for every Newton
+            # iteration of every point.  Downstream evaluators pass a
+            # full-length vector straight through, so this is transparent.
+            fit_params = mesh.expand_fit_params(fit_params)
 
             if use_init_elexi:
                 elem_num = jnp.atleast_1d(init_elexi_elem)
@@ -575,18 +657,19 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
 
                 (en, emb), res = jax.vmap(
                     lambda elem, xi, target, lbound, lmask: nr_solve(
-                        elem, xi, target, lbound, lmask, iterations, fit_params
+                        elem, xi, target, lbound, lmask, iterations, tol_sq,
+                        fit_params
                     )
                 )(elem_num, init_xi, points, mf_pt, dim_mask)
                 return (en, emb), res
             else:
                 if ndim == 2:
                     return _run_coarse_2d(points, fit_params, dim_mask,
-                                         grid_res, iterations, window_size,
-                                         nn_mode)
+                                         grid_res, iterations, tol_sq,
+                                         window_size, nn_mode)
                 else:
                     return _run_coarse_3d(points, fit_params, dim_mask,
-                                         grid_res, iterations,
+                                         grid_res, iterations, tol_sq,
                                          surface_embed, window_size,
                                          nn_mode)
 
@@ -640,14 +723,18 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
     # ── Public entry point ───────────────────────────────────────
     def embed(points, fit_params, dim_mask,
               init_elexi, surface_embed, grid_res, iterations,
-              chunk_size=None, window_size=16):
+              chunk_size=None, window_size=16, tol=None):
         """Dispatch to the appropriate JIT-compiled embedding function.
 
         Parameters that control Python-level branching
         (``init_elexi``, ``surface_embed``, ``grid_res``,
         ``window_size``) select the cached JIT trace.  ``iterations``
-        is passed as a traced ``jnp.int32`` so it shares one trace
+        and ``tol`` are passed as traced values so they share one trace
         across all values (B2).
+
+        ``tol`` is the residual norm at which the refinement stops;
+        ``None`` uses :data:`DEFAULT_EMBED_TOL` scaled by the mesh's own
+        extent, and ``0`` runs the full ``iterations`` unconditionally.
 
         When *chunk_size* is set and the number of query points exceeds
         it, the point set is split into chunks that are processed
@@ -657,6 +744,11 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
         """
         points = jnp.atleast_2d(points)
         n_pts = points.shape[0]
+
+        # Traced, like `iterations`, so changing it shares one XLA trace.
+        if tol is None:
+            tol = DEFAULT_EMBED_TOL * reference_length
+        tol_sq = jnp.float32(tol) ** 2
 
         # Resolve the mask once, up front, so every downstream path
         # (chunked or not, JIT primal or custom JVP) sees the same
@@ -687,7 +779,8 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
                 fn = _get_jit(use_init, bool(surface_embed),
                               int(grid_res), int(window_size), nn_mode)
                 (en, emb), res = fn(p_chunk, fit_params, dm_chunk,
-                                    ie_elem, ie_xi, jnp.int32(iterations))
+                                    ie_elem, ie_xi, jnp.int32(iterations),
+                                    tol_sq)
                 en_parts.append(en)
                 emb_parts.append(emb)
                 res_parts.append(res)
@@ -706,6 +799,6 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
         fn = _get_jit(use_init, bool(surface_embed),
                       int(grid_res), int(window_size), nn_mode)
         return fn(points, fit_params, dim_mask,
-                  ie_elem, ie_xi, jnp.int32(iterations))
+                  ie_elem, ie_xi, jnp.int32(iterations), tol_sq)
 
     return embed

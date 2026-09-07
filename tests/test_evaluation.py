@@ -15,7 +15,7 @@ import pytest
 from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis, L3Basis
 from HOMER.geometry import basic_surface, cube
 
-from _helpers import EXACT, arr, hermite_cube, unit_hex
+from _helpers import EXACT, arr, bulged_patch, hermite_cube, unit_hex
 
 
 @pytest.fixture(scope="module")
@@ -302,3 +302,46 @@ def test_eval_surface_samples_only_the_boundary():
     #every sampled point sits on a face of the unit cube
     on_a_face = np.isclose(surface[..., None], [0.0, 1.0], atol=1e-5).any(-1)
     assert on_a_face.any(axis=-1).all()
+
+
+############################################### the fused value+Jacobian
+
+"""``evaluate_embeddings_and_jacobians`` exists purely so the Newton-Raphson
+refinement can get both at one point without paying for the tensor-product
+contraction ndim + 1 times.  It is therefore only useful if it agrees exactly
+with the two functions it replaces."""
+
+
+@pytest.mark.parametrize("mesh_fn", [bulged_patch, hermite_cube])
+def test_the_fused_evaluator_matches_evaluating_value_and_jacobian_separately(mesh_fn):
+    mesh = mesh_fn()
+    rng = np.random.default_rng(0)
+    xis = rng.random((17, mesh.ndim))
+    eles = np.zeros(len(xis), dtype=int)
+
+    values, jacs = jax.vmap(
+        lambda e, x: mesh.evaluate_embeddings_and_jacobians(e, x)
+    )(eles, xis)
+
+    np.testing.assert_allclose(arr(values[:, 0]),
+                               arr(mesh.evaluate_embeddings_ele_xi_pair(eles, xis)),
+                               atol=EXACT)
+    np.testing.assert_allclose(arr(jacs[:, 0]),
+                               arr(mesh.evaluate_jacobians_ele_xi_pair(eles, xis)),
+                               atol=EXACT)
+
+
+def test_the_fused_evaluator_follows_fit_params():
+    """A parameter override must reach the fused path like any other evaluator."""
+    mesh = hermite_cube()
+    shifted = np.asarray(mesh.optimisable_param_array) * 1.5
+    xis = np.array([[0.25, 0.5, 0.75]])
+
+    values, jacs = mesh.evaluate_embeddings_and_jacobians([0], xis, fit_params=shifted)
+
+    np.testing.assert_allclose(
+        arr(values), arr(mesh.evaluate_embeddings([0], xis, fit_params=shifted)),
+        atol=EXACT)
+    np.testing.assert_allclose(
+        arr(jacs), arr(mesh.evaluate_jacobians([0], xis, fit_params=shifted)),
+        atol=EXACT)
