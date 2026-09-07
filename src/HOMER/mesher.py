@@ -16,8 +16,10 @@ New code should import from :mod:`HOMER` or :mod:`HOMER.mesh` directly.
 
 from HOMER.mesh import (MeshNode, MeshElement, MeshField, Mesh, make_eval,
                         make_deriv_eval, make_weight_eval, volume_quadrature_order,
-                        GAUSS, column_equilibrated_lstsq, MAX_XI_DENOMINATOR)
+                        GAUSS, column_equilibrated_lstsq, MAX_XI_DENOMINATOR,
+                        reorder_nodes)
 
 __all__ = ['MeshNode', 'MeshElement', 'MeshField', 'Mesh', 'make_eval',
            'make_deriv_eval', 'make_weight_eval', 'volume_quadrature_order',
-           'GAUSS', 'column_equilibrated_lstsq', 'MAX_XI_DENOMINATOR']
+           'GAUSS', 'column_equilibrated_lstsq', 'MAX_XI_DENOMINATOR',
+           'reorder_nodes']

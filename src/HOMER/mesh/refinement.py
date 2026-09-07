@@ -20,6 +20,7 @@ import pyvista as pv
 from HOMER.basis_definitions import Basis, BasisGroup
 from HOMER.mesh.node import MeshNode
 from HOMER.mesh.element import MeshElement
+from HOMER.mesh.reordering import reorder_nodes as _reorder_nodes, resolve_strategy
 from HOMER.topomap_operations import global_nodes_from_ele_localnodes, refine_connectivity
 from HOMER.utils import all_pairings
 
@@ -207,7 +208,7 @@ def _report_fixed_param_transfer(operation: str, stats: tuple[int, int, int], in
 
 
 def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
-           clean_nodes = True, plot=False, preserve_fixed_params = True):
+           clean_nodes = True, plot=False, preserve_fixed_params = True, reorder_nodes = True):
     """Subdivide every element, increasing the mesh resolution.
 
     Each existing element is replaced by ``refinement_factor ** ndim``
@@ -238,6 +239,17 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
         verbatim for interpolatory bases so pinned landmarks do not drift
         with the fit; constraints with no counterpart in the refined mesh
         are dropped and reported.
+    reorder_nodes:
+        Refinement rebuilds the node list, and the order it falls out in is
+        an artefact of the sub-element sweep.  When ``True`` (default) the
+        refined nodes are renumbered by
+        :func:`~HOMER.mesh.reordering.reorder_nodes` using
+        :data:`~HOMER.mesh.reordering.DEFAULT_NODE_ORDERING`; pass ``False``
+        to keep the raw ordering, or a strategy name to choose another.
+        A refinement that does not actually add nodes - a factor of one in
+        every direction - keeps the numbering it had, so node indices survive
+        it; a refinement that does add nodes renumbers, and indices into the
+        coarse mesh do not carry over.
 
     Raises
     ------
@@ -306,9 +318,15 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
     # plt.imshow(w_mat);plt.show()
     new_mesh.linear_fit(targets, w_mat) 
 
-    if preserve_fixed_params: #must happen while self still holds the old nodes
+    #must happen while self still holds the old nodes.  Both the constraint
+    #transfer and the reordering are answering the same question - which old
+    #node is this new node - so the map is built once for whichever wants it.
+    parent_of_new = None
+    n_old = len(self.nodes)
+    if preserve_fixed_params or resolve_strategy(reorder_nodes) is not None:
         parent_of_new = _parent_node_map(self, basis, basis, ele_indexes, parent_connectivity,
                                          refinement_factor, f_xi_locs, len(new_mesh.nodes))
+    if preserve_fixed_params:
         interpolatory = basis.interpolatory
         stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new, interpolatory)
         _report_fixed_param_transfer('refine', stats, interpolatory)
@@ -319,11 +337,17 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
     # spatial_hash = {tuple(np.round(node.loc, ref_res).tolist()):idn for idn, node in enumerate(self.nodes)} 
 
     self.nodes = new_mesh.nodes
+    #new_topo_lookup is the connectivity the refinement built, which is what the
+    #lattice ordering needs; self._topo_lookup is still the pre-refinement one
+    #until generate_mesh runs below.
+    _reorder_nodes(self, reorder_nodes, topo_lookup=new_topo_lookup, generate=False,
+                   parent_of_new=parent_of_new, n_old=n_old)
     self.generate_mesh()
     return
 
 
-def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True) -> 'MeshField':
+def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True,
+           reorder_nodes=True) -> 'MeshField':
     """Convert the mesh to a different set of basis functions.
 
     Constructs a new :class:`MeshField` with *new_basis*, sampling the
@@ -359,6 +383,17 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
         :attr:`MeshNode.fixed_params`.  Only parameters that exist in both
         bases carry across - rebasing H3 to L1 necessarily drops the
         derivative constraints - and the dropped ones are reported.
+    reorder_nodes:
+        A rebase rebuilds the node list from the new basis, so the order it
+        comes back in is an artefact of that, not the order the mesh had.
+        When ``True`` (default) the rebased nodes are renumbered by
+        :func:`~HOMER.mesh.reordering.reorder_nodes`: a rebase between bases
+        with the same nodes - H3 to L1, say - reproduces the numbering the
+        mesh had, and one that changes the node set uses
+        :data:`~HOMER.mesh.reordering.DEFAULT_NODE_ORDERING`.  Pass ``False``
+        to keep the raw ordering, or a strategy name to choose another.  A
+        rebase to the basis the mesh already has returns a copy untouched,
+        and so is unaffected either way.
 
     Returns
     -------
@@ -395,17 +430,25 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
     locs = self.evaluate_embeddings_ele_xi_pair(el, xi)
     new_mesh.linear_fit(weight_mat=w_mat, targets=locs)
 
-    if preserve_fixed_params: #rebasing keeps the element topology, so the parent element is the element
-        old_basis = self.elements[0].basis_functions
+    #rebasing keeps the element topology, so the parent element is the element.
+    #The map serves the constraint transfer and the reordering alike.
+    parent_of_new = None
+    old_basis = self.elements[0].basis_functions
+    if preserve_fixed_params or resolve_strategy(reorder_nodes) is not None:
         parent_of_new = _parent_node_map(self, old_basis, new_basis, ele_indexes,
                                          np.zeros((len(new_elements), self.ndim), dtype=int),
                                          [1] * self.ndim,
                                          [[Fraction(0), Fraction(1)]] * self.ndim,
                                          len(new_mesh.nodes))
+    if preserve_fixed_params:
         interpolatory = old_basis.interpolatory and new_basis.interpolatory
         stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new, interpolatory)
         _report_fixed_param_transfer('rebase', stats, interpolatory)
 
+    #a rebase keeps the element topology, so this mesh's connectivity is the
+    #new one too - and it is populated, which new_mesh's is not yet.
+    _reorder_nodes(new_mesh, reorder_nodes, topo_lookup=self._topo_lookup, generate=False,
+                   parent_of_new=parent_of_new, n_old=len(self.nodes))
     new_mesh.generate_mesh()
 
     if in_place:

@@ -1,4 +1,4 @@
-from HOMER.mesh import Mesh, MeshElement, MeshNode, MeshField
+from HOMER.mesh import Mesh, MeshElement, MeshNode, MeshField, reorder_nodes
 from HOMER.basis_definitions import (H3Basis, L1Basis, L3Basis, L2Basis, L4Basis, B3Basis,
                                      Basis, BasisGroup, Lagrange, basis_by_name)
 from HOMER.io import load_mesh, save_mesh

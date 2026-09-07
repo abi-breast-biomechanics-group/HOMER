@@ -68,6 +68,38 @@ mesh.refine(refinement_factor=2)
 
 ---
 
+## Node Numbering
+
+Refinement rebuilds the node list, so node *indices* do not survive one that
+adds nodes.  By default the refined nodes are renumbered along the mesh's
+parametric lattice — `xi_0` fastest, the last direction slowest — so a refined
+axis-aligned cube comes out in lexicographic `(z, y, x)` order, and the same
+mesh reached by two different routes numbers its nodes the same way:
+
+```python
+a = cube(basis=[L1Basis]*3); a.refine(4)
+b = cube(basis=[L1Basis]*3); b.refine(2); b.refine(2)
+# a and b now have identical node orderings
+```
+
+A refinement that adds *no* nodes — a factor of one in every direction — is
+the exception: there is an old numbering to keep, so it is kept and node
+indices survive unchanged.
+
+Pass `reorder_nodes=False` to keep the raw ordering the subdivision sweep
+produces, or a strategy name (`'lattice'`, `'spatial'`, `'bandwidth'`) to pick
+another — see [Node indexing](node-indexing.md#node-ordering-across-the-mesh).
+
+```python
+mesh.refine(2, reorder_nodes=False)      # leave the numbering alone
+mesh.refine(2, reorder_nodes='spatial')  # sort on coordinates instead
+```
+
+Each secondary field is renumbered from its own topology, so a field stays
+co-located with the geometry without the two sharing a node numbering.
+
+---
+
 ## Visualising Before and After
 
 ```python

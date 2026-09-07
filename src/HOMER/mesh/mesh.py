@@ -80,7 +80,7 @@ class Mesh(MeshField):
         assert self.elements[0].ndim == value.elements[0].ndim, 'Feilds must share the same dimensionality of basis components'
         self.fields[key] = value
 
-    def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True, plot=False, preserve_fixed_params=True):
+    def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True, plot=False, preserve_fixed_params=True, reorder_nodes=True):
         """Refine the primary geometry *and* all secondary fields simultaneously.
 
         Calls :meth:`MeshField.refine` on the coordinate mesh and on every
@@ -97,16 +97,29 @@ class Mesh(MeshField):
         preserve_fixed_params:
             Carry each node's :attr:`MeshNode.fixed_params` across to the
             coincident nodes of the refined geometry, and of every field.
+        reorder_nodes:
+            Renumber the refined nodes into a predictable order - see
+            :func:`~HOMER.mesh.reordering.reorder_nodes`.  Each field is
+            ordered from its own topology, so a field and the geometry stay
+            consistent without sharing a node numbering.
         """
-        super().refine(refinement_factor, by_xi_refinement, clean_nodes, plot, preserve_fixed_params)
+        super().refine(refinement_factor, by_xi_refinement, clean_nodes, plot, preserve_fixed_params,
+                       reorder_nodes)
         for field in self.fields.values():
-            field.refine(refinement_factor, by_xi_refinement, clean_nodes, plot, preserve_fixed_params)
+            field.refine(refinement_factor, by_xi_refinement, clean_nodes, plot, preserve_fixed_params,
+                         reorder_nodes)
 
-    def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True) -> 'Mesh':
+    def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True,
+               reorder_nodes=True) -> 'Mesh':
         """ Rebases self, capturing the rebase of the underlying mesh field.
+
+        *reorder_nodes* is passed straight through to
+        :meth:`MeshField.rebase`; the secondary fields are not rebased here,
+        so their numbering is untouched.
         """
         temp_meshField = super().rebase(new_basis, in_place=False, res=res,
-                                        preserve_fixed_params=preserve_fixed_params)
+                                        preserve_fixed_params=preserve_fixed_params,
+                                        reorder_nodes=reorder_nodes)
         mesh_field_backup = dict(self.fields) #a copy: the two meshes must not share a dict
         new_mesh = Mesh(elements=temp_meshField.elements, nodes=temp_meshField.nodes)
         new_mesh.fields = mesh_field_backup

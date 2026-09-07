@@ -16,7 +16,9 @@ The four classes are the package's subject:
 while what a field *does* lives in a module per concern - :mod:`evaluation`,
 :mod:`parameters`, :mod:`topology`, :mod:`refinement`, :mod:`plotting` - whose
 functions take the field as their first argument and are bound into the class
-by :mod:`HOMER.mesh.field`.
+by :mod:`HOMER.mesh.field`.  :mod:`reordering` stands apart from those: it is
+a plain function over a field rather than a method, because it is something
+done *to* a mesh after a manipulation rather than something a mesh does.
 
 Typical import::
 
@@ -32,8 +34,14 @@ from HOMER.mesh.element_eval import (make_eval, make_deriv_eval, make_weight_eva
                                      volume_quadrature_order, GAUSS)
 from HOMER.mesh.parameters import column_equilibrated_lstsq
 from HOMER.mesh.refinement import MAX_XI_DENOMINATOR
+from HOMER.mesh.reordering import (reorder_nodes, node_permutation, apply_node_permutation,
+                                   preserving_permutation, element_lattice_coords,
+                                   resolve_strategy, DEFAULT_NODE_ORDERING, STRATEGIES)
 
 __all__ = ['MeshNode', 'MeshElement', 'MeshField', 'Mesh',
            'make_eval', 'make_deriv_eval', 'make_weight_eval',
            'volume_quadrature_order', 'GAUSS', 'column_equilibrated_lstsq',
-           'MAX_XI_DENOMINATOR']
+           'MAX_XI_DENOMINATOR', 'reorder_nodes', 'node_permutation',
+           'apply_node_permutation', 'preserving_permutation',
+           'element_lattice_coords', 'resolve_strategy',
+           'DEFAULT_NODE_ORDERING', 'STRATEGIES']

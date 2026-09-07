@@ -76,6 +76,30 @@ mesh = seed.rebase([H3Basis]*3, res=20)  # default res=10
 
 ---
 
+## Node Numbering
+
+A rebase builds its node list from the new basis, so the order it comes back
+in has nothing to do with the order the mesh had.  What happens to the
+numbering depends on whether the two bases share their nodes:
+
+- **Same nodes** (L1 ↔ H3, which differ only in the derivatives each node
+  carries): every new node sits on exactly one old node, so the mesh's own
+  numbering is reproduced and node indices stay valid.
+- **Different nodes** (L1 → L2, which adds mid-element nodes): there is no old
+  numbering to keep, so the nodes are ordered along the mesh's parametric
+  lattice, the same ordering [refinement](refinement.md#node-numbering) uses.
+
+```python
+smooth = mesh.rebase([H3Basis]*3)                        # same nodes: numbering kept
+denser = mesh.rebase([L2Basis]*3)                        # new nodes: lattice ordering
+raw    = mesh.rebase([H3Basis]*3, reorder_nodes=False)   # as built, neither
+```
+
+A rebase to the basis the mesh already has returns an untouched copy, and so
+is unaffected either way.
+
+---
+
 ## Notes
 
 - `rebase()` always returns a **new** `MeshField` object.  The original mesh

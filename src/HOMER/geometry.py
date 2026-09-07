@@ -8,6 +8,7 @@ Currently provides:
 
 from typing import Optional
 from HOMER.mesh import MeshNode, MeshElement, Mesh
+from HOMER.mesh.reordering import reorder_nodes
 from HOMER.basis_definitions import H3Basis, L1Basis
 
 import numpy as np
@@ -57,23 +58,16 @@ def cubeMNO(res, basis=None, loc=None, scale=None):
     """
     Creates a multi-element unit cube mesh.
     Then re-orders the cube to have sane elements.
+
+    The ordering asked for is the ``'spatial'`` one, lexicographic in
+    ``(z, y, x)``.  The refinement's own ``'lattice'`` ordering agrees with it
+    for a cube, but sorting the coordinates is what this function has always
+    promised, so it is what it still asks for.
     """
     base_cube = cube(basis=basis, centre=loc, scale=scale) 
-    base_cube.refine(by_xi_refinement=[np.linspace(0, 1, r+1) for r in res])
-
-    def sort_grid_numpy(points_array):
-        rounded_points = np.round(points_array, 4)
-        x, y, z = rounded_points[:, 0], rounded_points[:, 1], rounded_points[:, 2]
-        sort_indices = np.lexsort((x,y,z))
-        return sort_indices
-
-    new_inds = sort_grid_numpy(np.array([p.loc for p in base_cube.nodes]))
-    inv_inds = np.arange(new_inds.shape[0])
-    inv_inds[new_inds] = inv_inds
-    base_cube.nodes = [base_cube.nodes[n] for n in new_inds]
-    for e in base_cube.elements:
-        e.nodes = [inv_inds[x] for x in e.nodes]
-    base_cube.generate_mesh()
+    base_cube.refine(by_xi_refinement=[np.linspace(0, 1, r+1) for r in res],
+                     reorder_nodes=False)
+    reorder_nodes(base_cube, 'spatial')
     return base_cube
 
 def basic_surface(corner_locs=None, basis=None):
@@ -98,21 +92,12 @@ def basic_surfaceMN(res, basis=None):
     """
     Creates a multi-element surface mesh.
     Then re-orders the cube to have sane elements.
+
+    As with :func:`cubeMNO` the ordering is the ``'spatial'`` one,
+    lexicographic in ``(z, y, x)``.
     """
     surf = basic_surface(basis=basis) 
-    surf.refine(by_xi_refinement=[np.linspace(0, 1, r+1) for r in res])
-
-    def sort_grid_numpy(points_array):
-        rounded_points = np.round(points_array, 4)
-        x, y, z = rounded_points[:, 0], rounded_points[:, 1], rounded_points[:, 2]
-        sort_indices = np.lexsort((x,y,z))
-        return sort_indices
-
-    new_inds = sort_grid_numpy(np.array([p.loc for p in surf.nodes]))
-    inv_inds = np.arange(new_inds.shape[0])
-    inv_inds[new_inds] = inv_inds
-    surf.nodes = [surf.nodes[n] for n in new_inds]
-    for e in surf.elements:
-        e.nodes = [inv_inds[x] for x in e.nodes]
-    surf.generate_mesh()
+    surf.refine(by_xi_refinement=[np.linspace(0, 1, r+1) for r in res],
+                reorder_nodes=False)
+    reorder_nodes(surf, 'spatial')
     return surf
