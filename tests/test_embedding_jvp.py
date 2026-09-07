@@ -166,3 +166,134 @@ def test_a_per_element_jvp_reproduces_the_full_jacobian(registration_problem):
 
     reference = np.asarray(jax.jacfwd(residual)(probe))
     np.testing.assert_allclose(np.asarray(assembled), reference, atol=1e-5)
+
+
+############################################### the closed-form JVP rule
+
+"""The rule in `HOMER.embedding` writes the implicit-function-theorem
+derivative out by hand rather than handing the stationarity condition to
+`jax.jacobian` and `jax.jvp`.  Two identities make that possible, and both are
+worth pinning: `H` splits into `W' M W` minus a curvature term, where `W` is
+the Jacobian the refinement already computed at the converged point; and the
+embedding is *linear* in the mesh parameters, so the parameter derivatives are
+the same kernel evaluated at the tangent parameters rather than derivatives at
+all.  Get either wrong and the derivative is quietly off, not broken -- so
+these compare against central differences on cases where the truth is
+computable.
+"""
+
+
+def _interior_problem(basis):
+    """Points just off the mesh, well inside it, so the derivative is smooth.
+
+    Points *outside* the mesh project onto a boundary, where xi is clamped and
+    the derivative has a kink -- central differences across one are
+    meaningless, so they are no use as a reference.
+    """
+    mesh = cube(basis=[basis] * 3)
+    rng = np.random.default_rng(0)
+    xi = rng.random((30, 3)) * 0.6 + 0.2
+    on_mesh = arr(mesh.evaluate_embeddings_ele_xi_pair(np.zeros(30, int), xi))
+    target = jnp.asarray(on_mesh + rng.standard_normal((30, 3)) * 0.01)
+    base = jnp.asarray(np.asarray(mesh.true_param_array).reshape(-1, 3))
+    return mesh, base, target
+
+
+@pytest.mark.parametrize("basis", [L2Basis, L3Basis])
+def test_the_parameter_derivative_matches_central_differences(basis):
+    """Covers the linear-in-parameters identity for both w and its Jacobian.
+
+    L2 and L3 tabulate no second derivative, so the curvature term has to come
+    from differentiating the basis expressions -- these bases are the reason it
+    is autodiffed rather than read from a table.
+    """
+    mesh, base, target = _interior_problem(basis)
+
+    def embedded(shift):
+        moved = base.at[:, 0].add(shift[0]).at[:, 1].add(shift[1]).at[:, 2].add(shift[2])
+        (_, xi), res = mesh.embed_points(target, fit_params=moved.ravel(),
+                                         return_residual=True, iterations=30, tol=0)
+        return jnp.concatenate([xi.ravel(), res.ravel()])
+
+    analytic = arr(jax.jacfwd(embedded)(jnp.zeros(3)))
+    numeric = central_difference(embedded, np.zeros(3), step=2e-3)
+
+    np.testing.assert_allclose(analytic, numeric, atol=2e-3)
+    assert np.abs(analytic).max() > 0.1   #not silently zero
+
+
+def test_the_point_derivative_matches_central_differences():
+    """dxi/dx and dr/dx go through the same H, but with the x_dot term."""
+    mesh, _, target = _interior_problem(L2Basis)
+    params = jnp.asarray(mesh.optimisable_param_array)
+
+    def embedded(shift):
+        moved = target + jnp.asarray(shift)
+        (_, xi), res = mesh.embed_points(moved, fit_params=params,
+                                         return_residual=True, iterations=30, tol=0)
+        return jnp.concatenate([xi.ravel(), res.ravel()])
+
+    analytic = arr(jax.jacfwd(embedded)(jnp.zeros(3)))
+    numeric = central_difference(embedded, np.zeros(3), step=2e-3)
+
+    np.testing.assert_allclose(analytic, numeric, atol=2e-3)
+    assert np.abs(analytic).max() > 0.1
+
+
+@pytest.mark.parametrize("n_active", [2, 1, 0])
+def test_a_masked_residual_still_differentiates(n_active):
+    """`dim_mask` under-determines xi; at n_active=0 H is exactly singular.
+
+    Not checked against central differences, deliberately: with fewer active
+    dimensions than parametric ones, every point of a null manifold is an
+    equally good minimum, so xi is not a function of the parameters and the
+    two finite-difference evaluations are free to land on different answers
+    (they do -- xi moves by 0.05 for a 2e-3 step).  What *is* well defined is
+    that the derivative exists, that the masked-off residual components carry
+    no derivative at all, and that the wholly degenerate case comes back a
+    clean zero rather than the NaN a plain solve would give.
+    """
+    mesh, base, target = _interior_problem(L2Basis)
+    dim_mask = np.array([True] * n_active + [False] * (3 - n_active))
+
+    def embedded(shift):
+        moved = base.at[:, 0].add(shift[0])
+        (_, xi), res = mesh.embed_points(target, fit_params=moved.ravel(),
+                                         return_residual=True, dim_mask=dim_mask,
+                                         iterations=30, tol=0)
+        return res
+
+    analytic = arr(jax.jacfwd(embedded)(jnp.zeros(1)))[..., 0]
+
+    assert np.all(np.isfinite(analytic))
+    #masked components are documented to be exactly zero in the Jacobian
+    np.testing.assert_array_equal(analytic[:, n_active:],
+                                  np.zeros_like(analytic[:, n_active:]))
+    if n_active == 0:
+        np.testing.assert_array_equal(analytic, np.zeros_like(analytic))
+
+
+def test_the_returned_jacobian_is_taken_at_the_converged_point():
+    """The rule reuses the refinement's Jacobian, so it must track the answer.
+
+    Checked through the derivative it feeds: `dr/dx = m - W dxi/dx`, an
+    identity that only holds if W is dw/dxi at the *same* (elem, xi) the solve
+    returned.  A Jacobian left over from a rejected proposal would break it.
+    """
+    mesh, _, target = _interior_problem(L3Basis)
+    params = jnp.asarray(mesh.optimisable_param_array)
+
+    def solve(pts):
+        (ele, xi), res = mesh.embed_points(pts, fit_params=params,
+                                           return_residual=True, iterations=30, tol=0)
+        return xi, res, ele
+
+    ele = np.asarray(solve(target)[2])
+    d_xi = arr(jax.jacfwd(lambda p: solve(p)[0])(target))
+    d_res = arr(jax.jacfwd(lambda p: solve(p)[1])(target))
+    W = arr(mesh.evaluate_jacobians_ele_xi_pair(ele, np.asarray(solve(target)[0])))
+
+    for i in range(len(ele)):
+        #dr_i/dx_i = I - W_i dxi_i/dx_i
+        predicted = np.eye(3) - W[i] @ d_xi[i, :, i, :]
+        np.testing.assert_allclose(d_res[i, :, i, :], predicted, atol=1e-4)

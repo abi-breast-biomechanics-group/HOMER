@@ -30,7 +30,7 @@ import pytest
 from HOMER import cube
 from HOMER.utils import (rodrigues_exp, masked_closest_indices,
                          aknn_closest_indices)
-from HOMER.embedding import _coarse_nn_mode
+from HOMER.embedding import _coarse_nn_mode, _mask_is_partial
 
 N_PTS = 200
 NOISE = 0.02
@@ -154,16 +154,84 @@ def test_masked_closest_indices_ignores_masked_dimensions():
 
 def test_coarse_search_mode_selection():
     """Each field shape must reach the search that can actually handle it."""
-    full3 = jnp.ones((8, 3), dtype=bool)
-    full12 = jnp.ones((8, 12), dtype=bool)
-    partial = jnp.array(np.tile([True, False, True], (8, 4)))
-
     # 10 bits per dimension: the cheap Z-curve is adequate.
-    assert _coarse_nn_mode(full3, 3) == "morton"
+    assert _coarse_nn_mode(False, 3) == "morton"
     # 2 bits per dimension: the Z-curve has stopped discriminating.
-    assert _coarse_nn_mode(full12, 12) == "aknn"
+    assert _coarse_nn_mode(False, 12) == "aknn"
     # No code can express a per-query subset of dimensions.
-    assert _coarse_nn_mode(partial, 12) == "masked"
+    assert _coarse_nn_mode(True, 12) == "masked"
+
+
+def test_whether_a_mask_is_partial_is_read_from_the_callers_argument():
+    """`None` means "nothing masked", and has to keep meaning it under jit.
+
+    The flag decides both the coarse search and how the custom JVP solves for
+    the xi tangent, and it used to be read from the *normalised* mask -- a JAX
+    array, which inside an enclosing `jax.jit` is a tracer whose value cannot
+    be read.  Every jitted caller therefore looked masked, including the
+    majority passing no mask at all, so `jax.jit(f)` and `f` ran different
+    algorithms.
+    """
+    assert _mask_is_partial(None) is False
+    assert _mask_is_partial(jnp.ones((8, 3), dtype=bool)) is False
+    assert _mask_is_partial(np.array([True, False, True])) is True
+    assert _mask_is_partial(jnp.array(np.tile([True, False, True], (8, 4)))) is True
+
+
+def test_jit_does_not_change_which_coarse_search_runs():
+    """The regression the flag exists to prevent, end to end."""
+    import jax
+    import HOMER.embedding as embedding
+
+    from HOMER.basis_definitions import L2Basis
+
+    mesh = cube(basis=[L2Basis] * 3)
+    rng = np.random.default_rng(0)
+    pts = jnp.asarray(rng.random((16, 3)) * 0.8 + 0.1)
+    params = jnp.asarray(mesh.optimisable_param_array)
+
+    seen = []
+    original = embedding._coarse_nn
+    embedding._coarse_nn = lambda *a: (seen.append(a[4]), original(*a))[1]
+    try:
+        mesh.embed_points(pts, fit_params=params)
+        plain = seen[-1]
+        jax.jit(lambda p: mesh.embed_points(pts, fit_params=p))(params)
+        jitted = seen[-1]
+    finally:
+        embedding._coarse_nn = original
+
+    assert plain == "morton"
+    assert jitted == plain
+
+
+def test_jit_does_not_change_the_embedding():
+    """What the coarse-search flag actually protects: the same answer.
+
+    Before the flag was read from the caller's own argument, a jitted call ran
+    the exact masked search and an unjitted one the Z-curve, so the two picked
+    different seeds -- on a surface mesh with points off the surface, 14 of
+    400 settled into a *different element*, one of them 1.7 away in xi.  Both
+    were valid minima with equal residual, which is exactly why it went
+    unnoticed.
+    """
+    import jax
+    from HOMER.geometry import basic_surfaceMN
+
+    mesh = basic_surfaceMN((4, 4))
+    rng = np.random.default_rng(0)
+    #deliberately off the surface: that is where the seed decides the answer
+    pts = jnp.asarray(rng.random((200, 3)) * 1.6 - 0.3)
+    params = jnp.asarray(mesh.optimisable_param_array)
+
+    def embed(p):
+        return mesh.embed_points(pts, fit_params=p, return_residual=True)
+
+    (plain_ele, plain_xi), _ = embed(params)
+    (jit_ele, jit_xi), _ = jax.jit(embed)(params)
+
+    np.testing.assert_array_equal(np.asarray(jit_ele), np.asarray(plain_ele))
+    np.testing.assert_array_equal(np.asarray(jit_xi), np.asarray(plain_xi))
 
 
 @pytest.mark.parametrize("fdim", [6, 12, 15])
