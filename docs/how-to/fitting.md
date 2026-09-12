@@ -41,17 +41,36 @@ mesh.linear_fit(target_pts, weight_mat=W)
 ```
 
 !!! note
-    `linear_fit` needs at least as many points as the weight matrix has
-    columns (`n_pts >= weight_mat.shape[1]`).  The columns are *parameters*,
-    not nodes: a Hermite node carries four parameter blocks in 2-D and eight
-    in 3-D, so a 4-node H3 patch already needs 16 points.  Increase `res` if
-    you see an assertion error.
+    `linear_fit` needs at least as many points as the system has *free*
+    columns.  The columns are parameters, not nodes: a Hermite node carries
+    four parameter blocks in 2-D and eight in 3-D, so a 4-node H3 patch with
+    nothing fixed already needs 16 points.  Increase `res` if you see an
+    assertion error.
 
-!!! warning "linear_fit ignores fixed parameters"
-    Parameters fixed with `MeshNode.fix_parameter()` are **not** respected by
-    `linear_fit`: it solves for every parameter and overwrites the constrained
-    ones. When you need constraints honoured, use the nonlinear pathway below, which optimises
-    `optimisable_param_array` and leaves fixed parameters alone.
+### Fixed Parameters in a Linear Fit
+
+Parameters fixed with `MeshNode.fix_parameter()` are held at their current
+values.  They are a known contribution to the targets, so the solve moves them
+to the right-hand side and fits only the free columns -- the constrained
+minimiser, not an unconstrained fit that overwrites the constraint afterwards:
+
+```python
+mesh.nodes[0].fix_parameter('loc')          # this corner stays where it is
+mesh.nodes[4].fix_parameter('loc', inds=[2])  # this one only holds its z
+mesh.generate_mesh()
+
+mesh.linear_fit(target_pts, weight_mat=W)
+```
+
+A held parameter comes back bit-for-bit, and every other parameter is the best
+it can be given it.  Fixing also makes the system *smaller*, so it needs fewer
+points, not more.
+
+!!! note "Fixing is per component"
+    `fix_parameter('loc', inds=[2])` pins only *z*, so the free set can differ
+    between the components of the field.  `W` is shared across them, so
+    components that share a free set share a solve: one solve for the usual
+    mesh, at most `fdim` when the constraints cut across components.
 
 ---
 
@@ -309,3 +328,7 @@ This parameter fixing is achieved by representing a scatter from the optimisable
 subset of the parameters to the true parameter array of the mesh.
 A similar strategy can be used to represent nodes with shared values, or with dependencies 
 on other functions or parameters.
+
+Both fitting pathways read that same subset: the nonlinear one optimises
+`optimisable_param_array` directly, and `linear_fit` solves for the columns it
+selects.

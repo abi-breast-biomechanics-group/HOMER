@@ -2,6 +2,32 @@
 
 Notable changes to HOMER.
 
+## Unreleased
+
+### Changed
+- `linear_fit` respects fixed parameters.  Parameters pinned with
+  `MeshNode.fix_parameter` are held at their current values and moved to the
+  right-hand side, so the solve runs over the free columns only and returns
+  the constrained minimiser.  Fixing is per component, and the weight matrix
+  is shared across them, so components that share a free set share a solve --
+  one for the usual mesh, at most `fdim` when the constraints cut across
+  components.  This changes the result for anyone who relied on the fit
+  overwriting a constraint; the system also needs only as many points as it
+  has free columns.
+- `refine` and `rebase` transfer the constraints before they fit, rather than
+  after.  A pinned location is now held *through* the least-squares solve, so
+  the parameters around it take up the slack, instead of being fitted freely
+  and having the pinned value written back over the answer.  It shows where
+  the constraint binds -- rebasing to a basis that cannot represent the
+  source -- and leaves refinement unchanged, which reproduces its parent
+  exactly either way.  Constraints with no value to carry across (derivatives,
+  and `loc` on a control net) still take the value the fit gives them.
+
+### Fixed
+- `MeshNode.fix_parameter(values=...)` no longer truncates the value it pins
+  when the node's array is an integer one, as it is for any mesh whose
+  coordinates were stated as whole numbers.
+
 ## 1.0.0 - 2026-09-12
 
 Everything below is the first tagged release; HOMER carried a `0.2.2.x`

@@ -328,6 +328,8 @@ def test_linear_fit_across_several_elements():
 
 def test_linear_fit_return_params_does_not_touch_the_mesh():
     mesh = unit_hex(basis=[L2] * 3)
+    mesh.nodes[0].fix_parameter('loc')
+    mesh.generate_mesh()
     grid = mesh.xi_grid(5)
     eles = np.zeros(len(grid), dtype=int)
     before = arr(mesh.true_param_array)
@@ -338,26 +340,130 @@ def test_linear_fit_return_params_does_not_touch_the_mesh():
 
     assert params is not None
     np.testing.assert_allclose(arr(mesh.true_param_array), before, atol=EXACT)
+    #the full vector, not the optimisable subset, with the held node carried
+    #through rather than left as a gap
+    assert params.shape == before.shape
+    np.testing.assert_allclose(arr(params)[:3], before[:3], atol=EXACT)
 
 
-def test_linear_fit_does_not_respect_fixed_parameters():
-    """Documented limitation, pinned so it cannot change silently.
+def constrained_minimum(mesh, weights, targets):
+    """The constrained least-squares answer, written out in plain numpy.
 
-    ``linear_fit`` solves the unconstrained normal equations; use
-    :func:`point_cloud_fit` when constraints matter.
+    Holding a parameter is the same problem with fewer columns and a corrected
+    right-hand side, one system per component because the free set is per
+    component.  Short enough to say twice, and saying it twice is the point --
+    the reference must not share the solve under test.
     """
-    target = bulged_patch()
-    fitted = basic_surface(basis=[L2] * 2)
-    fitted.nodes[0].fix_parameter('loc')
+    free = mesh.optimisable_param_bool.reshape(-1, mesh.fdim)
+    held = np.where(free, 0.0, arr(mesh.true_param_array).reshape(-1, mesh.fdim))
+    expected = held.copy()
+    for d in range(mesh.fdim):
+        cols = free[:, d]
+        expected[cols, d] = np.linalg.lstsq(weights[:, cols],
+                                            targets[:, d] - weights @ held[:, d],
+                                            rcond=None)[0]
+    return expected
+
+
+def constrained_patch(*fixings, basis=L2):
+    """A patch to fit, a target to fit it to, and the system between them."""
+    fitted = basic_surface(basis=[basis] * 2)
+    for node, kwargs in fixings:
+        fitted.nodes[node].fix_parameter('loc', **kwargs)
     fitted.generate_mesh()
-    pinned = np.array(fitted.nodes[0].loc, dtype=float)
+
     grid = fitted.xi_grid(6)
     eles = np.zeros(len(grid), dtype=int)
+    targets = arr(bulged_patch().evaluate_embeddings_ele_xi_pair(eles, grid))
+    return fitted, eles, grid, targets
 
-    fitted.linear_fit(arr(target.evaluate_embeddings_ele_xi_pair(eles, grid)),
-                      weight_mat=fitted.get_xi_weight_mat(eles, grid))
 
-    assert np.abs(np.array(fitted.nodes[0].loc, dtype=float) - pinned).max() > 0.1
+def test_linear_fit_holds_fixed_parameters():
+    """A fixed parameter keeps its value, and the free ones fit around it.
+
+    The reverse of what this file used to assert: the solve fitted every
+    column and the constraint was overwritten by the answer it came back with.
+    """
+    fitted, eles, grid, targets = constrained_patch((0, {}))
+    pinned = arr(fitted.nodes[0].loc)
+
+    fitted.linear_fit(targets, weight_mat=fitted.get_xi_weight_mat(eles, grid))
+
+    np.testing.assert_array_equal(arr(fitted.nodes[0].loc), pinned)
+
+
+def test_linear_fit_finds_the_constrained_minimum():
+    """Not merely that the held value survived -- the free parameters have to
+    be the best they can be given it, which is a different fit from the
+    unconstrained one truncated."""
+    fitted, eles, grid, targets = constrained_patch((0, {}), (4, {}))
+    weights = arr(fitted.get_xi_weight_mat(eles, grid))
+
+    fitted.linear_fit(targets, weight_mat=weights)
+
+    np.testing.assert_allclose(arr(fitted.true_param_array).reshape(-1, 3),
+                               constrained_minimum(fitted, weights, targets), atol=CLOSE)
+
+
+def test_linear_fit_holds_single_components():
+    """``fix_parameter`` takes component indices, so the free set can differ
+    between the components of the field.  The weight matrix is shared across
+    them, so this is the case that forces the solve to group the components
+    instead of running one system -- three groups here.
+    """
+    #node 0 is the corner the bulge lifts in z, node 4 the centre it pushes
+    #out in x; both hold the one component the target would have moved
+    fitted, eles, grid, targets = constrained_patch((0, {'inds': [2]}), (4, {'inds': [0]}))
+    before = arr(fitted.true_param_array).reshape(-1, 3)
+    weights = arr(fitted.get_xi_weight_mat(eles, grid))
+
+    fitted.linear_fit(targets, weight_mat=weights)
+
+    after = arr(fitted.true_param_array).reshape(-1, 3)
+    assert after[0, 2] == before[0, 2]
+    assert after[4, 0] == before[4, 0]
+    np.testing.assert_allclose(after, constrained_minimum(fitted, weights, targets), atol=CLOSE)
+    #and the components left free still move -- the fit is constrained, not frozen
+    assert np.abs(after[6, 2] - before[6, 2]) > 0.5
+
+
+def test_a_held_parameter_does_not_drift():
+    """Held, not re-fitted.  The solve around it runs in float32, so a value
+    that is carried through it comes back changed; this one must not."""
+    pinned = np.array([0.3, 0.1234567890123, 0.7])   #none of it exact in float32
+    fitted, eles, grid, targets = constrained_patch((0, {'values': pinned}))
+
+    fitted.linear_fit(targets, weight_mat=fitted.get_xi_weight_mat(eles, grid))
+
+    np.testing.assert_array_equal(arr(fitted.nodes[0].loc), pinned)
+
+
+def test_linear_fit_holds_fixed_parameters_through_the_sparse_path():
+    """The block form cannot drop a column out of a rectangular block, so the
+    held entries are zeroed and folded into the right-hand side instead.  That
+    has to land where the dense solve lands."""
+    fixings = ((0, {'inds': [2]}), (4, {}))
+    dense, eles, grid, targets = constrained_patch(*fixings)
+    dense.linear_fit(targets, weight_mat=dense.get_xi_weight_mat(eles, grid))
+
+    sparse, eles, grid, targets = constrained_patch(*fixings)
+    weights, columns = sparse.get_xi_weight_blocks(eles, grid)
+    sparse.linear_fit(targets, weight_mat=weights, sparse_columns=columns)
+
+    np.testing.assert_allclose(arr(sparse.true_param_array), arr(dense.true_param_array),
+                               atol=CLOSE)
+
+
+def test_linear_fit_with_every_parameter_fixed_leaves_the_mesh_alone():
+    """No free columns anywhere: there is nothing to solve, and the fit is a
+    no-op rather than a degenerate system."""
+    fitted, eles, grid, targets = constrained_patch(
+        *[(n, {}) for n in range(9)])
+    before = arr(fitted.true_param_array)
+
+    fitted.linear_fit(targets, weight_mat=fitted.get_xi_weight_mat(eles, grid))
+
+    np.testing.assert_array_equal(arr(fitted.true_param_array), before)
 
 
 def test_linear_fit_rejects_an_underdetermined_system():

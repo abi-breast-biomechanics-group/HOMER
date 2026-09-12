@@ -16,6 +16,8 @@ from HOMER.mesh import Mesh, MeshField, MeshNode, MeshElement
 from HOMER.basis_definitions import H3, L1, L2, L3, B3
 from HOMER.geometry import basic_surface, cube
 
+from _helpers import arr, bulged_patch
+
 
 def node_at(mesh, loc, tol=1e-4):
     """Index of the node sitting at *loc* (test-side lookup only).
@@ -211,6 +213,103 @@ def test_rebase_adds_free_nodes_only():
     assert len(out.nodes) == 9
     assert n_constrained(out) == 2
     assert not out.nodes[node_at(out, [0, 0.5, 0.5])].fixed_params
+
+
+def test_rebase_restores_pinned_location_exactly():
+    """The counterpart of ``test_refine_restores_pinned_location_exactly``.
+
+    Rebasing fits the new parameters by least squares, so a pinned landmark
+    only survives because the transfer re-asserts its value afterwards.  The
+    bases here are interpolatory, which is the case where that is meaningful.
+    """
+    for basis in (L2, L3, H3):
+        mesh = basic_surface(basis=[L1] * 2)
+        mesh.nodes[node_at(mesh, [0, 1, 0])].fix_parameter('loc', values=np.array([0.0, 0.75, 0.25]))
+        mesh.generate_mesh()
+
+        out = mesh.rebase([basis] * 2)
+
+        pinned = out.nodes[node_at(out, [0, 0.75, 0.25])]
+        assert np.array_equal(np.asarray(pinned.loc), np.array([0.0, 0.75, 0.25])), basis
+
+
+def test_a_pinned_value_is_not_truncated_into_an_integer_node():
+    """``basic_surface`` states its corners as whole numbers, so an unguarded
+    ``loc[inds] = values`` lands in an integer array and silently drops the
+    fractional part -- the same trap ``update_from_params`` promotes around."""
+    mesh = basic_surface(basis=[L1] * 2)
+    assert mesh.nodes[0].loc.dtype.kind == 'i' #the precondition, not the point
+
+    mesh.nodes[node_at(mesh, [0, 1, 0])].fix_parameter('loc', values=np.array([0.0, 0.75, 0.25]))
+
+    assert np.array_equal(np.asarray(mesh.nodes[node_at(mesh, [0, 0.75, 0.25])].loc),
+                          np.array([0.0, 0.75, 0.25]))
+
+
+def test_a_rebased_mesh_fits_around_its_transferred_constraints():
+    """The two halves together: rebasing carries the constraint over, and the
+    next ``linear_fit`` on the result holds it instead of fitting through it.
+
+    The fit targets a different surface from the one rebased, so the pinned
+    corner is somewhere the unconstrained solve would not have left it.
+    """
+    pinned = np.array([0.0, 0.75, 0.25])
+    mesh = basic_surface(basis=[L1] * 2)
+    mesh.nodes[node_at(mesh, [0, 1, 0])].fix_parameter('loc', values=pinned)
+    mesh.generate_mesh()
+    out = mesh.rebase([L2] * 2)
+    index = node_at(out, pinned)
+
+    grid = out.xi_grid(6)
+    eles = np.zeros(len(grid), dtype=int)
+    out.linear_fit(arr(bulged_patch().evaluate_embeddings_ele_xi_pair(eles, grid)),
+                   weight_mat=out.get_xi_weight_mat(eles, grid))
+
+    assert np.array_equal(arr(out.nodes[index].loc), pinned)
+
+
+def fit_residual(mesh, source, res=10):
+    """``||W p - targets||`` on the system ``rebase`` builds -- the quantity the
+    fit minimises, which is not the same as distance to the source surface."""
+    egrid = source.xi_grid(res=res, boundary_points=False)
+    el = np.repeat(np.arange(len(source.elements)), res ** source.ndim)
+    xi = np.tile(egrid.reshape(-1, source.ndim), (len(source.elements), 1))
+    targets = arr(source.evaluate_embeddings_ele_xi_pair(el, xi))
+    weights = arr(mesh.get_xi_weight_mat(el, xi))
+    return np.linalg.norm(weights @ arr(mesh.true_param_array).reshape(-1, source.fdim) - targets)
+
+
+def test_a_constraint_is_honoured_by_the_fit_not_stamped_on_after_it():
+    """Rebasing to a basis that cannot represent the source is where a pinned
+    location actually binds, and where the ordering shows.
+
+    Holding it through the fit lets the other parameters take up the slack; the
+    alternative -- fit everything, then write the pinned value back over the
+    answer -- leaves those parameters where the unconstrained solve put them.
+    The first is a better fit by the measure the fit minimises, and cannot be
+    worse: the stamped mesh satisfies the constraint too, so it is one of the
+    candidates the constrained solve chooses among.
+
+    (Refinement keeps the basis and reproduces its parent exactly, so the
+    constraint is slack there and the ordering makes no difference.)
+    """
+    source = bulged_patch()                  #L2 and curved; L1 cannot hold it
+    source.nodes[node_at(source, [0, 0, 1])].fix_parameter('loc')
+    source.generate_mesh()
+    pinned = arr(source.nodes[node_at(source, [0, 0, 1])].loc)
+
+    held = source.rebase([L1] * 2)
+    loose = source.rebase([L1] * 2, preserve_fixed_params=False)
+
+    #the constraint has to bind, or the comparison below is vacuous
+    assert np.abs(arr(loose.nodes[node_at(loose, [0, 0, 1], tol=0.6)].loc) - pinned).max() > 0.1
+
+    stamped = loose
+    stamped.nodes[node_at(stamped, [0, 0, 1], tol=0.6)].fix_parameter('loc', values=pinned)
+    stamped.generate_mesh()
+
+    np.testing.assert_array_equal(arr(held.nodes[node_at(held, [0, 0, 1], tol=0.6)].loc), pinned)
+    assert fit_residual(held, source) < fit_residual(stamped, source)
 
 
 def test_rebase_to_same_basis_is_unchanged():

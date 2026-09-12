@@ -127,10 +127,15 @@ class MeshNode(dict):
                 self.fixed_params[param] = inds
 
             if values[idp] is not None:
+                #promote before assigning: storing a float value into an
+                #integer array truncates it silently
+                current = self.loc if param == 'loc' else self[param]
+                promoted = current.astype(np.result_type(current, np.asarray(values[idp])))
+                promoted[inds] = values[idp]
                 if param == 'loc':
-                    self.loc[inds] = values[idp]
+                    self.loc = promoted
                 else:
-                    self[param][inds] = values[idp]
+                    self[param] = promoted
 
     def get_optimisability_arr(self):
         """

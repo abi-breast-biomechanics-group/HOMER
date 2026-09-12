@@ -36,11 +36,11 @@ Secondary fields:
 3. **Solve the linear system** – call `linear_fit(targets, W)` to compute
    the optimal nodal parameters.
 
-!!! warning "Fixed parameters are not respected"
-    `linear_fit` solves for every parameter, including any fixed with
-    `MeshNode.fix_parameter()`, so constraints on a secondary field's nodes
-    are overwritten by the fit.  See
-    [Mesh fitting](fitting.md#linear-fitting).
+!!! note "Fixed parameters are respected"
+    Constraints set with `MeshNode.fix_parameter()` on a secondary field's
+    nodes are held through the fit: `linear_fit` solves for the free
+    parameters only.  See
+    [Fixed parameters in a linear fit](fitting.md#fixed-parameters-in-a-linear-fit).
 
 ---
 
@@ -191,6 +191,6 @@ mesh.plot(field_to_draw='vec_dir', field_artist=arrow_artist)
   that must interpolate continuously across element boundaries.
 - Use **`L1`** or **`L2`** for simpler scalar fields (pressure,
   temperature) where smoothness is less critical.
-- Ensure you have **more sample points than nodal degrees of freedom**.  If
-  `linear_fit` raises an assertion error, add more sample points or reduce
+- Ensure you have **more sample points than free nodal degrees of freedom**.
+  If `linear_fit` raises an assertion error, add more sample points or reduce
   the basis order.

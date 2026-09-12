@@ -273,7 +273,10 @@ def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, 
         Sentinel value used to mask out unused target rows.
     :param return_params:
         Return the fitted parameter vector instead of writing it into the
-        field, leaving the mesh untouched.
+        field, leaving the mesh untouched.  Full length, with any held
+        parameter carrying the value it already had, in the precision the
+        solve ran at -- writing into the field restores those exactly, this
+        does not, so that the return stays traceable.
     :param skip_bool:
         Skip the *target_empty* masking and the overdetermined-system
         assertion, solving against *weight_mat* and *targets* as given.
@@ -289,40 +292,69 @@ def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, 
 
     **Notes**
 
-    Fixed parameters (set via :meth:`MeshNode.fix_parameter`) are
-    currently **not** respected by this method.  Use the nonlinear
-    optimisation pathway (``fitting.point_cloud_fit``) if constraints
-    are required.
+    Parameters fixed with :meth:`MeshNode.fix_parameter` are held at their
+    current values: they move to the right-hand side and the solve runs over
+    the free columns only, which is the constrained minimiser rather than an
+    unconstrained fit that is afterwards overwritten.  The point count the
+    system needs falls with them -- ``n_pts`` must reach the number of *free*
+    columns, not every column.
+
+    Fixing is per component (``fix_parameter('loc', inds=[2])`` pins only
+    *z*), so the free set can differ between the components of the field.
+    *weight_mat* is shared across them, so components that share a free set
+    share a solve: one for the usual meshes, at most *fdim* when the
+    constraints cut across components.
     """
+    n_cols = self.true_param_array.shape[0] // self.fdim
+    free = self.optimisable_param_bool.reshape(n_cols, self.fdim)
+    targets = targets[:, None] if targets.ndim == 1 else targets
+
+    if sparse_columns is None and not skip_bool: #skipped to make jax easier
+        kept = np.any(np.asarray(targets) != target_empty, axis=-1)
+        weight_mat, targets = weight_mat[kept], targets[kept]
     if sparse_columns is not None:
-        n_cols = self.true_param_array.shape[0] // self.fdim
-        new_params = sparse_equilibrated_lstsq(weight_mat, sparse_columns, n_cols, targets)
-    else:
-        if not skip_bool: #just to make jax easier
-            if targets.ndim > 1:
-                target_mask = np.any(targets != target_empty, axis=-1)
-            else:
-                target_mask = targets != target_empty
-            A = weight_mat[target_mask]
-            b = targets[target_mask]
-            assert A.shape[0] >= A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
+        sparse_columns = np.asarray(sparse_columns)
+
+    #the held parameters are a known contribution to the targets, so they move
+    #to the right-hand side and leave a smaller system in the free ones
+    current = np.asarray(self.true_param_array).reshape(n_cols, self.fdim)
+    held = np.where(free, 0.0, current)
+    new_params = jnp.asarray(held)
+
+    #fix_parameter takes component indices, so each component of the field has
+    #its own free set; weight_mat is shared across them, so components sharing
+    #a free set share a solve.  Nothing fixed, or whole parameters fixed, is
+    #one group.
+    patterns, group = np.unique(free.T, axis=0, return_inverse=True)
+    for pattern, cols in enumerate(patterns):
+        comps = np.flatnonzero(group.ravel() == pattern)
+        if not cols.any():
+            continue #every parameter of these components is held
+        b = targets[:, comps]
+        if sparse_columns is not None:
+            kept_cols = cols[sparse_columns]
+            if not cols.all():
+                b = b - (weight_mat[..., None] * held[sparse_columns][:, :, comps]).sum(1)
+            solved = sparse_equilibrated_lstsq(jnp.where(kept_cols, weight_mat, 0.0),
+                                               jnp.where(kept_cols, (np.cumsum(cols) - 1)[sparse_columns], 0),
+                                               int(cols.sum()), b)
         else:
-            A = weight_mat
-            b = targets
+            A = weight_mat if cols.all() else weight_mat[:, cols]
+            if not cols.all():
+                b = b - weight_mat @ held[:, comps]
+            if not skip_bool:
+                assert A.shape[0] >= A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
+            solved = column_equilibrated_lstsq(A, b)[0]
+        new_params = new_params.at[np.ix_(cols, comps)].set(solved)
 
-        new_params, residual, rank, s = column_equilibrated_lstsq(A, b)
-    # if not skip_bool:
-    #     if rank < A.shape[1]:
-    #         logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")
-    #         pass
-
-    # print('residual error:', residual)
     if return_params:
         return new_params.flatten()
-    self.true_param_array = np.array(new_params).flatten()
-    self.optimisable_param_array = self.true_param_array[self.optimisable_param_bool]
-    self.update_from_params(new_params.flatten(), generate=False)
-    self.generate_mesh()
+    #back in numpy at the field's own precision: the nodes are written through
+    #in place, and a held parameter is restored from the source rather than
+    #read back out of a solve that ran in float32, so it does not drift
+    full = np.asarray(new_params).astype(current.dtype)
+    full[~free] = current[~free]
+    self.update_from_params(full.flatten(), generate=True)
 
 
 def column_equilibrated_lstsq(A, b):
