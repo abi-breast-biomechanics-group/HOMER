@@ -16,7 +16,7 @@ from HOMER.utils import (all_pairings, aknn_closest_indices,
                          hex_surface_to_spherical, jax_aknn,
                          make_tiling, masked_closest_indices, rodrigues_exp,
                          skew_symmetric, spheres_to_polydata,
-                         spherical_to_hex_surface, vol_hexahedron, vol_tet)
+                         spherical_to_hex_surface)
 
 
 def exact_closest(a, b, weights=None):
@@ -124,21 +124,6 @@ def test_jax_aknn_returns_sorted_distances_and_matching_indices():
 
 
 ############################################### volumes and transforms
-
-def test_vol_tet_matches_the_determinant_formula():
-    p = np.eye(3)
-    assert vol_tet(np.zeros(3), p[0], p[1], p[2]) == pytest.approx(1 / 6)
-
-
-def test_vol_hexahedron_of_the_unit_cube_is_one():
-    corners = np.array(list(np.ndindex(2, 2, 2)), dtype=float)
-    assert vol_hexahedron(corners) == pytest.approx(1.0)
-
-
-def test_vol_hexahedron_scales_cubically():
-    corners = np.array(list(np.ndindex(2, 2, 2)), dtype=float)
-    assert vol_hexahedron(corners * 3.0) == pytest.approx(27.0)
-
 
 def test_h_tform_applies_a_homogeneous_transform():
     points = np.array([[1.0, 2.0, 3.0], [0.0, 0.0, 0.0]])

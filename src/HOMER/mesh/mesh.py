@@ -74,7 +74,7 @@ class Mesh(MeshField):
         assert self.elements[0].ndim == value.elements[0].ndim, 'Feilds must share the same dimensionality of basis components'
         self.fields[key] = value
 
-    def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True, plot=False, preserve_fixed_params=True, reorder_nodes=True):
+    def refine(self, refinement_factor: Optional[int] = None, by_xi_refinement: Optional[tuple[np.ndarray]] = None, clean_nodes=True, preserve_fixed_params=True, reorder_nodes=True):
         """Refine the primary geometry *and* all secondary fields simultaneously.
 
         Calls :meth:`MeshField.refine` on the coordinate mesh and on every
@@ -95,10 +95,10 @@ class Mesh(MeshField):
             ordered from its own topology, so a field and the geometry stay
             consistent without sharing a node numbering.
         """
-        super().refine(refinement_factor, by_xi_refinement, clean_nodes, plot, preserve_fixed_params,
+        super().refine(refinement_factor, by_xi_refinement, clean_nodes, preserve_fixed_params,
                        reorder_nodes)
         for field in self.fields.values():
-            field.refine(refinement_factor, by_xi_refinement, clean_nodes, plot, preserve_fixed_params,
+            field.refine(refinement_factor, by_xi_refinement, clean_nodes, preserve_fixed_params,
                          reorder_nodes)
 
     def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True,

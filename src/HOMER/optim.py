@@ -43,14 +43,11 @@ def kdtree_distance_query(fit_data, kdtree_args=None):
     @jax.custom_jvp
     def distances(data):
         # data = jnp.asarray(data).squeeze()
-        try:
-            dists = jax.pure_callback(
-                get_distances,
-                jax.ShapeDtypeStruct((data.shape[0] * 3,), data.dtype),
-                data,
-            )
-        except:
-            breakpoint()
+        dists = jax.pure_callback(
+            get_distances,
+            jax.ShapeDtypeStruct((data.shape[0] * 3,), data.dtype),
+            data,
+        )
         return dists
 
     @distances.defjvp

@@ -31,7 +31,7 @@ from HOMER.mesh.element import MeshElement
 from HOMER.mesh.field import MeshField
 from HOMER.mesh.mesh import Mesh
 from HOMER.mesh.element_eval import (make_eval, make_deriv_eval, make_weight_eval,
-                                     volume_quadrature_order, GAUSS)
+                                     quadrature_order, GAUSS)
 from HOMER.mesh.parameters import column_equilibrated_lstsq
 from HOMER.mesh.refinement import MAX_XI_DENOMINATOR
 from HOMER.mesh.reordering import (reorder_nodes, node_permutation, apply_node_permutation,
@@ -40,7 +40,7 @@ from HOMER.mesh.reordering import (reorder_nodes, node_permutation, apply_node_p
 
 __all__ = ['MeshNode', 'MeshElement', 'MeshField', 'Mesh',
            'make_eval', 'make_deriv_eval', 'make_weight_eval',
-           'volume_quadrature_order', 'GAUSS', 'column_equilibrated_lstsq',
+           'quadrature_order', 'GAUSS', 'column_equilibrated_lstsq',
            'MAX_XI_DENOMINATOR', 'reorder_nodes', 'node_permutation',
            'apply_node_permutation', 'preserving_permutation',
            'element_lattice_coords', 'resolve_strategy',

@@ -31,8 +31,8 @@ def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, ju
         grid = self.xi_grid(res=res, dim=self.ndim, surface=True)
         if element_ids is not None:
             all_points = []
-            for ne, e in enumerate(elements_to_iter):
-                all_points.append(self.evaluate_embeddings(np.array([ne]), grid, fit_params=fit_params))
+            for e in elements_to_iter:
+                all_points.append(self.evaluate_embeddings(np.array([e]), grid, fit_params=fit_params))
             return np.concatenate(all_points, axis=0) 
         else:
             return self.evaluate_embeddings_in_every_element(grid)
@@ -69,7 +69,7 @@ def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, ju
             return np.asarray(self.evaluate_embeddings_in_every_element(xi2grid, fit_params=fit_params)), c
 
 
-def get_hex_surface(self, element_ids, tiling = (10, 6), fit_params=None) -> tuple[np.ndarray, np.ndarray]:
+def get_hex_surface(self, element_ids=None, tiling = (10, 6), fit_params=None) -> tuple[np.ndarray, np.ndarray]:
     """
     Returns lines evaluating a hexagon tiling of the element surface
 

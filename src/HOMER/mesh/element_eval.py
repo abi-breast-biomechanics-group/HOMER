@@ -4,7 +4,7 @@ element_eval.py - building the per-element evaluation kernels.
 Given the bases of an element and the ordering of their tensor-product weights,
 the ``make_*`` factories here close over that structure once and return the
 JAX functions a mesh calls for every subsequent evaluation.  :data:`GAUSS`
-tabulates the quadrature rules, and :func:`volume_quadrature_order` picks the
+tabulates the quadrature rules, and :func:`quadrature_order` picks the
 rule a given basis needs.
 """
 
@@ -229,15 +229,21 @@ def make_weight_eval(basis_funcs: BasisGroup, bp_inds):
     return xi_eval
 
 
-def volume_quadrature_order(basis_functions: BasisGroup) -> list[int]:
+def quadrature_order(basis_functions: BasisGroup) -> list[int]:
     """Gauss points per direction needed to integrate det(J) exactly.
 
     A map of polynomial degree ``p_d`` in direction ``d`` has a Jacobian whose
     ``d``-th column has dropped to degree ``p_d - 1`` in that direction while
-    the other two columns still carry degree ``p_d``.  Every term of the 3x3
-    determinant takes one entry from each column, so det(J) reaches degree
-    ``3 * p_d - 1`` in ``xi_d``.  An ``n``-point Gauss rule is exact to degree
-    ``2n - 1``, so ``n_d = ceil(3 * p_d / 2)``.
+    the other columns still carry degree ``p_d``.  Every term of the
+    determinant takes one entry from each column, so over ``ndim`` directions
+    det(J) reaches degree ``ndim * p_d - 1`` in ``xi_d``.  An ``n``-point
+    Gauss rule is exact to degree ``2n - 1``, so
+    ``n_d = ceil(ndim * p_d / 2)``.
+
+    This is the order for a *square* Jacobian, where the parametric and
+    physical dimensions agree.  A 2-D manifold in 3-D space has a ``(3, 2)``
+    Jacobian whose area element is a square root, not a polynomial, so no
+    finite Gauss rule is exact there and this order does not apply.
 
     Using the basis order itself -- the obvious choice, and what this used to
     do -- under-integrates every element that is not affine.  A distorted
@@ -246,17 +252,18 @@ def volume_quadrature_order(basis_functions: BasisGroup) -> list[int]:
     because the rule was never refined at all.
 
     The tabulated rules stop at :data:`GAUSS`'s highest order, which covers
-    every basis HOMER ships (``L4Basis``, degree 4, needs 6 points).  A
+    every basis HOMER ships (``L4Basis``, degree 4, needs 6 points in 3-D).  A
     higher-degree basis is clamped to the table and warned about, since an
     approximate answer beats no answer.
     """
+    ndim = len(basis_functions)
     max_order = max(GAUSS)
     orders = []
     for basis in basis_functions:
-        needed = int(np.ceil(3 * basis.order / 2))
+        needed = int(np.ceil(ndim * basis.order / 2))
         if needed > max_order:
             logging.warning(
-                f"Exact volume quadrature for {basis.name} (degree {basis.order}) "
+                f"Exact quadrature for {basis.name} (degree {basis.order}) "
                 f"needs {needed} Gauss points per direction, but only {max_order} are "
                 f"tabulated; the volume will be under-integrated."
             )

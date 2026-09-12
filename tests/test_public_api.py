@@ -61,7 +61,7 @@ def test_mesh_overrides_plot_with_its_own_implementation():
 
 
 @pytest.mark.parametrize("name", ['MeshNode', 'MeshElement', 'MeshField', 'Mesh',
-                                  'GAUSS', 'volume_quadrature_order',
+                                  'GAUSS', 'quadrature_order',
                                   'column_equilibrated_lstsq', 'MAX_XI_DENOMINATOR',
                                   'make_eval', 'make_deriv_eval', 'make_weight_eval'])
 def test_the_mesher_shim_still_re_exports_everything(name):

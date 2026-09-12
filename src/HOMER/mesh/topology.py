@@ -451,7 +451,3 @@ def get_colouring_dict(self, fields_seperable=False, seed_matrix=False):
     )
 
     return colouring_dict, seed_matrix_vals, seed_matrix_idxs
-    # td = seed_matrix.todense()
-    # breakpoint()
-    # seed_matrix = BCOO.fromdense(basis)
-    return colouring_dict, seed_matrix

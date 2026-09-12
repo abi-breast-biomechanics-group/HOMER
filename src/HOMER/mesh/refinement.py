@@ -15,7 +15,6 @@ from fractions import Fraction
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
-import pyvista as pv
 
 from HOMER.basis_definitions import Basis, BasisGroup
 from HOMER.mesh.node import MeshNode
@@ -204,7 +203,7 @@ def _report_fixed_param_transfer(operation: str, stats: tuple[int, int, int], in
 
 
 def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refinement: Optional[tuple[np.ndarray]] =  None,
-           clean_nodes = True, plot=False, preserve_fixed_params = True, reorder_nodes = True):
+           clean_nodes = True, preserve_fixed_params = True, reorder_nodes = True):
     """Subdivide every element, increasing the mesh resolution.
 
     Each existing element is replaced by ``refinement_factor ** ndim``
@@ -300,13 +299,7 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
 
     targets = self.evaluate_embeddings_ele_xi_pair(old_eles, old_xis)
 
-    if plot:
-        test = pv.lines_from_points(np.array(targets))
-        test['data'] = np.arange(targets.shape[0])
-        test.plot(render_lines_as_tubes=True, cmap='jet', line_width=15)
-
     w_mat = new_mesh.get_xi_weight_mat(new_eles, new_xi)
-    # plt.imshow(w_mat);plt.show()
     new_mesh.linear_fit(targets, w_mat) 
 
     #must happen while self still holds the old nodes.  Both the constraint

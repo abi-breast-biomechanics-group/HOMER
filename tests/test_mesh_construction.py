@@ -18,7 +18,7 @@ import pytest
 from HOMER import Mesh, MeshElement, MeshNode
 from HOMER.basis_definitions import (B3Basis, BasisGroup, H3Basis, L1Basis, L2Basis,
                                      L3Basis, L4Basis)
-from HOMER.mesh import GAUSS, volume_quadrature_order
+from HOMER.mesh import GAUSS, quadrature_order
 
 from _helpers import EXACT, arr, bulged_patch, hermite_cube, node_locs, unit_hex
 
@@ -177,7 +177,7 @@ def test_get_volume_is_exact_on_a_curved_element():
     """Checked against an independent, far higher-order quadrature.
 
     ``get_volume`` picks its Gauss order from
-    :func:`~HOMER.mesher.volume_quadrature_order` so that det(J) is integrated
+    :func:`~HOMER.mesher.quadrature_order` so that det(J) is integrated
     exactly.  The reference below is a 24-point tensor Gauss-Legendre rule
     built straight from numpy -- nothing in HOMER decides it -- so agreement
     is evidence about the rule, not a restatement of it.
@@ -201,21 +201,29 @@ def test_get_volume_is_exact_on_a_distorted_hexahedron(basis):
     assert mesh.get_volume() == pytest.approx(reference_volume(mesh), rel=1e-4)
 
 
-def test_volume_quadrature_order_follows_the_degree_of_det_J():
-    """n = ceil(3p/2), per direction, and mixed bases are handled per direction."""
-    assert volume_quadrature_order([L1Basis] * 3) == [2, 2, 2]
-    assert volume_quadrature_order([L2Basis] * 3) == [3, 3, 3]
-    assert volume_quadrature_order([H3Basis] * 3) == [5, 5, 5]
-    assert volume_quadrature_order([L4Basis] * 3) == [6, 6, 6]
-    assert volume_quadrature_order([L1Basis, H3Basis, L4Basis]) == [2, 5, 6]
+def test_quadrature_order_follows_the_degree_of_det_J():
+    """n = ceil(ndim*p/2), per direction, and mixed bases are handled per direction."""
+    assert quadrature_order([L1Basis] * 3) == [2, 2, 2]
+    assert quadrature_order([L2Basis] * 3) == [3, 3, 3]
+    assert quadrature_order([H3Basis] * 3) == [5, 5, 5]
+    assert quadrature_order([L4Basis] * 3) == [6, 6, 6]
+    assert quadrature_order([L1Basis, H3Basis, L4Basis]) == [2, 5, 6]
+
+    #the rule follows the element's dimensionality, not a hard-coded 3: over
+    #ndim directions det(J) reaches degree ndim * p - 1, so a 2-D element
+    #needs ceil(2 * p / 2) = p points per direction
+    assert quadrature_order([L1Basis] * 2) == [1, 1]
+    assert quadrature_order([L2Basis] * 2) == [2, 2]
+    assert quadrature_order([H3Basis] * 2) == [3, 3]
+    assert quadrature_order([L4Basis] * 2) == [4, 4]
 
 
-def test_volume_quadrature_order_warns_rather_than_failing_on_an_exotic_basis(caplog):
+def test_quadrature_order_warns_rather_than_failing_on_an_exotic_basis(caplog):
     """A degree past the tabulated rules is clamped, loudly."""
     degree7 = replace(L4Basis, name='Degree7Basis', order=7)
 
     with caplog.at_level(logging.WARNING):
-        orders = volume_quadrature_order(degree7 * 3)
+        orders = quadrature_order(degree7 * 3)
 
     assert orders == [max(GAUSS)] * 3
     assert 'under-integrated' in caplog.text

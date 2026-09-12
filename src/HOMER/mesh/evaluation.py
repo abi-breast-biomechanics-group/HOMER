@@ -20,7 +20,7 @@ import jax.numpy as jnp
 import pyvista as pv
 
 from HOMER.embedding import build_embedding_fn
-from HOMER.mesh.element_eval import GAUSS, volume_quadrature_order
+from HOMER.mesh.element_eval import GAUSS, quadrature_order
 from HOMER.mesh_decorators import wide_eval
 from HOMER.utils import make_tiling
 
@@ -553,7 +553,7 @@ def evaluate_sobolev(self, weights=None, fit_params=None,flatten=True):
     n_derivs = [len(b.deriv) for b in self.elements[0].basis_functions]
     d_order = [b.order for b in self.elements[0].basis_functions]
     if fit_params is None:
-        fit_params = self.true_param_array
+        fit_params = self.optimisable_param_array
 
     gp, w = self.gauss_grid(d_order)
     deriv_combos = list(product(*[range(d) for d in n_derivs]))[1:] # skip the no deriv case
@@ -584,7 +584,7 @@ def get_volume(self, fit_params = None, element_wise=False):
     """
     Calculates the mesh volume by Gauss quadrature of the Jacobian determinant.
 
-    The quadrature order is chosen by :func:`volume_quadrature_order` so
+    The quadrature order is chosen by :func:`quadrature_order` so
     that det(J) is integrated *exactly*, which makes the result exact (to
     float round-off) for any element the basis can describe -- not just
     affine ones.
@@ -594,7 +594,7 @@ def get_volume(self, fit_params = None, element_wise=False):
     """
     if self.ndim != 3:
         raise ValueError(f"Volume is only defined on a 3-D mesh, this one is {self.ndim}-D")
-    gauss_points, weights = self.gauss_grid(volume_quadrature_order(self.elements[0].basis_functions))
+    gauss_points, weights = self.gauss_grid(quadrature_order(self.elements[0].basis_functions))
     Jmats = self.evaluate_jacobians_in_every_element(gauss_points, fit_params=fit_params)
     dets = jnp.linalg.det(Jmats).reshape(len(self.elements), -1)
     vols = dets * weights[None]
@@ -607,10 +607,11 @@ def get_volume(self, fit_params = None, element_wise=False):
 def evaluate_strain(self, element_ids, xis, othr: "Mesh", coord_function: Optional[Callable] = None, return_F=False, fit_params=None):
     """Evaluate the Green-Lagrange strain tensor between two mesh states.
 
-    Computes the deformation gradient **F** = J_ref⁻¹ · J_def where J_ref
+    Computes the deformation gradient **F** = J_def · J_ref⁻¹ where J_ref
     is the Jacobian of *self* (reference configuration) and J_def is the
     Jacobian of *othr* (deformed configuration), then returns the strain
-    tensor **E** = (Fᵀ F − I) / 2.
+    tensor **E** = (Fᵀ F − I) / 2.  The Jacobians carry physical directions
+    as rows, so a uniform stretch of 3 along x gives **F** = diag(3, 1, 1).
 
     :param element_ids:
         1-D integer array, shape ``(n_pts,)``.

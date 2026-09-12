@@ -29,7 +29,12 @@ def process_node(node_str, keys, dim=3):
         node_keys = {k:np.array(v) for k, v in zip(keys, node_data[1:])}
 
         if np.any([len(node_datum) != 3 for node_datum in node_data]):
-            breakpoint()
+            raise ValueError(
+                f"Node {node_num}: expected 3 components per property, got "
+                f"{[len(d) for d in node_data]}. The file may declare a "
+                f"different set of derivative fields than the keys given "
+                f"({', '.join(keys)})."
+            )
 
         node = MeshNode(node_loc, id=str(node_num), **node_keys)
         return [node]
@@ -183,7 +188,6 @@ def process_elem_legacy(elem_data, basis_def):
     inds = re_ind_elem_nodes(elem_data, inds)
     # print(inds)
     # print(no_dupe)
-    breakpoint()
     elem = MeshElement(node_ids=inds, basis_functions=basis_def, id=id) #, no_dupe
     return elem
 
@@ -265,7 +269,6 @@ def load_elem(loc, basis_def):
             if idl == 3:
                 # breakpoint()
                 nums = re.findall(r"[-+]?(?:\d*\.*\d+)", line)
-                print(nums, line)
                 num_elems = max([int(n) for n in nums])
                 # elem_data = [[] for _ in range(num_elems)]
                 elem_data = []
@@ -278,10 +281,13 @@ def load_elem(loc, basis_def):
                 # pass
 
             else:
-                try:
-                    elem_data[-1].append(line)
-                except:
-                    breakpoint()
+                if not elem_data:
+                    raise ValueError(
+                        f"{loc}: element data on line {idl + 1} before any "
+                        f"element block began. The file may be malformed, or an "
+                        f"ipelem variant this reader does not handle."
+                    )
+                elem_data[-1].append(line)
 
     elem = [process_elem(elem_datum, basis_def) for elem_datum in elem_data if not len(elem_datum) == 0]
     return elem
@@ -295,41 +301,3 @@ def load_mesh(ipnode, ipelem, basis=(H3Basis, H3Basis, L2Basis), keys=('du', 'dv
     meshObj = Mesh(nodes, elems)
     meshObj._clean_pts()
     return meshObj
-
-
-if __name__ == "__main__":
-
-    ipnode = Path("bin/heart/BB001_RC_Cubic_59.ipnode")
-    ipelem = Path("bin/heart/BB001_RC_Cubic_59.ipelem")
-
-    ipelem = Path("/Users/robinlaven/Documents/mobstr_3D/compphan/snr_inf/cmiss_ref/cylinder_geofitted.ipelem")
-    ipnode = Path("/Users/robinlaven/Documents/mobstr_3D/compphan/snr_inf/cmiss_ref/cylinder_ffdfitted.ipnode")
-
-    # ipnode = Path("/Users/robinlaven/Documents/mobstr_3D/compphan/snr_inf/cmiss_ref/cylinder_geofitted.ipnode")
-    # ipelem = Path("bin/cyl.ipelem")
-
-    nodes = load_node(ipnode, 
-                      keys = ['du', 'dv', 'dudv'],
-                      # keys = ['dv', 'du', 'dudv'],
-                      # keys = ['du', 'dv', 'dudv', 'dw', 'dudw', 'dvdw', 'dudvdw'],
-                      )
-
-    for n in nodes:
-        print(n['du'])
-        n['du'] = n['du'] * [1, 1, 0]
-        pass
-
-    elems = load_elem(ipelem, basis_def=(H3Basis, H3Basis, L2Basis))
-
-    mesh = Mesh(nodes, elems)
-    mesh._clean_pts()
-    mesh.plot(labels=False)
-
-    # mesh.save("/Users/robinlaven/Documents/mobstr_3D/compphan/snr_inf/cmiss_ref/FFD.json")
-
-    # meshObj.save("scaffold_test/sternum.json")
-
-
-    # node = meshObj.get_node('3')
-
-    # print(node) 

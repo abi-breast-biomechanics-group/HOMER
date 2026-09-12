@@ -271,6 +271,28 @@ def test_get_surface_just_faces_only_visits_boundary_faces(refined_cube):
     assert np.isclose(np.abs(surface), 0.5, atol=1e-4).any(axis=-1).all()
 
 
+def test_get_surface_samples_the_elements_it_is_given(refined_cube):
+    """element_ids selects *which* elements, not just how many.
+
+    The loop used to evaluate the enumerate counter rather than the id it was
+    handed, so any list of ids returned elements 0..n-1 instead.  Two
+    different single-element requests must not come back identical.
+    """
+    first = arr(refined_cube.get_surface(element_ids=[0], res=4))
+    last_id = len(refined_cube.elements) - 1
+    last = arr(refined_cube.get_surface(element_ids=[last_id], res=4))
+
+    assert not np.array_equal(first, last)
+
+    #each request returns exactly one element's worth of samples, and the two
+    #agree with the same element taken out of the all-element sweep
+    every = arr(refined_cube.get_surface(res=4))
+    per_element = len(every) // len(refined_cube.elements)
+    assert len(first) == per_element
+    np.testing.assert_allclose(first, every[:per_element], atol=EXACT)
+    np.testing.assert_allclose(last, every[last_id * per_element:], atol=EXACT)
+
+
 def test_get_triangle_surface_indexes_real_points(refined_cube):
     points, faces = refined_cube.get_triangle_surface(res=5)
 
