@@ -107,9 +107,22 @@ pv.OFF_SCREEN = True
 `tests/conftest.py` does exactly this, which is why the suite runs headless.
 See the [plotting guide](how-to/plotting.md#rendering-without-a-display).
 
-**The first evaluation is slow.** That is XLA compiling. HOMER sets a
-persistent compilation cache under `/tmp/jax_cache` at import, so the cost is
-paid once per mesh shape per machine rather than once per process.
+**The first evaluation is slow.** That is XLA compiling. HOMER turns on JAX's
+persistent compilation cache at import, in your platform's per-user cache
+directory — `~/Library/Caches/HOMER` on macOS, `~/.cache/HOMER` on Linux,
+`%LOCALAPPDATA%\HOMER\Cache` on Windows — so the cost is paid once per mesh
+shape per machine rather than once per process.
+
+That is only a default. Set `JAX_COMPILATION_CACHE_DIR` to put the cache
+elsewhere, or to an empty string to turn it off, and HOMER leaves your choice
+alone:
+
+```bash
+export JAX_COMPILATION_CACHE_DIR=""     # no cache
+```
+
+The setting is process-global, so it applies to all of your JAX work, not only
+HOMER's.
 
 **Numerical results differ slightly between runs or machines.** HOMER
 evaluates in float32. Quantities reached by least squares or Newton-Raphson

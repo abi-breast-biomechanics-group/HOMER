@@ -38,6 +38,11 @@ date sits under Unreleased.
 - Docstrings are reST throughout, rendered by mkdocstrings with a griffe
   extension that turns roles into cross-references.
 - `load_exelem` renamed to `load_ipmesh`, after the format it reads.
+- JAX's persistent compilation cache now defaults to the platform's per-user
+  cache directory instead of a shared `/tmp/jax_cache`, and only when the user
+  has not chosen one themselves — `JAX_COMPILATION_CACHE_DIR` is no longer
+  overridden on import. The size and compile-time thresholds are left at JAX's
+  defaults, which is what stops the cache growing without bound.
 
 ### Removed
 - `compat_functions/dep_mesh.py`, which had never parsed.

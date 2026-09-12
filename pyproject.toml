@@ -11,6 +11,8 @@ dependencies = [
     #imported at module scope by HOMER.mesher and HOMER.fitting
     "matplotlib",
     "networkx",
+    #per-user cache directory for JAX's persistent compilation cache
+    "platformdirs",
 ]
 
 [project.optional-dependencies]

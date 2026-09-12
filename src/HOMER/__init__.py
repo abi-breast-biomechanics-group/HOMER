@@ -10,9 +10,26 @@ from HOMER.mac_plotting_patch import apply_macos_fullscreen_close_patch
 # full-screen space, which shows up as a bus error on close.  No-op elsewhere.
 apply_macos_fullscreen_close_patch()
 
+import os
+
 import jax
 
-jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
-jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
-jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-jax.config.update("jax_persistent_cache_enable_xla_caches", "all")
+# JAX compiles on the first call and that compile dominates it, so the
+# persistent cache is worth having on.  As a *default* only: the setting is
+# process-global and applies to every JAX computation in the program, not just
+# HOMER's, so an explicit choice always wins -- either the
+# JAX_COMPILATION_CACHE_DIR environment variable, or a jax.config.update made
+# before HOMER is imported.  Set that variable to an empty string to opt out.
+#
+# The location is the platform's per-user cache directory rather than a shared
+# /tmp: on a multi-user machine everyone would otherwise write to one place,
+# and Windows has no /tmp at all.
+#
+# The size and compile-time thresholds are left at JAX's own defaults.  They
+# exist so that compilations too cheap to be worth storing are not stored,
+# which is what keeps the cache from growing without bound.
+if ("JAX_COMPILATION_CACHE_DIR" not in os.environ
+        and jax.config.jax_compilation_cache_dir is None):
+    from platformdirs import user_cache_dir
+
+    jax.config.update("jax_compilation_cache_dir", user_cache_dir("HOMER"))
