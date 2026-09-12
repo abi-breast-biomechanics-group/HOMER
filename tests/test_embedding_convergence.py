@@ -6,8 +6,16 @@ query points, so a single ``lax.while_loop`` trip count is shared by the whole
 batch -- which is the thing worth testing.  A converged point must be *frozen*,
 not merely ignored: if the batched loop let finished lanes keep stepping until
 the slowest one caught up, an answer would depend on which other points
-happened to be embedded alongside it, and the same point would come back
-differently from a solo call, a reordered batch, or a different ``chunk_size``.
+happened to be embedded alongside it.
+
+What the batch is *made of* must not matter at all, and that is asserted
+exactly: reordering it, or adding points that never converge, reproduces every
+answer bit for bit.  How *many* points are in it is a weaker guarantee.  The
+loop stops as soon as the residual is inside ``tol``, and a batch of one and a
+batch of two dozen are different XLA programs that can cross that line on
+iterates a rounding apart -- both inside the tolerance, which is all the
+tolerance claims.  So batch size is held to the position the answer names
+rather than to the bits of the answer.
 
 The tolerance itself is checked to be what it claims -- an early exit at
 float32 round-off, not an accuracy setting.
@@ -20,6 +28,10 @@ from HOMER.embedding import DEFAULT_EMBED_TOL
 from HOMER.geometry import cubeMNO
 
 from _helpers import EXACT, arr
+
+#one float32 rounding of a parametric coordinate.  Not an accuracy budget: it
+#is the width of the last bit, and the observed spread is half of it.
+XI_ROUNDING = float(np.finfo(np.float32).eps)
 
 
 @pytest.fixture(scope="module")
@@ -57,12 +69,25 @@ def embed(mesh, points, **kw):
 ############################################### batch composition
 
 def test_a_point_embeds_the_same_alone_as_in_a_batch(block, on_mesh):
+    """Batch size may move the last bit of xi.  It may not move the point.
+
+    ``(element, xi)`` is a *way of writing* a position, and a point on a shared
+    face has more than one: the same place is xi = 1 of one element and xi = 0
+    of its neighbour, and a rounding in the refinement is enough to decide
+    which of the two comes back.  Neither is wrong, so the position is what is
+    compared.  Where the two calls do agree on the element, the parametric
+    coordinate has to agree to a float32 rounding of itself.
+    """
     ele, xi, _ = embed(block, on_mesh)
+    batched = arr(block.evaluate_embeddings_ele_xi_pair(ele, xi))
 
     for i, point in enumerate(on_mesh):
         solo_ele, solo_xi, _ = embed(block, point)
-        assert solo_ele[0] == ele[i]
-        np.testing.assert_array_equal(solo_xi[0], xi[i])
+        solo = arr(block.evaluate_embeddings_ele_xi_pair(solo_ele, solo_xi)).reshape(-1)
+
+        np.testing.assert_allclose(solo, batched[i], atol=EXACT)
+        if solo_ele[0] == ele[i]:
+            np.testing.assert_allclose(solo_xi[0], xi[i], atol=XI_ROUNDING)
 
 
 def test_a_point_that_cannot_converge_does_not_disturb_the_others(block, on_mesh,
