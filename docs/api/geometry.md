@@ -1,3 +1,3 @@
 # API – geometry
 
-::: HOMER.geometry.cube
+::: HOMER.geometry

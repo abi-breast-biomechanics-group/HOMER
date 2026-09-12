@@ -1,6 +1,6 @@
 site_name: HOMER
-site_description: High Order Mesh Embeddings and Refinement
-site_url: ""
+site_description: High Order Mesh Representations
+site_url: https://abi-breast-biomechanics-group.github.io/HOMER/
 repo_url: https://github.com/abi-breast-biomechanics-group/HOMER
 
 theme:
@@ -21,7 +21,9 @@ plugins:
       handlers:
         python:
           options:
-            docstring_style: numpy
+            docstring_style: sphinx
+            extensions:
+              - scripts/griffe_rest_roles.py
             show_root_heading: true
             show_source: false
             merge_init_into_class: true
@@ -39,6 +41,7 @@ nav:
     - Mesh fitting / optimisation: how-to/fitting.md
     - Secondary fields: how-to/secondary-fields.md
     - Strain evaluation: how-to/strain.md
+    - Plotting: how-to/plotting.md
     - Topology mapping: how-to/topology.md
     - Node indexing: how-to/node-indexing.md
   - API Reference:
@@ -49,6 +52,10 @@ nav:
     - io: api/io.md
     - geometry: api/geometry.md
     - jacobian_evaluator: api/jacobian_evaluator.md
+    - utils: api/utils.md
+    - embedding: api/embedding.md
+    - compatibility readers: api/compat.md
+    - internals: api/internals.md
 
 markdown_extensions:
   - admonition
