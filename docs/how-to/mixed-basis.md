@@ -69,6 +69,7 @@ thing and is still accepted everywhere.
 | Requirement | Recommended basis |
 |---|---|
 | C¹ smooth geometry, shape optimisation | `H3` |
+| C² smooth geometry, shape optimisation | `B3` |
 | Simple coarse mesh before rebasing | `L1` |
 | Mid-order accuracy, fewer DoF than H3 | `L2` or `L3` |
 | High-accuracy Lagrange interpolation | `L4` |
@@ -90,5 +91,9 @@ linear_mesh = Mesh(nodes=nodes, elements=MeshElement(
 from HOMER import H3
 smooth_mesh = linear_mesh.rebase(H3**2)
 ```
+
+This can be a convienient way to manipulate meshes, exploiting different properties of H3 and L3 meshes.
+However, rebase is not exact, typically converging to 1e-6.
+As such, drift could occur over millions of rebase operations.
 
 See the [Basis conversion guide](rebase.md) for full details.

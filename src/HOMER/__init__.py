@@ -5,7 +5,9 @@ from HOMER.basis_definitions import (H3, L1, L3, L2, L4, B3,
 from HOMER.basis_definitions import (H3Basis, L1Basis, L3Basis, L2Basis,
                                      L4Basis, B3Basis)
 from HOMER.io import load_mesh, save_mesh
-from HOMER.jacobian_evaluator import jacobian, matrix_free_jacobian
+from HOMER.jacobian_evaluator import (jacobian, make_jac_for_mesh_func,
+                                     make_static_jac_for_mesh_func,
+                                     matrix_free_jacobian)
 from HOMER.geometry import cube
 from HOMER.mac_plotting_patch import apply_macos_fullscreen_close_patch
 
@@ -56,5 +58,6 @@ __all__ = [
     'Basis', 'BasisGroup', 'Lagrange', 'basis_by_name',
     'load_mesh', 'save_mesh',
     'jacobian', 'matrix_free_jacobian',
+    'make_jac_for_mesh_func', 'make_static_jac_for_mesh_func',
     'cube',
 ]
