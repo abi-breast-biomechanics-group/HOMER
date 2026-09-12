@@ -299,8 +299,8 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
 
     targets = self.evaluate_embeddings_ele_xi_pair(old_eles, old_xis)
 
-    w_mat = new_mesh.get_xi_weight_mat(new_eles, new_xi)
-    new_mesh.linear_fit(targets, w_mat) 
+    weights, columns = new_mesh.get_xi_weight_blocks(new_eles, new_xi)
+    new_mesh.linear_fit(targets, weights, sparse_columns=columns)
 
     #must happen while self still holds the old nodes.  Both the constraint
     #transfer and the reordering are answering the same question - which old
@@ -408,9 +408,9 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
     egrid = self.xi_grid(res=res, boundary_points=False)
     el = (np.ones((1, res**self.ndim)) * np.arange(len(self.elements))[:, None]).flatten().astype(int)
     xi = np.tile(egrid.reshape(-1, self.ndim), (len(self.elements), 1))
-    w_mat = new_mesh.get_xi_weight_mat(el, xi)
+    weights, columns = new_mesh.get_xi_weight_blocks(el, xi)
     locs = self.evaluate_embeddings_ele_xi_pair(el, xi)
-    new_mesh.linear_fit(weight_mat=w_mat, targets=locs)
+    new_mesh.linear_fit(weight_mat=weights, targets=locs, sparse_columns=columns)
 
     #rebasing keeps the element topology, so the parent element is the element.
     #The map serves the constraint transfer and the reordering alike.

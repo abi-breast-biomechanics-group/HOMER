@@ -7,8 +7,11 @@ it.  The first argument is the field itself, and :mod:`HOMER.mesh.field` binds
 them into the class.
 """
 
+import jax
 import numpy as np
-import jax.numpy as jnp 
+import jax.numpy as jnp
+import scipy.sparse as sp
+from scipy.sparse.linalg import splu
 
 
 def get_element_params(self, ele_num: int) -> np.ndarray:
@@ -110,7 +113,104 @@ def get_xi_weight_mat(self, eles, xis):
     return out_weight.at[(rows, cols)].add(data)
 
 
-def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, skip_bool=False):
+def get_xi_weight_blocks(self, eles, xis):
+    """The weight matrix of :meth:`get_xi_weight_mat`, left unscattered.
+
+    Every query point draws on exactly one element, so its row of the weight
+    matrix has the same small number of non-zeros wherever it lands -- one per
+    nodal degree of freedom of that element.  :meth:`get_xi_weight_mat`
+    scatters those into a dense ``(n_pts, n_nodes)`` array that is almost
+    entirely zero; this returns them as they are computed, alongside the
+    columns they belong in, which is all :func:`sparse_equilibrated_lstsq`
+    needs.
+
+    :param eles:
+        1-D integer array of element indices, shape ``(n_pts,)``.
+    :param xis:
+        Parametric coordinates, shape ``(n_pts, ndim)``.
+
+    :returns:
+        tuple
+            ``(weights, columns)``, both ``(n_pts, K)`` for *K* the number of
+            nodal degrees of freedom per element.  ``weights[i, k]`` belongs at
+            column ``columns[i, k]`` of row *i*; repeats within a row are
+            summed, as the dense form's scatter-add does.
+    """
+    weights = self.generate_weight_matrix(xis).T
+    columns = (jnp.atleast_2d(self.ele_map)[eles, ::self.fdim] // self.fdim).astype(int)
+    return jnp.squeeze(weights), columns
+
+
+def _splu_solve(weights, columns, n_cols, b):
+    """The numpy side of :func:`sparse_equilibrated_lstsq`."""
+    weights = np.asarray(weights, dtype=np.float64)
+    columns = np.asarray(columns)
+    b = np.atleast_2d(np.asarray(b, dtype=np.float64).T).T
+
+    n_rows, K = columns.shape
+    rows = np.repeat(np.arange(n_rows), K)
+    #coo sums duplicate (row, column) pairs, which is what the dense form's
+    #scatter-add does for a node an element refers to more than once
+    W = sp.coo_matrix((weights.reshape(-1), (rows, columns.reshape(-1))),
+                      shape=(n_rows, n_cols)).tocsc()
+
+    scale = np.sqrt(W.multiply(W).sum(axis=0)).A1
+    scale[scale == 0] = 1.0
+    W = W @ sp.diags(1.0 / scale)
+
+    normal = (W.T @ W).tocsc()
+    #the normal matrix is symmetric positive definite, so the symmetric
+    #ordering is the one that keeps the factor sparse
+    factor = splu(normal, permc_spec='MMD_AT_PLUS_A')
+    return (factor.solve(W.T @ b) / scale[:, None])
+
+
+def sparse_equilibrated_lstsq(weights, columns, n_cols, b):
+    """Least squares on a sparse weight matrix, by equilibrated normal equations.
+
+    The sparse counterpart of :func:`column_equilibrated_lstsq`, for the
+    systems built out of a mesh rather than handed in by a caller.  Those are
+    block-sparse by construction -- a query point sees one element, so its row
+    touches only that element's nodes -- and the density falls as the mesh
+    grows: a refined cube reaches 0.16% at four thousand elements, where the
+    dense form is a 2.2 GB array that is 99.84% zeros.
+
+    Columns are equilibrated exactly as in the dense solve, and for the same
+    reason it costs nothing and buys several digits.  Here it does something
+    more: forming ``W.T @ W`` squares the condition number, which would be
+    fatal at the 4.4e4 a refined tricubic Hermite mesh starts from, and merely
+    uninteresting at the 4.1e2 equilibration leaves.  The factorisation runs in
+    float64 whatever the field's precision, so the squaring costs nothing that
+    the float32 result can see.
+
+    Runs through :func:`jax.pure_callback`, so it can be called from traced
+    code.  It carries no differentiation rule: nothing differentiates through
+    a refinement, and a JVP written for a caller that does not exist is a
+    liability rather than a feature.
+
+    :param weights:
+        Non-zero weights per row, shape ``(n_pts, K)``, from
+        :meth:`get_xi_weight_blocks`.
+    :param columns:
+        Column index of each weight, shape ``(n_pts, K)``.
+    :param n_cols:
+        Number of columns of the full matrix -- the nodal degree-of-freedom
+        count.  Static, so the callback has a shape to promise.
+    :param b:
+        Targets, shape ``(n_pts,)`` or ``(n_pts, fdim)``.
+
+    :returns:
+        jax.numpy.ndarray
+            Fitted parameters, shape ``(n_cols, fdim)``.
+    """
+    fdim = 1 if jnp.ndim(b) == 1 else jnp.shape(b)[1]
+    out = jax.ShapeDtypeStruct((n_cols, fdim), jnp.asarray(b).dtype)
+    return jax.pure_callback(lambda w, c, t: _splu_solve(w, c, n_cols, t).astype(out.dtype),
+                             out, weights, columns, b)
+
+
+def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, skip_bool=False,
+               sparse_columns=None):
     """Fit nodal parameters by solving a linear least-squares problem.
 
     Solves ``weight_mat @ params ≈ targets`` via :func:`jax.numpy.linalg.lstsq`
@@ -140,6 +240,13 @@ def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, 
         assertion, solving against *weight_mat* and *targets* as given.
         For callers inside a traced region, where masking would give a
         data-dependent shape.
+    :param sparse_columns:
+        When given, *weight_mat* is the ``(n_pts, K)`` weight block from
+        :meth:`get_xi_weight_blocks` rather than a dense matrix, and this is
+        the matching column index array.  The system is then solved by
+        :func:`sparse_equilibrated_lstsq` without ever being formed dense.
+        The *target_empty* masking does not apply -- a system assembled from a
+        mesh has no empty rows to drop.
 
     **Notes**
 
@@ -148,19 +255,23 @@ def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, 
     optimisation pathway (``fitting.point_cloud_fit``) if constraints
     are required.
     """
-    if not skip_bool: #just to make jax easier
-        if targets.ndim > 1:
-            target_mask = np.any(targets != target_empty, axis=-1)
-        else:
-            target_mask = targets != target_empty
-        A = weight_mat[target_mask]
-        b = targets[target_mask]
-        assert A.shape[0] >= A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
+    if sparse_columns is not None:
+        n_cols = self.true_param_array.shape[0] // self.fdim
+        new_params = sparse_equilibrated_lstsq(weight_mat, sparse_columns, n_cols, targets)
     else:
-        A = weight_mat
-        b = targets
+        if not skip_bool: #just to make jax easier
+            if targets.ndim > 1:
+                target_mask = np.any(targets != target_empty, axis=-1)
+            else:
+                target_mask = targets != target_empty
+            A = weight_mat[target_mask]
+            b = targets[target_mask]
+            assert A.shape[0] >= A.shape[1], "Attempted to solve an undertederimined system, more datapoints are needed"
+        else:
+            A = weight_mat
+            b = targets
 
-    new_params, residual, rank, s = column_equilibrated_lstsq(A, b)
+        new_params, residual, rank, s = column_equilibrated_lstsq(A, b)
     # if not skip_bool:
     #     if rank < A.shape[1]:
     #         logging.warning("Problem matrix was rank deficient. Try fitting (i) more datapoints, or (ii) a lower order field")

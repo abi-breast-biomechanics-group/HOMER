@@ -38,6 +38,12 @@ date sits under Unreleased.
 - Docstrings are reST throughout, rendered by mkdocstrings with a griffe
   extension that turns roles into cross-references.
 - `load_exelem` renamed to `load_ipmesh`, after the format it reads.
+- `refine` and `rebase` solve their fit sparse. The weight matrix they build
+  is block-sparse by construction — a query point sees one element — and was
+  being formed dense and handed to an SVD: 2.2GB, 99.84% zeros, 49 of the 56
+  seconds a `refine(16)` took. `refine(16)` is now 2.5s, and the cost grows
+  with the mesh rather than with its cube. The sparse solve runs in float64,
+  so it is also several digits more accurate than the float32 dense one.
 - `get_xi_surface_nodes` reads a face off the basis and the element node
   ordering instead of building a weight matrix over a tiled xi query. It no
   longer allocates a dense `(25 * n_elements) x n_parameters` array, and no
