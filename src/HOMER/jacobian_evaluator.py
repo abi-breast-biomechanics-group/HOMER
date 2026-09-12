@@ -15,6 +15,11 @@ when building custom fitting problems::
 
     fitting_fn, jac_fn = jacobian(my_cost_function,
                                   init_estimate=mesh.optimisable_param_array)
+
+When the Jacobian is too large to hold -- or dense in the blocks that matter,
+so that a colouring saves nothing -- :func:`matrix_free_jacobian` gives scipy a
+``LinearOperator`` over ``jvp``/``vjp`` and a column-equilibrating scaling to
+go with it, for ``least_squares(..., tr_solver='lsmr')``.
 """
 
 from functools import partial
@@ -25,6 +30,7 @@ import jax.numpy as jnp
 import sparsejac
 import numpy as np
 import scipy
+from scipy.sparse.linalg import LinearOperator
 
 def jacobian(
     cost_function: Optional[Callable] = None, 
@@ -114,3 +120,126 @@ def estimate_sparsity(callable_fn, init_estimate) -> jax.experimental.sparse.BCO
         shape=(M, N)
     )
 
+
+
+def estimate_column_norms(vjp, n_res, probes=16, seed=0, dtype=np.float64):
+    """The column norms of a jacobian, without ever forming a column.
+
+    ``||J_j||^2 = E[(J^T z)_j^2]`` for ``z ~ N(0, I)``, so a single vjp prices
+    every column at once and a handful of probes estimates the whole scaling.
+    This is the matrix-free twin of
+    :func:`~HOMER.mesh.parameters.column_equilibrated_lstsq`, which reads the
+    same norms straight off an assembled matrix.
+
+    :param vjp:
+        ``w -> J^T w`` at the point the jacobian is wanted.
+    :param n_res:
+        Length of the residual vector, which is the length of a probe.
+    :param probes:
+        How many gaussian probes to average.  The estimate's relative error
+        falls as ``1/sqrt(probes)``, and a scaling only has to be right to
+        within a factor, so 16 is plenty.
+    :param seed:
+        Seed for the probes, so that a fit is reproducible.
+    :param dtype:
+        Dtype of the probes; must match what the residual is evaluated in.
+    :returns:
+        ``(n_par,)`` array of estimated column norms.
+    """
+    rng = np.random.default_rng(seed)
+    probe = rng.normal(size=(probes, n_res)).astype(dtype)
+    mean_square = np.mean([np.asarray(vjp(jnp.asarray(z))) ** 2 for z in probe],
+                          axis=0)
+    return np.sqrt(mean_square)
+
+
+def matrix_free_jacobian(cost_function, init_estimate, probes=16, seed=0,
+                         precondition=True):
+    """A jacobian for ``least_squares`` that is never formed, only applied.
+
+    For a residual of ~1e5 entries in ~1e4 parameters the jacobian costs
+    gigabytes to store, and a sparsity colouring does not rescue it when the
+    blocks that matter are dense -- every dof supporting a sample excites the
+    same rows, so :func:`jacobian` is the wrong tool.  This returns a
+    :class:`scipy.sparse.linalg.LinearOperator` over jax's ``jvp``/``vjp``
+    instead: nothing larger than a residual vector is ever allocated, and
+    ``least_squares(..., tr_solver='lsmr')`` -- the one scipy trust-region
+    solver that takes an operator -- solves each subproblem from
+    matrix-vector products alone.
+
+    Everything is returned in the *scaled* variable ``u``, with
+    ``params = u * scale`` and *scale* the reciprocal column norms, so that
+    every column of the operator has unit length.  That preconditioning is not
+    a refinement: a Hermite basis carries derivative dofs whose columns are
+    orders of magnitude shorter than the value dofs', and lsmr on the raw
+    operator never solves the subproblem well enough to take a Newton-sized
+    step.  SciPy's own ``x_scale='jac'`` cannot do it here -- it squares the
+    jacobian elementwise, which needs a real matrix.
+
+    *scale* is estimated once, at *init_estimate*, and held fixed for the whole
+    solve, exactly as the assembled equilibration is.
+
+    :param cost_function:
+        A JAX-compatible ``params -> residuals``, both 1-D.
+    :param init_estimate:
+        The parameters the fit starts from, and the point the column norms are
+        estimated at.
+    :param probes:
+        Gaussian probes averaged for those norms.
+    :param seed:
+        Seed for the probes.
+    :param precondition:
+        ``False`` returns the bare operator and a *scale* of ones.  Useful for
+        pricing what the scaling buys, not for fitting.
+    :returns:
+        fitting_function : Callable
+            ``u -> residuals`` as numpy, for ``least_squares``.
+        jacobian_operator : Callable
+            ``u -> LinearOperator``, for its ``jac``.
+        scale : np.ndarray
+            ``(n_par,)``.  Divide the starting parameters by it, multiply the
+            answer back.
+
+    **Examples**
+
+    ::
+
+        fwd, jac, scale = matrix_free_jacobian(cost, p_start)
+        result = least_squares(fwd, p_start / scale, jac=jac, tr_solver='lsmr')
+        params = result.x * scale
+    """
+    init = jnp.asarray(init_estimate)
+    start_residual = jax.jit(cost_function)(init)
+    n_res, n_par = start_residual.shape[0], init.shape[0]
+    dtype = np.dtype(start_residual.dtype)
+
+    jvp = jax.jit(lambda p, v: jax.jvp(cost_function, (p,), (v,))[1])
+    vjp = jax.jit(lambda p, w: jax.vjp(cost_function, p)[1](w)[0])
+
+    if precondition:
+        norms = estimate_column_norms(partial(vjp, init), n_res, probes, seed, dtype)
+        #a dead column would come back as 1/0: leave it at unit scale instead
+        scale = 1.0 / np.where(norms > 0, norms, 1.0)
+    else:
+        scale = np.ones(n_par)
+    scale = scale.astype(dtype)
+    scale_j = jnp.asarray(scale)
+
+    scaled_cost = jax.jit(lambda u: cost_function(u * scale_j))
+
+    def as_vector(v):
+        #scipy probes the operator with an int8 vector and hands lsmr (n, 1)
+        #columns; jax rejects both, so normalise on the way in
+        return jnp.asarray(np.asarray(v, dtype=dtype).ravel())
+
+    def fitting_function(params):
+        return np.asarray(scaled_cost(as_vector(params)))
+
+    def jacobian_operator(params):
+        p = as_vector(params) * scale_j
+        return LinearOperator(
+            (n_res, n_par), dtype=dtype,
+            matvec=lambda v: np.asarray(jvp(p, as_vector(v) * scale_j)),
+            rmatvec=lambda w: np.asarray(vjp(p, as_vector(w)) * scale_j))
+
+    return fitting_function, jacobian_operator, scale

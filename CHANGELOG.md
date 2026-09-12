@@ -14,6 +14,10 @@ date sits under Unreleased.
 - `dim_mask` on `embed_points`, for embedding against a subset of field
   dimensions.
 - Colouring utilities for sparse Jacobian evaluation.
+- `matrix_free_jacobian`, for fits whose Jacobian is too large to form or
+  too dense for a colouring: a `LinearOperator` over `jvp`/`vjp`, with the
+  column equilibration `least_squares(tr_solver='lsmr')` needs and cannot
+  compute for itself.
 - Fixed parameters are preserved through serialisation, refinement and
   rebasing.
 - Reference pages for `embedding`, `utils`, the compatibility readers and the

@@ -2,7 +2,7 @@ from HOMER.mesh import Mesh, MeshElement, MeshNode, MeshField, reorder_nodes
 from HOMER.basis_definitions import (H3Basis, L1Basis, L3Basis, L2Basis, L4Basis, B3Basis,
                                      Basis, BasisGroup, Lagrange, basis_by_name)
 from HOMER.io import load_mesh, save_mesh
-from HOMER.jacobian_evaluator import jacobian
+from HOMER.jacobian_evaluator import jacobian, matrix_free_jacobian
 from HOMER.geometry import cube
 from HOMER.mac_plotting_patch import apply_macos_fullscreen_close_patch
 

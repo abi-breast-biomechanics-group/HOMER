@@ -107,6 +107,54 @@ fitting_fn, jac_fn = point_cloud_fit(mesh, pts, normals=normal_vectors)
 
 ---
 
+## Fits Too Large to Hold a Jacobian
+
+`point_cloud_fit` and `jacobian` both build the Jacobian as a matrix, with a
+sparsity colouring to keep it affordable. That stops working on two kinds of
+problem: one where the matrix itself is too big (a residual of ~1e5 entries in
+~1e4 parameters costs gigabytes), and one where the blocks that matter are
+dense, so the colouring saves nothing — every dof supporting a sample excites
+the same rows, which is what a field fitted over embedded points looks like.
+
+`matrix_free_jacobian` hands SciPy a `LinearOperator` over JAX's `jvp`/`vjp`
+instead. Nothing larger than a residual vector is ever allocated, and
+`tr_solver='lsmr'` — the one SciPy trust-region solver that accepts an
+operator — solves each subproblem from matrix-vector products alone.
+
+```python
+from HOMER import matrix_free_jacobian
+from scipy.optimize import least_squares
+
+def cost(params):
+    D = W @ params.reshape(n_dof, 6)      # a field evaluated at the samples
+    return jnp.ravel(render(D) - observed)
+
+fwd, jac, scale = matrix_free_jacobian(cost, p_start)
+
+result = least_squares(fwd, p_start / scale, jac=jac, tr_solver='lsmr',
+                       tr_options=dict(maxiter=50))
+params = result.x * scale
+```
+
+The `scale` is the point of the divide-and-multiply. It holds the reciprocal
+column norms of the Jacobian, estimated at `p_start` with a handful of random
+probes (`||J_j||^2 = E[(J^T z)_j^2]`, so one `vjp` prices every column at
+once), and the returned operator has that scaling folded in — the same
+equilibration `column_equilibrated_lstsq` applies to an assembled matrix, on a
+matrix you never assemble.
+
+!!! warning "The scaling is not optional"
+    A Hermite basis carries derivative dofs whose columns are orders of
+    magnitude shorter than the value dofs'. On the raw operator lsmr never
+    solves the trust-region subproblem well enough to take a Newton-sized step,
+    and the fit stalls. SciPy's own `x_scale='jac'` cannot stand in for it:
+    that squares the Jacobian elementwise, so it needs a real matrix.
+
+Pass `precondition=False` to see what the scaling buys — a `scale` of ones and
+the bare operator.
+
+---
+
 ## Fixing Parameters During Optimisation
 
 `MeshNode.fix_parameter()` excludes specific degrees of freedom from

@@ -17,7 +17,8 @@ from scipy.spatial import cKDTree
 from HOMER.basis_definitions import B3Basis, H3Basis, L1Basis, L2Basis, L3Basis
 from HOMER.fitting import point_cloud_fit
 from HOMER.geometry import basic_surface, cube
-from HOMER.jacobian_evaluator import estimate_sparsity, jacobian
+from HOMER.jacobian_evaluator import (estimate_column_norms, estimate_sparsity,
+                                      jacobian, matrix_free_jacobian)
 from HOMER.mesh import column_equilibrated_lstsq
 
 from _helpers import CLOSE, EXACT, arr, bulged_patch, unit_hex
@@ -424,3 +425,144 @@ def test_mesh_residual_jacobian_is_block_sparse():
     assert matrix.shape == (points.size, len(mesh.optimisable_param_array))
     density = np.count_nonzero(matrix) / matrix.size
     assert density < 0.5
+
+
+############################################### the matrix-free jacobian
+
+def hermite_weights(refine=2, basis=H3Basis):
+    """A weight matrix whose column norms span orders of magnitude.
+
+    The derivative dofs of a Hermite basis carry weights an order of magnitude
+    below the value dofs', cubed over three directions -- which is the whole
+    reason the matrix-free operator has to be preconditioned.
+    """
+    mesh = unit_hex(basis=[basis] * 3)
+    mesh.refine(refine)
+    grid = mesh.xi_grid(basis.order + 2)
+    eles = np.repeat(np.arange(len(mesh.elements)), len(grid))
+    return np.asarray(mesh.get_xi_weight_mat(eles, np.tile(grid, (len(mesh.elements), 1))))
+
+
+def representable_system(refine=2):
+    """``cost(p) = W p - W p_true``: a target the basis reaches exactly.
+
+    The reachable *residual* is zero by construction, which is what the fit is
+    scored on here.  The parameters are not: ``W`` is one column short of full
+    rank, so a null-space direction is free and ``p_true`` itself is only one
+    of the answers.
+    """
+    weights = hermite_weights(refine)
+    weights_j = jnp.asarray(weights)
+    p_true = jnp.asarray(np.random.default_rng(0).random(weights.shape[1]), jnp.float32)
+    target = weights_j @ p_true
+
+    def cost(params):
+        return weights_j @ params - target
+
+    return cost, weights, np.asarray(p_true)
+
+
+def test_the_operator_applies_the_dense_jacobian():
+    """matvec and rmatvec against ``jax.jacfwd``: the independent code path."""
+    import jax
+
+    rng = np.random.default_rng(1)
+    start = np.array([1.0, 2.0, 3.0, 4.0], np.float32)
+    reference = np.asarray(jax.jacfwd(simple_cost)(start))
+
+    _, jac_operator, scale = matrix_free_jacobian(simple_cost, start, precondition=False)
+    operator = jac_operator(start)
+
+    np.testing.assert_allclose(scale, np.ones(4), atol=EXACT)
+    v, w = rng.random(4).astype(np.float32), rng.random(3).astype(np.float32)
+    np.testing.assert_allclose(operator.matvec(v), reference @ v, atol=1e-5)
+    np.testing.assert_allclose(operator.rmatvec(w), reference.T @ w, atol=1e-5)
+
+
+def test_the_scaled_operator_stays_its_own_adjoint():
+    """``<Jv, w> == <v, J^T w>`` -- a scaling applied to one side alone is
+    otherwise silent, and lsmr would simply converge to the wrong step."""
+    rng = np.random.default_rng(2)
+    cost, weights, p_true = representable_system(refine=1)
+    n_res, n_par = weights.shape
+
+    _, jac_operator, scale = matrix_free_jacobian(cost, np.zeros(n_par, np.float32))
+    operator = jac_operator(p_true / scale)
+
+    v = rng.standard_normal(n_par).astype(np.float32)
+    w = rng.standard_normal(n_res).astype(np.float32)
+
+    np.testing.assert_allclose(operator.matvec(v) @ w, v @ operator.rmatvec(w),
+                               rtol=1e-4)
+
+
+def test_probes_price_the_columns_they_cannot_form():
+    """The estimator against the norms of the assembled matrix it replaces."""
+    cost, weights, _ = representable_system(refine=1)
+    n_res, n_par = weights.shape
+    vjp = lambda w: jnp.asarray(weights.T) @ w
+
+    estimated = estimate_column_norms(vjp, n_res, probes=256, dtype=np.float32)
+
+    true_norms = np.linalg.norm(weights, axis=0)
+    np.testing.assert_allclose(estimated / true_norms, 1.0, rtol=0.25)
+
+
+def test_the_scaling_flattens_the_column_norms():
+    """What the preconditioner is for: unit columns out of a Hermite basis."""
+    cost, weights, _ = representable_system(refine=1)
+    true_norms = np.linalg.norm(weights, axis=0)
+
+    _, _, scale = matrix_free_jacobian(cost, np.zeros(weights.shape[1], np.float32),
+                                       probes=256)
+
+    assert true_norms.max() / true_norms.min() > 100
+    np.testing.assert_allclose(true_norms * scale, 1.0, rtol=0.25)
+
+
+def test_a_dead_column_keeps_unit_scale():
+    """A parameter no residual touches must not be scaled by 1/0."""
+    def cost(params):
+        return jnp.stack([params[0], params[2] * 2.0])
+
+    _, jac_operator, scale = matrix_free_jacobian(cost, np.zeros(3, np.float32))
+
+    assert np.isfinite(scale).all()
+    assert scale[1] == 1.0
+
+
+def test_lsmr_cannot_solve_the_subproblem_unpreconditioned():
+    """The end-to-end claim, on a target the basis reaches exactly.
+
+    Both solves get the same budget -- the same residual evaluations, the same
+    lsmr iterations per trust-region subproblem.  Preconditioned, that budget
+    drives the residual to the float32 floor; on the raw operator the
+    subproblem is never solved well enough to take a Newton-sized step, and the
+    fit is still three orders of magnitude short when the budget runs out.
+    """
+    cost, weights, _ = representable_system()
+    start = np.zeros(weights.shape[1], np.float32)
+    budget = dict(max_nfev=20, tr_solver='lsmr', tr_options=dict(maxiter=10))
+
+    def remaining_cost(precondition):
+        fwd, jac, scale = matrix_free_jacobian(cost, start, precondition=precondition)
+        return least_squares(fwd, start / scale, jac=jac, **budget).cost
+
+    preconditioned = remaining_cost(precondition=True)
+
+    assert preconditioned < 1e-4
+    assert remaining_cost(precondition=False) > 100 * preconditioned
+
+
+def test_the_operator_takes_what_scipy_hands_it():
+    """``least_squares`` probes the operator with an int8 vector, and lsmr
+    passes ``(n, 1)`` columns.  JAX rejects both, so the operator normalises."""
+    start = np.array([1.0, 2.0, 3.0, 4.0], np.float32)
+
+    _, jac_operator, _ = matrix_free_jacobian(simple_cost, start)
+    operator = jac_operator(start)
+
+    assert operator.dtype == np.float32
+    assert operator.matvec(np.ones(4, np.int8)).shape == (3,)
+    assert operator.matvec(np.ones((4, 1))).shape == (3, 1)     #scipy re-columns it
+    assert operator.rmatvec(np.ones((3, 1))).shape == (4, 1)

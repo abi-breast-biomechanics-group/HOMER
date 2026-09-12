@@ -73,3 +73,10 @@ def test_the_mesher_shim_still_re_exports_everything(name):
 @pytest.mark.parametrize("name", ['Mesh', 'MeshElement', 'MeshNode', 'MeshField'])
 def test_the_top_level_package_exports_the_classes(name):
     assert getattr(HOMER, name) is getattr(mesh_pkg, name)
+
+
+@pytest.mark.parametrize("name", ['jacobian', 'matrix_free_jacobian'])
+def test_the_top_level_package_exports_both_jacobian_pathways(name):
+    """The assembled one and the operator; a fit reaches for one or the other."""
+    from HOMER import jacobian_evaluator
+    assert getattr(HOMER, name) is getattr(jacobian_evaluator, name)
