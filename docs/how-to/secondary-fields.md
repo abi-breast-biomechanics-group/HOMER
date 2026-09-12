@@ -36,6 +36,12 @@ Secondary fields:
 3. **Solve the linear system** – call `linear_fit(targets, W)` to compute
    the optimal nodal parameters.
 
+!!! warning "Fixed parameters are not respected"
+    `linear_fit` solves for every parameter, including any fixed with
+    `MeshNode.fix_parameter()`, so constraints on a secondary field's nodes
+    are overwritten by the fit.  See
+    [Mesh fitting](fitting.md#linear-fitting).
+
 ---
 
 ## Creating a Secondary Field
@@ -59,7 +65,7 @@ created but the nodal parameters are left at zero.
 
 ## Worked Example – Normal Vector + Scalar Height Fields
 
-This example reproduces the workflow from `tests/create_mesh_field.py`.
+The same workflow is exercised by `tests/test_fields.py`.
 
 ```python
 import math
@@ -73,11 +79,7 @@ nodes = [MeshNode(loc=[x, y, z])
 element = MeshElement(node_indexes=list(range(8)),
                       basis_functions=(L1Basis, L1Basis, L1Basis))
 mesh = Mesh(nodes=nodes, elements=element)
-mesh = Mesh(nodes=mesh.rebase([H3Basis]*3).nodes,
-            elements=mesh.rebase([H3Basis]*3).elements)
-
-# Alternatively, a one-liner rebase:
-mesh.rebase([H3Basis]*3)   # returns a MeshField; use Mesh(...) to re-wrap
+mesh.rebase([H3Basis]*3, in_place=True)
 
 # ── 2. Generate sample data ─────────────────────────────────────────────────
 def fibonacci_sphere(n, radius=0.5, centre=(0., 0., 0.)):
@@ -158,7 +160,7 @@ values = fibre_field.evaluate_embeddings(elem_ids, xis)  # (3, 3)
 # Or across the whole mesh at once
 all_values = fibre_field.evaluate_embeddings_in_every_element(
     mesh.xi_grid(5)
-)  # (n_elements * 125, 3):wa
+)  # (n_elements * 125, 3)
 
 ```
 
@@ -192,5 +194,3 @@ mesh.plot(field_to_draw='vec_dir', field_artist=arrow_artist)
 - Ensure you have **more sample points than nodal degrees of freedom**.  If
   `linear_fit` raises an assertion error, add more sample points or reduce
   the basis order.
-- After fitting, check the residual printed by `linear_fit` to assess fit
-  quality.  The residual is the total squared-norm of the fitting error.

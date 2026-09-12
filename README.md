@@ -42,6 +42,10 @@ Fix that mesh parameter - constrain a node to lie on a plane - express another a
 | `L2Basis` | Quadratic Lagrange | 3 | C⁰ | – |
 | `L3Basis` | Cubic Lagrange | 4 | C⁰ | – |
 | `L4Basis` | Quartic Lagrange | 5 | C⁰ | – |
+| `B3Basis` | Cubic B-spline | 4 control points | C² | – |
+
+`B3Basis` is not interpolatory: its nodal parameters are control points shared
+with the neighbouring elements, so they do not sit on the curve.
 
 ---
 

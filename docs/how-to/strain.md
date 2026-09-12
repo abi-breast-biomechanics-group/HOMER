@@ -13,7 +13,10 @@ gradient at parametric location ξ is:
 
 **F**(ξ) = **J**_X(ξ)⁻¹ · **J**_x(ξ)
 
-where **J**(ξ) = ∂position/∂ξ is the Jacobian matrix.
+where **J**(ξ) = ∂position/∂ξ is the Jacobian matrix returned by
+`evaluate_jacobians`, which stores the *parametric* directions as rows.  Under
+the transposed convention used by most continuum-mechanics texts the same
+deformation gradient is written **F** = **J**_x **J**_X⁻¹.
 
 The Green-Lagrange strain tensor is then:
 

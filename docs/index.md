@@ -1,4 +1,4 @@
-# HOMER – High Order Mesh Embeddings and Refinement
+# HOMER – High Order Mesh Representations
 
 HOMER is a Python library for constructing, fitting, evaluating, and visualising
 **high-order finite-element meshes** using JAX for fast, differentiable
@@ -49,22 +49,72 @@ mesh.plot()
 
 ### Installation
 
-Currently, installation requires cloning this repository:
+A conda environment is recommended:
+
+```bash
+conda create --name HOMER python=3.13
+conda activate HOMER
+```
+
+Install directly from the repository:
+
+```bash
+pip install git+https://github.com/abi-breast-biomechanics-group/HOMER.git
+```
+
+Or clone first for an editable install:
+
 ```bash
 git clone https://github.com/abi-breast-biomechanics-group/HOMER
 cd HOMER
-```
-
-then install via pip (preferably within a conda env)
-```bash
 pip install -e .
 ```
 
-For the optional documentation extras:
+For the test and documentation extras:
 
 ```bash
-pip install -e ".[docs]"
+pip install -e ".[dev]"    # pytest
+pip install -e ".[docs]"   # mkdocs, mkdocstrings
 ```
+
+### Troubleshooting
+
+**JAX installs but runs on the CPU.** `pip install jax` gives you the CPU
+build. For GPU or TPU you need the matching accelerator wheel from the
+[JAX install guide](https://docs.jax.dev/en/latest/installation.html);
+HOMER does not pin one, because the right wheel depends on your CUDA version.
+Check what you got with:
+
+```python
+import jax; print(jax.devices())
+```
+
+**PyVista cannot open a window.** Over SSH, in a container, or in CI there is
+no display to open. Switch to off-screen rendering *before* PyVista is
+imported:
+
+```python
+import os
+os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
+
+import matplotlib
+matplotlib.use("Agg")
+
+import pyvista as pv
+pv.OFF_SCREEN = True
+```
+
+`tests/conftest.py` does exactly this, which is why the suite runs headless.
+See the [plotting guide](how-to/plotting.md#rendering-without-a-display).
+
+**The first evaluation is slow.** That is XLA compiling. HOMER sets a
+persistent compilation cache under `/tmp/jax_cache` at import, so the cost is
+paid once per mesh shape per machine rather than once per process.
+
+**Numerical results differ slightly between runs or machines.** HOMER
+evaluates in float32. Quantities reached by least squares or Newton-Raphson
+agree to about `1e-3`, exact-arithmetic quantities to about `1e-5`; the test
+suite uses those two tolerances throughout.
 
 ### Key Concepts
 
@@ -79,13 +129,17 @@ pip install -e ".[docs]"
 
 ### Supported Basis Functions
 
-| Class | Type | Nodes/dir | C⁰ | Node fields |
+| Class | Type | Nodes/dir | Continuity | Node fields |
 |---|---|---|---|---|
 | `H3Basis` | Cubic Hermite | 2 | C¹ | `du`, `dv`, … |
 | `L1Basis` | Linear Lagrange | 2 | C⁰ | – |
 | `L2Basis` | Quadratic Lagrange | 3 | C⁰ | – |
 | `L3Basis` | Cubic Lagrange | 4 | C⁰ | – |
 | `L4Basis` | Quartic Lagrange | 5 | C⁰ | – |
+| `B3Basis` | Cubic B-spline | 4 control points | C² | – |
+
+`B3Basis` is not interpolatory: its parameters are control points shared with
+the neighbouring elements, so they do not lie on the curve.
 
 ---
 

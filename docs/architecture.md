@@ -44,7 +44,12 @@ HOMER/mesh/
     refinement.py    refine and rebase, and the fixed-parameter transfer
     plotting.py      drawing; the only module that touches PyVista
     element_eval.py  per-element evaluation kernels and quadrature rules
+    reordering.py    node renumbering, after an operation rebuilds the list
 ```
+
+`reordering.py` is the exception to the binding above: renumbering is done
+*to* a field rather than *by* one, so `reorder_nodes` stays a plain function
+and is called as `reorder_nodes(mesh)`.
 
 Binding rather than inheriting is deliberate: `@expand_wide_evals` reads
 `vars(cls)`, so a method reached through a base class would be invisible to it
@@ -183,8 +188,12 @@ All evaluation functions are JAX-compatible.  The key integration points are:
 
 - `evaluate_embeddings`, `evaluate_deriv_embeddings`, `evaluate_jacobians`
   are JIT-compiled via `jax.jit` when `jax_compile=True`.
-- `_xis_to_points` uses `jax.lax.fori_loop` and `jax.vmap` for
-  batch-parallel point embedding.
+- `HOMER.embedding.build_embedding_fn` builds the point-embedding closures
+  once per `generate_mesh()` — a coarse nearest-neighbour search, a vmapped
+  Newton-Raphson solver, and `mesh_embed_points` with a custom JVP that
+  reuses the converged Jacobian.  Building them once removes the XLA
+  retracing a per-call definition caused, and the iteration count is passed
+  as a traced value so changing `iterations` does not retrace either.
 - `topomap` is a `@jax.jit`-compiled function for cross-element boundary
   mapping.
 - `jacobian_evaluator.jacobian` uses `sparsejac` (forward-mode AD with

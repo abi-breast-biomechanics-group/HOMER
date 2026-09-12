@@ -102,5 +102,11 @@ is unaffected either way.
 
 ## Notes
 
-- `rebase()` always returns a **new** `MeshField` object.  The original mesh
-  is not modified.
+- `rebase()` returns a new `MeshField` and leaves the original untouched.
+- Pass `in_place=True` to rebase the mesh itself: it replaces the mesh's nodes
+  and elements, regenerates it, and returns the same object.
+
+```python
+new = mesh.rebase([H3Basis]*3)                   # mesh is unchanged
+same = mesh.rebase([H3Basis]*3, in_place=True)   # same is mesh
+```

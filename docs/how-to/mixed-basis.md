@@ -12,21 +12,24 @@ of freedom) in others.
 A quadratic-Lagrange surface mesh requires 3 × 3 = 9 nodes per element.
 No derivative fields are needed on the nodes.
 
+Nodes are listed with `xi_u` varying fastest, then `xi_v` — the ordering
+described under [Node indexing](node-indexing.md#node-ordering-within-an-element).
+
 ```python
 import numpy as np
 from HOMER import Mesh, MeshNode, MeshElement, L2Basis
 
-# 9-node quadratic patch (xi=0,0.5,1 in each direction)
+# 9-node quadratic patch, xi_u and xi_v each at 0, 0.5, 1
 nodes = [
-    MeshNode(loc=[0, 0, 1]),   # (0,0)
-    MeshNode(loc=[0, 0, 0.5]), # (0,0.5)
-    MeshNode(loc=[0, 0, 0]),   # (0,1)
-    MeshNode(loc=[0, 0.5, 1]), # (0.5,0)
-    MeshNode(loc=[0.5, 0.5, 0.5]), # middle
-    MeshNode(loc=[0, 0.5, 0]), # (0.5,1)
-    MeshNode(loc=[0, 1, 1]),   # (1,0)
-    MeshNode(loc=[0, 1, 0.5]), # (1,0.5)
-    MeshNode(loc=[0, 1, 0]),   # (1,1)
+    MeshNode(loc=[0.0, 0.0, 0.0]),   # (u, v) = (0,   0)
+    MeshNode(loc=[0.5, 0.0, 0.0]),   #          (0.5, 0)
+    MeshNode(loc=[1.0, 0.0, 0.0]),   #          (1,   0)
+    MeshNode(loc=[0.0, 0.5, 0.0]),   #          (0,   0.5)
+    MeshNode(loc=[0.5, 0.5, 0.3]),   #          (0.5, 0.5)  raised centre
+    MeshNode(loc=[1.0, 0.5, 0.0]),   #          (1,   0.5)
+    MeshNode(loc=[0.0, 1.0, 0.0]),   #          (0,   1)
+    MeshNode(loc=[0.5, 1.0, 0.0]),   #          (0.5, 1)
+    MeshNode(loc=[1.0, 1.0, 0.0]),   #          (1,   1)
 ]
 
 element = MeshElement(
