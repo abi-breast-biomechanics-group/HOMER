@@ -46,8 +46,13 @@ date sits under Unreleased.
 - JAX's persistent compilation cache now defaults to the platform's per-user
   cache directory instead of a shared `/tmp/jax_cache`, and only when the user
   has not chosen one themselves — `JAX_COMPILATION_CACHE_DIR` is no longer
-  overridden on import. The size and compile-time thresholds are left at JAX's
-  defaults, which is what stops the cache growing without bound.
+  overridden on import. The size threshold is left at JAX's default, which is
+  what stops the cache growing without bound.
+- The cache's compile-time floor is lowered to 0.01s, again only when
+  `JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS` says nothing. JAX's default of
+  one second is tuned for a handful of large kernels; HOMER compiles many small
+  ones, none of which reached the floor, so the cache stayed empty. The full
+  test suite goes from 264s to 166s with it, and the cache converges at ~28MB.
 
 ### Removed
 - `compat_functions/dep_mesh.py`, which had never parsed.

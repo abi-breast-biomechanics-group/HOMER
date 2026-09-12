@@ -25,11 +25,20 @@ import jax
 # /tmp: on a multi-user machine everyone would otherwise write to one place,
 # and Windows has no /tmp at all.
 #
-# The size and compile-time thresholds are left at JAX's own defaults.  They
-# exist so that compilations too cheap to be worth storing are not stored,
-# which is what keeps the cache from growing without bound.
+# The size threshold is left at JAX's own default, which is what keeps the
+# cache from growing without bound.
 if ("JAX_COMPILATION_CACHE_DIR" not in os.environ
         and jax.config.jax_compilation_cache_dir is None):
     from platformdirs import user_cache_dir
 
     jax.config.update("jax_compilation_cache_dir", user_cache_dir("HOMER"))
+
+# JAX stores a compilation only when it took longer than this, so that work too
+# cheap to be worth a disk round trip is not written out.  Its default of one
+# second is tuned for programs that compile a handful of large kernels; HOMER
+# compiles many small ones, and a mesh that takes seconds to build does it in
+# hundreds of compiles that each fall under the floor, so nothing is ever
+# stored and the cache stays empty.  Lowering the floor is what makes it work
+# at all.  As a default only, like the directory above.
+if "JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS" not in os.environ:
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.01)
