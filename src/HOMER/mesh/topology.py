@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import networkx as nx
 
 from HOMER.utils import build_full_lookup 
+from HOMER.mesh.reordering import _element_node_lists
 
 
 def associated_node_index(self, index_list:list, nodes_to_gather: Optional[list] = None, node_by_id = False):
@@ -251,9 +252,18 @@ def _explore_topology(self, rounding_res=5):
 
 def get_xi_surface_nodes(self, xi_dim, bound_val):
     """
-    Given a xi dim, and the boundary value, uses the known mesh topology to find all elements 
-    which have no neighbouring elements at that boundary.
-    Then uses the xi_weight mat to find the relative weightings of values in the mesh.
+    Given a xi dim and the boundary value, uses the known mesh topology to find all
+    elements which have no neighbouring element at that boundary, and the nodes whose
+    basis functions have support on the face those elements expose.
+
+    The bases are a tensor product, so a local node contributes to the
+    ``xi_dim = bound_val`` face exactly when its own 1-D basis function is non-zero
+    there - the other directions sweep the whole face and drop out.  The face is
+    therefore a property of one 1-D basis and the element's node ordering, and needs
+    no mesh evaluation.  For an interpolatory basis this is the single layer of nodes
+    sitting on the face; for a control-net basis such as
+    :data:`~HOMER.basis_definitions.B3Basis` it is every layer with support there,
+    which is the set that actually controls the surface.
 
     :param xi_dim:
         Parametric direction whose boundary to look at, 0-based.
@@ -261,70 +271,27 @@ def get_xi_surface_nodes(self, xi_dim, bound_val):
         Which end of that direction: ``0`` for xi = 0, ``1`` for xi = 1.
 
     :returns:
-        ``(valid_elements, valid_nodes)`` -- the elements with no neighbour on
-        that boundary, and a boolean mask over the parameter vector selecting
-        the parameters those elements' surface nodes contribute to.
+        ``(valid_elements, valid_nodes)`` -- the indices of the elements with no
+        neighbour on that boundary, and the indices of the nodes their bases give
+        support on it.
     """
-    if self.ndim == 2:
-        # find the elements
-        valid_elements = np.where(self._topo_lookup[:, xi_dim, bound_val] == -1)[0]
-
-        # find the nodes along the 1D edge
-        xiq_grid = (np.arange(5) / 4.0).reshape(-1, 1)
-        xiq_pt = np.ones(5) * bound_val
-        xi_query = np.insert(xiq_grid, xi_dim, xiq_pt, axis=1)
-        xi_query = np.tile(xi_query, (len(valid_elements), 1))
-        eles_to_q = np.repeat(valid_elements, 5)
-        mat = self.get_xi_weight_mat(eles_to_q, xi_query) 
-        pams = np.repeat(np.any(mat > 0, axis=0), 3)
-
-        valid_nodes = []
-        for idn, node in enumerate(self.nodes):
-            append = False 
-            sval, pams = pams[:self.fdim], pams[self.fdim:]
-            if np.any(sval):
-                append = True
-            for key, value in node.items():
-                l_val = value.flatten().shape[0]
-                sval, pams = pams[:l_val], pams[l_val:] 
-                if np.any(sval):
-                    append = True
-            if append:
-                valid_nodes.append(idn)
-
-        return valid_elements, valid_nodes
-        raise ValueError("everything on a 2d mesh is a surface, but requested to find surface elements")
-
-    #find the elements
     valid_elements = np.where(self._topo_lookup[:, xi_dim, bound_val] == -1)[0]
 
+    bases = self.elements[0].basis_functions
+    basis = bases[xi_dim]
+    #the weights of a direction are grouped by node, so a Hermite node's value and
+    #derivative weights collapse back onto the one node
+    supported = np.asarray(basis.fn(jnp.array([float(bound_val)]))).ravel() != 0
+    supported = supported.reshape(len(basis.node_locs), -1).any(axis=1)
 
-    #find the nodes
-    xiq_grid = np.mgrid[:5,:5]
-    xiq_grid = np.column_stack((xiq_grid[0].flatten(), xiq_grid[1].flatten()))/4
-    xiq_pt = np.ones((5**2)) * bound_val
-    xi_query = np.insert(xiq_grid, xi_dim, xiq_pt, axis=1)
-    xi_query = np.tile(xi_query, (len(valid_elements), 1))
+    #local nodes are the Fortran-ordered lattice of the 1-D bases, direction 0 fastest
+    nodes_per_dim = [len(b.node_locs) for b in bases]
+    stride = int(np.prod(nodes_per_dim[:xi_dim]))
+    local = np.arange(int(np.prod(nodes_per_dim)))
+    on_face = np.where(supported[(local // stride) % nodes_per_dim[xi_dim]])[0]
 
-    eles_to_q= np.repeat(valid_elements, 5**2)
-    mat = self.get_xi_weight_mat(eles_to_q, xi_query) #this should be 1/3rd of the params
-    pams = np.repeat(np.any(mat > 0, axis=0), 3)
-
-    valid_nodes = []
-    for idn, node in enumerate(self.nodes):
-        append = False 
-        sval, pams = pams[:self.fdim], pams[self.fdim:]
-        if np.any(sval):
-            append = True
-        for key, value in node.items():
-            l_val = value.flatten().shape[0]
-            sval, pams = pams[:l_val], pams[l_val:] 
-            if np.any(sval):
-                append = True
-        if append:
-            valid_nodes.append(idn)
-
-    return valid_elements, valid_nodes
+    ele_nodes = _element_node_lists(self)
+    return valid_elements, np.unique(ele_nodes[np.ix_(valid_elements, on_face)])
 
 
 def get_faces(self, rounding_res = 5) -> list[tuple[int]]:

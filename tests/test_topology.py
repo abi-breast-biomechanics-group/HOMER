@@ -9,7 +9,7 @@ the neighbour reaches at the mapped coordinate.
 import numpy as np
 import pytest
 
-from HOMER.basis_definitions import L1Basis, L2Basis
+from HOMER.basis_definitions import B3Basis, H3Basis, L1Basis, L2Basis
 from HOMER.geometry import basic_surface, basic_surfaceMN, cube, cubeMNO
 from HOMER.topomap_operations import refine_connectivity
 
@@ -95,6 +95,67 @@ def test_get_xi_surface_nodes_selects_one_face_of_the_mesh(block):
     assert len(elements) == 4                #the four elements touching that face
     locs = np.array([block.nodes[n].loc for n in nodes], dtype=float)
     np.testing.assert_allclose(locs[:, 2], 0.5, atol=EXACT)
+
+
+def test_hermite_surface_nodes_leave_the_far_node_behind():
+    """A Hermite node carries derivative weights as well as a value weight, and
+    all of them vanish at the far end of the direction - so the node at xi = 0
+    is no more a part of the xi = 1 face than it is for a Lagrange basis."""
+    mesh = cube(scale=1, centre=np.zeros(3), basis=[H3Basis] * 3)
+    mesh.refine(2)
+
+    elements, nodes = mesh.get_xi_surface_nodes(2, 1)
+
+    assert len(elements) == 4
+    locs = np.array([mesh.nodes[n].loc for n in nodes], dtype=float)
+    np.testing.assert_allclose(locs[:, 2], 0.5, atol=EXACT)
+
+
+def test_control_net_surface_spans_every_layer_with_support():
+    """A B-spline face is shaped by three layers of control points.
+
+    ``B3(0) = [1/6, 4/6, 1/6, 0]``, so three of an element's four control
+    layers have support on the xi = 0 face.  Picking the nodes out by their
+    position in the element node list alone would return only the nearest
+    layer, which does not determine the surface.
+    """
+    mesh = cube(scale=1, centre=np.zeros(3), basis=[L1Basis] * 3)
+    mesh.refine(2)
+    mesh = mesh.rebase([B3Basis] * 3)
+
+    elements, nodes = mesh.get_xi_surface_nodes(2, 0)
+
+    assert len(elements) == 4
+    assert len(nodes) == 3 * 25            #three of the five 5x5 control layers
+
+
+@pytest.mark.parametrize('basis', [[H3Basis] * 3, [B3Basis] * 3], ids=['H3', 'B3'])
+def test_surface_nodes_are_the_nodes_that_move_the_surface(basis):
+    """The contract, stated as geometry rather than as topology.
+
+    Shifting a node the call returns has to be able to move the face; shifting
+    any other node must leave it exactly where it was.
+    """
+    mesh = cube(scale=1, centre=np.zeros(3), basis=[L1Basis] * 3)
+    mesh.refine(2)
+    mesh = mesh.rebase(basis)
+
+    elements, nodes = mesh.get_xi_surface_nodes(2, 0)
+    grid = np.linspace(0, 1, 4)
+    xi = np.insert(np.stack(np.meshgrid(grid, grid, indexing='ij'), -1).reshape(-1, 2), 2, 0, axis=1)
+    face = lambda: arr(mesh.evaluate_embeddings(elements, xi))
+
+    before = face()
+    moves_the_face = set()
+    for n in range(len(mesh.nodes)):
+        mesh.nodes[n].loc = mesh.nodes[n].loc + np.array([0., 0., 1.])
+        mesh.generate_mesh()
+        if np.abs(face() - before).max() > 0:
+            moves_the_face.add(n)
+        mesh.nodes[n].loc = mesh.nodes[n].loc - np.array([0., 0., 1.])
+        mesh.generate_mesh()
+
+    assert set(int(n) for n in nodes) == moves_the_face
 
 
 ############################################### connectivity refinement

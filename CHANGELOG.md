@@ -38,6 +38,11 @@ date sits under Unreleased.
 - Docstrings are reST throughout, rendered by mkdocstrings with a griffe
   extension that turns roles into cross-references.
 - `load_exelem` renamed to `load_ipmesh`, after the format it reads.
+- `get_xi_surface_nodes` reads a face off the basis and the element node
+  ordering instead of building a weight matrix over a tiled xi query. It no
+  longer allocates a dense `(25 * n_elements) x n_parameters` array, and no
+  longer retraces once per mesh size. Between 40x and 5000x faster depending
+  on the basis, for identical results.
 - JAX's persistent compilation cache now defaults to the platform's per-user
   cache directory instead of a shared `/tmp/jax_cache`, and only when the user
   has not chosen one themselves — `JAX_COMPILATION_CACHE_DIR` is no longer
