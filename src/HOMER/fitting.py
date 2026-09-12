@@ -20,8 +20,8 @@ Jacobian for use with ``scipy.optimize.least_squares``::
 import numpy as np
 import jax.numpy as jnp
 
-from HOMER.mesher import Mesh
-from HOMER.optim import jax_comp_kdtree_distance_query, jax_comp_kdtree_normal_distance_query
+from HOMER.mesh import Mesh
+from HOMER.optim import kdtree_distance_query, kdtree_normal_distance_query
 from HOMER.jacobian_evaluator import jacobian
 
 from matplotlib import pyplot as plt
@@ -33,42 +33,40 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
     that measures the distance from the mesh surface to the target point cloud,
     with an optional Sobolev smoothness regularisation term.
 
-    A KD-tree is built from *data* (and *normals* when provided) at
-    construction time.  Every evaluation then queries this tree against the
-    current mesh surface.
+    A SciPy KD-tree is built from *data* (and *normals* when provided) at
+    construction time, behind a JAX custom-JVP callback (see
+    :mod:`HOMER.optim`).  Every evaluation queries that tree against the
+    current mesh surface, which costs a host round-trip per evaluation.
 
-    Parameters
-    ----------
-    mesh:
-        The :class:`~HOMER.mesher.Mesh` to fit.
-    data:
+    :param mesh:
+        The :class:`~HOMER.mesh.mesh.Mesh` to fit.
+    :param data:
         Target point cloud, shape ``(n_pts, 3)``.
-    normals:
+    :param normals:
         Optional surface normals at each target point, shape ``(n_pts, 3)``.
         When provided, the distance metric is projected along the normal
         direction (useful for fitting to noisy oriented point clouds).
-    res:
+    :param res:
         Number of xi grid points per direction used to sample the mesh
         surface.
-    compile:
+    :param compile:
         When ``True``, JIT-compiles the mesh evaluation functions
         (recommended for iterative optimisation).
-    surface_only:
+    :param surface_only:
         When ``True``, only sample the mesh surface faces (for volume meshes).
-    sob_weight:
+    :param sob_weight:
         Scalar weight applied to the Sobolev smoothness term.  Increase to
         produce smoother fits at the cost of surface accuracy.
 
-    Returns
-    -------
-    fitting_function : Callable
-        Residual function ``(params) → residuals`` compatible with
-        ``scipy.optimize.least_squares``.
-    jacobian_fun : Callable
-        Sparse Jacobian function ``(params) → scipy.sparse.coo_array``.
+    :returns:
+        fitting_function : Callable
+            Residual function ``(params) → residuals`` compatible with
+            ``scipy.optimize.least_squares``.
+        jacobian_fun : Callable
+            Sparse Jacobian function ``(params) → scipy.sparse.coo_array``.
 
-    Examples
-    --------
+    **Examples**
+
     ::
 
         fitting_fn, jac_fn = point_cloud_fit(mesh, target_pts, compile=True)
@@ -77,9 +75,9 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
         mesh.update_from_params(result.x)
     """
     if normals is None:
-        data_tree = jax_comp_kdtree_distance_query(data, kdtree_args={"workers":-1})
+        data_tree = kdtree_distance_query(data, kdtree_args={"workers":-1})
     else:
-        data_tree = jax_comp_kdtree_normal_distance_query(data, normals, kdtree_args={"workers":-1})
+        data_tree = kdtree_normal_distance_query(data, normals, kdtree_args={"workers":-1})
     eval_points = mesh.xi_grid(res, surface=surface_only)
     # sob_points = mesh.gauss_grid([4, 4])
 
@@ -95,7 +93,7 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
         wpts = mesh.evaluate_embeddings(mesh_elements, eval_points, fit_params=params[:])
         dists = data_tree(wpts)
         outputs.append(dists.flatten())
-        outputs.append(mesh.evaluate_sobolev().flatten() * sob_weight)
+        outputs.append(mesh.evaluate_sobolev(fit_params=params[:]).flatten() * sob_weight)
         outputs = jnp.concatenate(outputs)
         return outputs
 

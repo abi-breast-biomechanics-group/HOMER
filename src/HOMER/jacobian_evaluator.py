@@ -15,6 +15,11 @@ when building custom fitting problems::
 
     fitting_fn, jac_fn = jacobian(my_cost_function,
                                   init_estimate=mesh.optimisable_param_array)
+
+When the Jacobian is too large to hold -- or dense in the blocks that matter,
+so that a colouring saves nothing -- :func:`matrix_free_jacobian` gives scipy a
+``LinearOperator`` over ``jvp``/``vjp`` and a column-equilibrating scaling to
+go with it, for ``least_squares(..., tr_solver='lsmr')``.
 """
 
 from functools import partial
@@ -25,8 +30,7 @@ import jax.numpy as jnp
 import sparsejac
 import numpy as np
 import scipy
-from scipy.sparse import csr_matrix
-from collections import defaultdict
+from scipy.sparse.linalg import LinearOperator
 
 def jacobian(
     cost_function: Optional[Callable] = None, 
@@ -39,6 +43,37 @@ def jacobian(
     """
     Given a jax compatible callable, returns both a compiled jax function, but also 
     the autodifferentiated jacobian of the function.
+
+    :param cost_function:
+        The JAX-compatible residual function, differentiated with respect to
+        its first argument.  ``None`` returns a partially-applied
+        :func:`jacobian`, so it can be used as a decorator factory.
+    :param init_estimate:
+        A representative parameter vector, used to probe the sparsity
+        pattern.  Required unless *sparsity* is given.
+    :param sparsity:
+        A known pattern as a ``BCOO``, which skips the probing step.  A
+        callable raises: patterns that change between calls are not
+        supported.
+    :param further_args:
+        Extra keyword arguments bound into *cost_function* before the
+        sparsity is estimated.
+    :param sparse:
+        When ``True`` (default), build the Jacobian with :mod:`sparsejac`
+        forward-mode AD over the pattern.  ``False`` gives a dense
+        ``jax.jacfwd``, which is the better choice for small problems.
+    :param return_sparsity:
+        Also return the pattern that was used or estimated.
+
+    :raises ValueError:
+        If neither *init_estimate* nor *sparsity* is given, or if *sparsity*
+        is a callable.
+
+    :returns:
+        ``(fwd_func, jac_func)``, both taking the parameter vector and
+        suitable for ``scipy.optimize.least_squares``; the Jacobian returns a
+        ``scipy.sparse.coo_array``.  With *return_sparsity*, the pattern is
+        appended.
     """
     if init_estimate is None and sparsity is None:
         raise ValueError("Code needs an initial estimate for meaningful sparsity estimation")
@@ -59,14 +94,8 @@ def jacobian(
 
     if sparse:
         if isinstance(sparsity, Callable):
-            def scipy_sparse_jac(params, **kwargs):
-                # t0 = time()
-                sparse_csr = sparsity(params)
-                # t1 = time()
-                # print(t1 - t0)
-                # update_csr_jacobian(partial(fwd_func, **kwargs), params, sparse_csr)
-                sparse_csr = update_csr_jacobian_hybrid(partial(fwd_func, **kwargs), params, sparse_csr)
-                return sparse_csr
+            raise ValueError("Non-static sparsities are not yet supported")
+
         else:
             if sparsity is None:
                 sparsity = estimate_sparsity(partial(fwd_func, **further_args), init_estimate)
@@ -94,6 +123,28 @@ def jacobian(
     return fwd_func, scipy_sparse_jac
     
 def estimate_sparsity(callable_fn, init_estimate) -> jax.experimental.sparse.BCOO:
+    """Probe which outputs of *callable_fn* depend on which inputs.
+
+    Perturbs one input at a time by 1.0 and records the outputs that move by
+    more than ``1e-8``.  The probe runs under :func:`jax.lax.scan` rather than
+    as one batched call, so peak memory is ``O(N)`` rather than ``O(N**2)`` in
+    the parameter count.
+
+    This detects structural dependence, not the size of the derivative: an
+    output that happens not to move under a unit step at *init_estimate* is
+    recorded as independent, so pass an estimate representative of where the
+    optimiser will actually work.
+
+    :param callable_fn:
+        A JAX-compatible function of one parameter vector, with any other
+        arguments already bound.
+    :param init_estimate:
+        The parameter vector to perturb, shape ``(N,)``.
+
+    :returns:
+        The pattern as a ``BCOO`` of shape ``(M, N)`` with unit entries, in
+        the form :mod:`sparsejac` expects.
+    """
     init_estimate = jnp.asarray(init_estimate)
     init_val = callable_fn(init_estimate)
     
@@ -121,144 +172,127 @@ def estimate_sparsity(callable_fn, init_estimate) -> jax.experimental.sparse.BCO
         (jnp.ones(inds.shape[0]), inds), 
         shape=(M, N)
     )
-def _next_power_of_2(x):
-    """Returns the smallest power of 2 greater than or equal to x."""
-    return 1 if x == 0 else 2**(x - 1).bit_length()
 
-def update_csr_jacobian(f, params, sparsity_csr, MAX_BATCH_SIZE=128):
-    # ts0 = time()
-    M, N = sparsity_csr.shape
-    indptr = sparsity_csr.indptr
-    indices = sparsity_csr.indices
-    
-    if not np.issubdtype(sparsity_csr.data.dtype, np.floating):
-        sparsity_csr.data = sparsity_csr.data.astype(np.float32)
 
-    pattern_to_rows = defaultdict(list)
-    exact_max_deps = 0
-    
-    for i in range(M):
-        start, end = indptr[i], indptr[i+1]
-        deps = indices[start:end]
-        if len(deps) == 0:
-            continue
-            
-        pattern_to_rows[tuple(deps)].append(i)
-        if len(deps) > exact_max_deps:
-            exact_max_deps = len(deps)
 
-    if exact_max_deps == 0:
-        sparsity_csr.data[:] = 0.0
-        return sparsity_csr
+def estimate_column_norms(vjp, n_res, probes=16, seed=0, dtype=np.float64):
+    """The column norms of a jacobian, without ever forming a column.
 
-    exact_max_groups = sum((len(rows) + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE 
-                           for rows in pattern_to_rows.values())
+    ``||J_j||^2 = E[(J^T z)_j^2]`` for ``z ~ N(0, I)``, so a single vjp prices
+    every column at once and a handful of probes estimates the whole scaling.
+    This is the matrix-free twin of
+    :func:`~HOMER.mesh.parameters.column_equilibrated_lstsq`, which reads the
+    same norms straight off an assembled matrix.
 
-    # --- 2. Bucket to powers of 2 ---
-    MAX_DEPS = _next_power_of_2(exact_max_deps)
-    MAX_GROUPS = _next_power_of_2(exact_max_groups)
-
-    # --- 3. Prepare static arrays ---
-    row_indices = np.zeros((MAX_GROUPS, MAX_BATCH_SIZE), dtype=np.int32)
-    row_masks = np.zeros((MAX_GROUPS, MAX_BATCH_SIZE), dtype=bool)
-    col_indices = np.zeros((MAX_GROUPS, MAX_DEPS), dtype=np.int32)
-    col_masks = np.zeros((MAX_GROUPS, MAX_DEPS), dtype=bool)
-    data_loc_mapping = np.zeros((MAX_GROUPS, MAX_BATCH_SIZE, MAX_DEPS), dtype=np.int32)
-    group_idx = 0
-    
-    # --- 4. FAST Vectorized Array Population ---
-    for deps_tuple, rows in pattern_to_rows.items():
-        deps_len = len(deps_tuple)
-        deps_arr = np.array(deps_tuple, dtype=np.int32)
-        rows_arr = np.array(rows, dtype=np.int32)
-        n_rows = len(rows_arr)
-        
-        # Calculate chunks and padding
-        num_chunks = (n_rows + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE
-        pad_len = num_chunks * MAX_BATCH_SIZE - n_rows
-        
-        if pad_len > 0:
-            rows_padded = np.pad(rows_arr, (0, pad_len), constant_values=0)
-            masks_padded = np.pad(np.ones(n_rows, dtype=bool), (0, pad_len), constant_values=False)
-        else:
-            rows_padded = rows_arr
-            masks_padded = np.ones(n_rows, dtype=bool)
-            
-        # Reshape to 2D blocks
-        rows_chunked = rows_padded.reshape(num_chunks, MAX_BATCH_SIZE)
-        masks_chunked = masks_padded.reshape(num_chunks, MAX_BATCH_SIZE)
-        
-        # Target indices in the static arrays
-        g_start = group_idx
-        g_end = group_idx + num_chunks
-        
-        row_indices[g_start:g_end, :] = rows_chunked
-        row_masks[g_start:g_end, :] = masks_chunked
-        
-        col_indices[g_start:g_end, :deps_len] = deps_arr
-        col_masks[g_start:g_end, :deps_len] = True
-        
-        starts = indptr[rows_chunked][..., np.newaxis] # Shape: (num_chunks, MAX_BATCH_SIZE, 1)
-        offsets = np.arange(deps_len)[np.newaxis, np.newaxis, :] # Shape: (1, 1, deps_len)
-        
-        data_loc_mapping[g_start:g_end, :, :deps_len] = starts + offsets
-        
-        group_idx += num_chunks
-    # ts1 = time()
-    # print(f" to0k {ts1-ts0} s")
-    batched_grads = extract_vmapped_sparse_jacobian(
-        f, params, row_indices, row_masks, col_indices, col_masks
-    )
-    
-    grads_np = np.asarray(batched_grads)
-    combined_mask = row_masks[:, :, np.newaxis] & col_masks[:, np.newaxis, :]
-    valid_grads = grads_np[combined_mask]
-    valid_locs = data_loc_mapping[combined_mask]
-    
-    sparsity_csr.data[valid_locs] = valid_grads
-
-    return sparsity_csr
-
-@partial(jax.jit, static_argnums=0)
-def extract_vmapped_sparse_jacobian(f, x_full, row_indices, row_masks, col_indices, col_masks):
+    :param vjp:
+        ``w -> J^T w`` at the point the jacobian is wanted.
+    :param n_res:
+        Length of the residual vector, which is the length of a probe.
+    :param probes:
+        How many gaussian probes to average.  The estimate's relative error
+        falls as ``1/sqrt(probes)``, and a scaling only has to be right to
+        within a factor, so 16 is plenty.
+    :param seed:
+        Seed for the probes, so that a fit is reproducible.
+    :param dtype:
+        Dtype of the probes; must match what the residual is evaluated in.
+    :returns:
+        ``(n_par,)`` array of estimated column norms.
     """
-    row_indices/masks shape: (MAX_GROUPS, MAX_BATCH_SIZE)
-    col_indices/masks shape: (MAX_GROUPS, MAX_DEPS)
+    rng = np.random.default_rng(seed)
+    probe = rng.normal(size=(probes, n_res)).astype(dtype)
+    mean_square = np.mean([np.asarray(vjp(jnp.asarray(z))) ** 2 for z in probe],
+                          axis=0)
+    return np.sqrt(mean_square)
+
+
+def matrix_free_jacobian(cost_function, init_estimate, probes=16, seed=0,
+                         precondition=True):
+    """A jacobian for ``least_squares`` that is never formed, only applied.
+
+    For a residual of ~1e5 entries in ~1e4 parameters the jacobian costs
+    gigabytes to store, and a sparsity colouring does not rescue it when the
+    blocks that matter are dense -- every dof supporting a sample excites the
+    same rows, so :func:`jacobian` is the wrong tool.  This returns a
+    :class:`scipy.sparse.linalg.LinearOperator` over jax's ``jvp``/``vjp``
+    instead: nothing larger than a residual vector is ever allocated, and
+    ``least_squares(..., tr_solver='lsmr')`` -- the one scipy trust-region
+    solver that takes an operator -- solves each subproblem from
+    matrix-vector products alone.
+
+    Everything is returned in the *scaled* variable ``u``, with
+    ``params = u * scale`` and *scale* the reciprocal column norms, so that
+    every column of the operator has unit length.  That preconditioning is not
+    a refinement: a Hermite basis carries derivative dofs whose columns are
+    orders of magnitude shorter than the value dofs', and lsmr on the raw
+    operator never solves the subproblem well enough to take a Newton-sized
+    step.  SciPy's own ``x_scale='jac'`` cannot do it here -- it squares the
+    jacobian elementwise, which needs a real matrix.
+
+    *scale* is estimated once, at *init_estimate*, and held fixed for the whole
+    solve, exactly as the assembled equilibration is.
+
+    :param cost_function:
+        A JAX-compatible ``params -> residuals``, both 1-D.
+    :param init_estimate:
+        The parameters the fit starts from, and the point the column norms are
+        estimated at.
+    :param probes:
+        Gaussian probes averaged for those norms.
+    :param seed:
+        Seed for the probes.
+    :param precondition:
+        ``False`` returns the bare operator and a *scale* of ones.  Useful for
+        pricing what the scaling buys, not for fitting.
+    :returns:
+        fitting_function : Callable
+            ``u -> residuals`` as numpy, for ``least_squares``.
+        jacobian_operator : Callable
+            ``u -> LinearOperator``, for its ``jac``.
+        scale : np.ndarray
+            ``(n_par,)``.  Divide the starting parameters by it, multiply the
+            answer back.
+
+    **Examples**
+
+    ::
+
+        fwd, jac, scale = matrix_free_jacobian(cost, p_start)
+        result = least_squares(fwd, p_start / scale, jac=jac, tr_solver='lsmr')
+        params = result.x * scale
     """
-    def group_fn(r_idx, r_mask, c_idx, c_mask):
-        # 1. Build tangents for the dependencies in this group
-        # Shape: (MAX_DEPS, N)
-        tangents = jnp.zeros((c_idx.shape[0], x_full.shape[0]), dtype=jnp.float32)
-        # Place 1.0s at the target column indices, applying the column mask
-        tangents = tangents.at[jnp.arange(c_idx.shape[0]), c_idx].set(c_mask.astype(jnp.float32))
-        
-        push_forward = lambda t: jax.jvp(f, (x_full,), (t,))[1]
-        jvp_out = jax.vmap(push_forward)(tangents)
-        sparse_batch = jvp_out.T[r_idx]
-        
-        # 4. Mask out the invalid rows (padding)
-        sparse_batch = jnp.where(r_mask[:, None], sparse_batch, 0.0)
-        return sparse_batch
+    init = jnp.asarray(init_estimate)
+    start_residual = jax.jit(cost_function)(init)
+    n_res, n_par = start_residual.shape[0], init.shape[0]
+    dtype = np.dtype(start_residual.dtype)
 
-    # Vectorize the group function across the MAX_GROUPS dimension
-    batched_sparse_grads = jax.vmap(group_fn)(row_indices, row_masks, col_indices, col_masks)
-    return batched_sparse_grads
+    jvp = jax.jit(lambda p, v: jax.jvp(cost_function, (p,), (v,))[1])
+    vjp = jax.jit(lambda p, w: jax.vjp(cost_function, p)[1](w)[0])
 
-@partial(jax.jit, static_argnums=0)
-def extract_csr_data(f, x_full, row_indices, col_indices):
-    J_dense = jax.jacfwd(f)(x_full)
-    # return J_dense
-    return J_dense[row_indices, col_indices]
+    if precondition:
+        norms = estimate_column_norms(partial(vjp, init), n_res, probes, seed, dtype)
+        #a dead column would come back as 1/0: leave it at unit scale instead
+        scale = 1.0 / np.where(norms > 0, norms, 1.0)
+    else:
+        scale = np.ones(n_par)
+    scale = scale.astype(dtype)
+    scale_j = jnp.asarray(scale)
 
-def update_csr_jacobian_hybrid(f, x_full, sparsity_csr):
-    row_indices = np.repeat(np.arange(sparsity_csr.shape[0]), np.diff(sparsity_csr.indptr))
-    col_indices = sparsity_csr.indices
-    csr_data_jax = extract_csr_data(f, x_full, row_indices, col_indices)
-    # return csr_data_jax
-    sparsity_csr.data = np.asarray(csr_data_jax)
-    return sparsity_csr
+    scaled_cost = jax.jit(lambda u: cost_function(u * scale_j))
 
-# @partial(jax.jit, static_argnums=0)
-# def update_csr_jacobian_hybrid(f, x_full): #, row_indices):
-#     J_dense = jax.jacfwd(f)(x_full)
-#     return J_dense
+    def as_vector(v):
+        #scipy probes the operator with an int8 vector and hands lsmr (n, 1)
+        #columns; jax rejects both, so normalise on the way in
+        return jnp.asarray(np.asarray(v, dtype=dtype).ravel())
+
+    def fitting_function(params):
+        return np.asarray(scaled_cost(as_vector(params)))
+
+    def jacobian_operator(params):
+        p = as_vector(params) * scale_j
+        return LinearOperator(
+            (n_res, n_par), dtype=dtype,
+            matvec=lambda v: np.asarray(jvp(p, as_vector(v) * scale_j)),
+            rmatvec=lambda w: np.asarray(vjp(p, as_vector(w)) * scale_j))
+
+    return fitting_function, jacobian_operator, scale

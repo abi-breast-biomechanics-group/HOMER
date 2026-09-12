@@ -86,10 +86,14 @@ directions of the two faces are aligned (``True``) or anti-aligned (``False``).
 ## Notes
 
 - The topology exploration uses spatial hashing: two faces are considered
-  connected if their midpoint coordinates are equal to 10 decimal places.
+  connected if their midpoint coordinates are equal to 5 decimal places
+  (`rounding_res`, on both `_explore_topology` and `get_faces`).
   As the same parameters define this midpoint, they are definitionally equal.
   This rounding factor can be changed for very small meshes, but maybe just consider a change of scale and make your computer happier.
 - Multi-element junctions (more than 2 elements meeting at a face) are not
-  supported and raise a `ValueError`.
+  supported, and are *not* detected.  A shared region matched by more than two
+  elements falls through both branches of the face search, so it is recorded
+  neither in `mesh.faces` nor in `mesh.bmap` and those elements are left
+  unconnected.
 - For 2-D manifold meshes, each element is its own "face" and `topomap` still
   handles cross-element boundary embedding.

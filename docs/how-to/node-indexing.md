@@ -116,3 +116,54 @@ node_indexes = [  # xi_u × xi_v grid
 ```
 
 For a 3-D element, the order is ``u`` fastest, then ``v``, then ``w``.
+
+---
+
+## Node Ordering Across the Mesh
+
+The order *within* an element is fixed by the basis.  The order of the mesh's
+`nodes` list is not: refining, rebasing and most other manipulations rebuild it
+from scratch, and the order that falls out is an artefact of the algorithm.
+`reorder_nodes` replaces it with an ordering derived from the mesh itself, so
+the same mesh built two different ways numbers its nodes the same way:
+
+```python
+from HOMER import reorder_nodes
+
+reorder_nodes(mesh)                # 'lattice', the default
+reorder_nodes(mesh, 'spatial')     # lexicographic in (z, y, x)
+reorder_nodes(mesh, 'bandwidth')   # reverse Cuthill-McKee
+```
+
+`refine()` and `rebase()` already call it — pass `reorder_nodes=False` to
+either to opt out, or set `HOMER.mesh.reordering.DEFAULT_NODE_ORDERING = False`
+to turn it off for the whole session.
+
+An operation that leaves the node *set* alone leaves the numbering alone too:
+when every node of the result sits on exactly one node of the original and none
+is left over — an L1 → H3 rebase, a refinement by a factor of one — the mesh's
+own numbering is reproduced and the strategy is not consulted, so node indices
+you are holding stay valid.  A real refinement is not that case: its old nodes
+are a strict subset of the new ones, so it renumbers.
+
+| strategy | orders by | use it when |
+| --- | --- | --- |
+| `'lattice'` | the node's position in the mesh's parametric lattice, `xi_0` fastest | almost always: it is coordinate-free, so it is meaningful for a secondary field and unaffected by how the mesh is posed or deformed |
+| `'spatial'` | the nodal coordinates, last coordinate slowest | you want the numbering to follow world space, and the field is geometric |
+| `'bandwidth'` | reverse Cuthill-McKee over the node adjacency graph | the mesh is not a lattice, and you care about the bandwidth of the parameter couplings |
+
+Reordering is a *pure renumbering*: node objects, elements, bases and
+everything stored on a node — including its fixed parameters — are carried
+across untouched, and the field evaluates identically before and after.
+Elements referencing nodes by ID need no rewriting at all, since the ID travels
+with the node.
+
+The permutation is returned, so an index list of your own can follow it:
+
+```python
+perm = reorder_nodes(mesh)
+inverse = np.empty_like(perm)
+inverse[perm] = np.arange(len(perm))
+
+watched = inverse[watched]     # the same nodes, at their new indices
+```

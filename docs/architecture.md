@@ -8,24 +8,59 @@ other.
 ## Class Hierarchy
 
 ```
-AbstractBasis  (basis_definitions.py)
+Basis  (basis_definitions.py)      – one frozen instance per 1-D basis
   ├── H3Basis   – cubic Hermite
   ├── L1Basis   – linear Lagrange
   ├── L2Basis   – quadratic Lagrange
   ├── L3Basis   – cubic Lagrange
-  └── L4Basis   – quartic Lagrange
+  ├── L4Basis   – quartic Lagrange
+  └── B3Basis   – cubic B-spline
+BasisGroup(tuple)                  – the bases of one element, one per direction
 
-MeshNode(dict)  (mesher.py)
+MeshNode(dict)  (mesh/node.py)
   └── Physical coordinates + derivative fields
 
-MeshElement     (mesher.py)
+MeshElement     (mesh/element.py)
   └── Links nodes via tensor-product basis
 
-MeshField       (mesher.py)
+MeshField       (mesh/field.py)
   ├── Mesh(MeshField)  – primary coordinate mesh
   │     └── fields : dict[str, MeshField]
   └── Secondary fields (fibre directions, stresses, …)
 ```
+
+`MeshField` owns the state — nodes, elements, the parameter vector, the JAX
+closures compiled from them — and the lifecycle that keeps those in step
+(`generate_mesh`).  What a field *does* lives in a module per concern, whose
+functions take the field as their first argument and are bound into the class
+body by `mesh/field.py`:
+
+```
+HOMER/mesh/
+    node.py  element.py  field.py  mesh.py     the classes
+    evaluation.py    evaluating the field, its derivatives, embedded points
+    parameters.py    the parameter vector, and least-squares fitting it
+    topology.py      shared nodes, faces, surfaces, colouring
+    refinement.py    refine and rebase, and the fixed-parameter transfer
+    plotting.py      drawing; the only module that touches PyVista
+    element_eval.py  per-element evaluation kernels and quadrature rules
+    reordering.py    node renumbering, after an operation rebuilds the list
+```
+
+`reordering.py` is the exception to the binding above: renumbering is done
+*to* a field rather than *by* one, so `reorder_nodes` stays a plain function
+and is called as `reorder_nodes(mesh)`.
+
+Binding rather than inheriting is deliberate: `@expand_wide_evals` reads
+`vars(cls)`, so a method reached through a base class would be invisible to it
+and the generated `*_in_every_element` / `*_ele_xi_pair` variants would
+silently disappear.  Two consequences for anything added to those modules: the
+first parameter is `self`, and a zero-argument `super()` will not work (there
+is no `__class__` cell outside a class body) — call the sibling function
+directly instead.
+
+`HOMER/mesher.py` remains as a re-export shim so `from HOMER.mesher import
+Mesh` keeps working.
 
 ---
 
@@ -110,19 +145,40 @@ mesh but can use different basis functions.
 
 ---
 
-## Basis Hierarchy
+## Bases and basis groups
 
-All basis classes are frozen dataclasses inheriting from `AbstractBasis`.
-They carry:
+A basis is a *value*, not a type: `H3Basis`, `L1Basis`, … are frozen `Basis`
+instances, interned by name in a registry.  Each carries:
 
 | Attribute | Description |
 |---|---|
+| `name` | Serialisation key and repr, e.g. `'H3Basis'` |
 | `fn` | Evaluation function `fn(x) → (n_pts, n_basis)` |
-| `deriv` | List `[fn, d1, d2, …]` of derivative functions |
-| `weights` | Ordered weight names, e.g. `['x0', 'dx0', 'x1', 'dx1']` |
+| `deriv` | Tuple `(fn, d1, d2, …)` of derivative functions |
+| `weights` | Ordered weight names, e.g. `('x0', 'dx0', 'x1', 'dx1')` |
 | `order` | Polynomial order |
 | `node_locs` | Node positions in `[0, 1]` |
 | `node_fields` | `DerivativeField` instance (Hermite), or `None` (Lagrange) |
+| `interpolatory` | Whether nodal parameters are field values at the nodes |
+
+An element's parametric directions are built with arithmetic — `*` repeats a
+basis across directions, `+` concatenates directions — and the result is a
+`BasisGroup`, a `tuple` subclass, so lists and tuples of bases remain valid
+input everywhere:
+
+```python
+H3Basis * 3                # tricubic-Hermite volume
+H3Basis * 2 + L1Basis      # Hermite surface extruded linearly
+2 * H3Basis + B3Basis      # the same shape, the other way round
+(H3Basis + L1Basis) * 2    # H3, L1, H3, L1
+H3Basis ** 3               # tensor power, a spelling of H3Basis * 3
+```
+
+Equality and hashing are by name, so a basis survives a deepcopy, a pickle
+and a JSON round-trip as the same value.  `Basis` validates itself on
+construction (`deriv[0]` must be `fn`; `fn` must return one column per weight
+name), and registers itself, which is how a user-defined basis round-trips
+through `HOMER.io` without touching the reader.
 
 ---
 
@@ -132,8 +188,12 @@ All evaluation functions are JAX-compatible.  The key integration points are:
 
 - `evaluate_embeddings`, `evaluate_deriv_embeddings`, `evaluate_jacobians`
   are JIT-compiled via `jax.jit` when `jax_compile=True`.
-- `_xis_to_points` uses `jax.lax.fori_loop` and `jax.vmap` for
-  batch-parallel point embedding.
+- `HOMER.embedding.build_embedding_fn` builds the point-embedding closures
+  once per `generate_mesh()` — a coarse nearest-neighbour search, a vmapped
+  Newton-Raphson solver, and `mesh_embed_points` with a custom JVP that
+  reuses the converged Jacobian.  Building them once removes the XLA
+  retracing a per-call definition caused, and the iteration count is passed
+  as a traced value so changing `iterations` does not retrace either.
 - `topomap` is a `@jax.jit`-compiled function for cross-element boundary
   mapping.
 - `jacobian_evaluator.jacobian` uses `sparsejac` (forward-mode AD with

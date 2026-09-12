@@ -2,3 +2,14 @@
 */*.egg-info
 __pycache__
 */__pycache__
+.DS_Store
+
+#build output: mkdocs writes /site, setuptools writes /build
+/site
+/build
+
+#CodeGraph's index, which is local to each machine
+/.codegraph
+
+#local working data -- meshes, .ipdata, .ipelem and the scripts over them
+/bin

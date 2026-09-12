@@ -72,10 +72,20 @@ element = MeshElement(
 A collapsed element shares two or more corner nodes to create wedge or
 pyramid shapes:
 
+With node indices running `xi_0` fastest, then `xi_1`, then `xi_2`, repeating
+an index collapses that part of the element:
+
 ```python
-# 6-node wedge: share node 0 and node 4 (the "apex")
+# Fully collapsed in w: the top face repeats the bottom face, so the
+# element has four distinct nodes instead of eight
+collapsed_element = MeshElement(
+    node_indexes=[0, 1, 2, 3, 0, 1, 2, 3],
+    basis_functions=(H3Basis, H3Basis, H3Basis),
+)
+
+# 6-node wedge: the top face collapses to the edge (4, 5)
 wedge_element = MeshElement(
-    node_indexes=[0, 1, 2, 3, 0, 1, 2, 3],  # apex collapsed
+    node_indexes=[0, 1, 2, 3, 4, 5, 4, 5],
     basis_functions=(H3Basis, H3Basis, H3Basis),
 )
 ```

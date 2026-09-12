@@ -11,9 +11,12 @@ deformed configurations).
 Given a reference mesh **X** and a deformed mesh **x**, the deformation
 gradient at parametric location ξ is:
 
-**F**(ξ) = **J**_X(ξ)⁻¹ · **J**_x(ξ)
+**F**(ξ) = **J**_x(ξ) · **J**_X(ξ)⁻¹
 
-where **J**(ξ) = ∂position/∂ξ is the Jacobian matrix.
+where **J**(ξ) = ∂position/∂ξ is the Jacobian returned by
+`evaluate_jacobians`: rows are physical directions and columns parametric
+ones, so `J[i, j]` is ∂x_i/∂ξ_j.  A uniform stretch of 3 along x therefore
+gives **F** = diag(3, 1, 1).
 
 The Green-Lagrange strain tensor is then:
 
@@ -66,18 +69,33 @@ print("E_zz at xi=0.5:", strains[len(strains)//2, 2, 2])
 
 ## Strain on a 2-D Manifold Mesh
 
-For 2-D surface meshes, the 3-D strain tensor is not well-defined without
-specifying a local coordinate frame.  Provide a `coord_function`:
+A 2-D surface in 3-D has a `(3, 2)` Jacobian, which has no determinant and no
+inverse, so there is no deformation gradient to form.  Calling
+`evaluate_strain` on one without a `coord_function` says so:
+
+```
+ValueError: Strain tensor on manifold mesh requires a coord function to
+provide a meaninful basis
+```
+
+`surface_normal_mapping` is the ready-made answer.  It prepends the unit
+surface normal as a third Jacobian column, giving a square frame in which the
+out-of-plane direction carries no stretch:
 
 ```python
-def local_frame(mesh, eles, xis, Jmats):
-    """Project Jacobians into a local (tangent, normal) frame."""
-    ...
-    return projected_Jmats
+from HOMER.geometry import basic_surface
+from HOMER.utils import surface_normal_mapping
 
 strains = mesh_ref.evaluate_strain(elem_ids, xis, mesh_def,
-                                   coord_function=local_frame)
+                                   coord_function=surface_normal_mapping)
 ```
+
+Stretch a flat patch by 1.5 along one in-plane axis and the centre comes back
+with `E_yy = (1.5**2 - 1) / 2 = 0.625` and zeros elsewhere, which is the
+analytic Green-Lagrange answer.
+
+A `coord_function` is any callable `(mesh, eles, xis, Jmats) -> Jmats`, so
+pass your own when you want a different frame — fibre-aligned axes, say.
 
 ---
 

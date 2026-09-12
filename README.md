@@ -21,7 +21,7 @@ Fix that mesh parameter - constrain a node to lie on a plane - express another a
 ## Features
 - Cubic Hermite, Cubic B-spline, Linear, Quadratic, Cubic and Quartic Lagrange elements
 - Automatic Jacobian sparsity evaluation
-- JAX-friendly implementations of KDTree evaluations, and subsecond projection operations for 1_000_000 points
+- Differentiable point embedding, seeded by an approximate nearest-neighbour search in JAX — a million points project in under a second
 - Secondary mesh fields for fibre directions, stresses, and arbitrary vector/scalar data
 - Mesh refinement and basis conversion (rebase)
 - JSON serialisation/deserialisation
@@ -38,11 +38,14 @@ Fix that mesh parameter - constrain a node to lie on a plane - express another a
 | Class | Type | Nodes per direction | Continuity | Derivative fields on node |
 |---|---|---|---|---|
 | `H3Basis` | Cubic Hermite | 2 | C¹ | `du`, `dv`, … |
-| `B3Basis` | Cubic-Bspline | 4 | C² | - |
 | `L1Basis` | Linear Lagrange | 2 | C⁰ | – |
 | `L2Basis` | Quadratic Lagrange | 3 | C⁰ | – |
 | `L3Basis` | Cubic Lagrange | 4 | C⁰ | – |
 | `L4Basis` | Quartic Lagrange | 5 | C⁰ | – |
+| `B3Basis` | Cubic B-spline | 4 control points | C² | – |
+
+`B3Basis` is not interpolatory: its nodal parameters are control points shared
+with the neighbouring elements, so they do not sit on the curve.
 
 ---
 

@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # pyvista renders off-screen in conftest, but VTK still needs a GL context
+      - uses: pyvista/setup-headless-display-action@v5
+
+      # HOMER points JAX's persistent cache here (src/HOMER/__init__.py); a cold
+      # cache is about a third of the suite's runtime.  The key is unique per run
+      # so each run saves what it compiled, and restore-keys picks up the newest
+      # earlier cache -- entries JAX can no longer use are simply missed, not wrong.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/HOMER
+          key: jax-compile-${{ matrix.python-version }}-${{ github.run_id }}
+          restore-keys: jax-compile-${{ matrix.python-version }}-
+
+      - run: pip install -e ".[dev]"
+
+      - run: pytest
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # mkdocstrings imports HOMER, so the package itself has to be installed
+      - run: pip install -e ".[docs]"
+
+      - run: python -m mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  # The site is published from what `docs` just built, so it cannot drift from
+  # the code; it goes out only once main has a green suite behind it.
+  publish-docs:
+    name: publish docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [tests, docs]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # A half-finished deployment is worse than a slow one, so this one queue
+    # never cancels, unlike the workflow-wide group above.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
