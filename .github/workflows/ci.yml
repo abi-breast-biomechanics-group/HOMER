@@ -30,6 +30,16 @@ jobs:
       # pyvista renders off-screen in conftest, but VTK still needs a GL context
       - uses: pyvista/setup-headless-display-action@v5
 
+      # HOMER points JAX's persistent cache here (src/HOMER/__init__.py); a cold
+      # cache is about a third of the suite's runtime.  The key is unique per run
+      # so each run saves what it compiled, and restore-keys picks up the newest
+      # earlier cache -- entries JAX can no longer use are simply missed, not wrong.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/HOMER
+          key: jax-compile-${{ matrix.python-version }}-${{ github.run_id }}
+          restore-keys: jax-compile-${{ matrix.python-version }}-
+
       - run: pip install -e ".[dev]"
 
       - run: pytest
