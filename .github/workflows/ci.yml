@@ -60,3 +60,29 @@ jobs:
       - run: pip install -e ".[docs]"
 
       - run: python -m mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  # The site is published from what `docs` just built, so it cannot drift from
+  # the code; it goes out only once main has a green suite behind it.
+  publish-docs:
+    name: publish docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [tests, docs]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # A half-finished deployment is worse than a slow one, so this one queue
+    # never cancels, unlike the workflow-wide group above.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
