@@ -16,17 +16,17 @@ or Hermite basis.
 
 ```python
 import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, L1Basis, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, L1, H3
 
 # 1. Create a coarse trilinear mesh (L1 × L1 × L1)
 nodes = [MeshNode(loc=[x, y, z])
          for x in [0., 1.] for y in [0., 1.] for z in [0., 1.]]
 element = MeshElement(node_indexes=list(range(8)),
-                      basis_functions=(L1Basis, L1Basis, L1Basis))
+                      basis_functions=(L1, L1, L1))
 seed = Mesh(nodes=nodes, elements=element)
 
 # 2. Rebase to cubic Hermite
-mesh = seed.rebase([H3Basis, H3Basis, H3Basis])
+mesh = seed.rebase([H3, H3, H3])
 
 # The resulting mesh has the same shape but smooth H3 interpolation
 mesh.plot()
@@ -39,14 +39,14 @@ mesh.plot()
 The same workflow applies to 2-D surface meshes:
 
 ```python
-from HOMER import L1Basis, H3Basis
+from HOMER import L1, H3
 
 # Linear seed
 seed_2d = Mesh(nodes=four_nodes, elements=MeshElement(
-    node_indexes=[0,1,2,3], basis_functions=(L1Basis, L1Basis)))
+    node_indexes=[0,1,2,3], basis_functions=(L1, L1)))
 
 # Convert to cubic Hermite surface
-smooth_2d = seed_2d.rebase([H3Basis, H3Basis])
+smooth_2d = seed_2d.rebase([H3, H3])
 ```
 
 ---
@@ -57,9 +57,9 @@ You can also rebase from Hermite to Lagrange (e.g. for export or
 compatibility with other solvers):
 
 ```python
-from HOMER import L3Basis
+from HOMER import L3
 
-lagrange_mesh = hermite_mesh.rebase([L3Basis, L3Basis, L3Basis])
+lagrange_mesh = hermite_mesh.rebase([L3, L3, L3])
 ```
 
 ---
@@ -71,7 +71,7 @@ the linear fit.  Increase it for better accuracy when rebasing to a
 significantly different basis:
 
 ```python
-mesh = seed.rebase([H3Basis]*3, res=20)  # default res=10
+mesh = seed.rebase([H3]*3, res=20)  # default res=10
 ```
 
 ---
@@ -90,9 +90,9 @@ numbering depends on whether the two bases share their nodes:
   lattice, the same ordering [refinement](refinement.md#node-numbering) uses.
 
 ```python
-smooth = mesh.rebase([H3Basis]*3)                        # same nodes: numbering kept
-denser = mesh.rebase([L2Basis]*3)                        # new nodes: lattice ordering
-raw    = mesh.rebase([H3Basis]*3, reorder_nodes=False)   # as built, neither
+smooth = mesh.rebase([H3]*3)                        # same nodes: numbering kept
+denser = mesh.rebase([L2]*3)                        # new nodes: lattice ordering
+raw    = mesh.rebase([H3]*3, reorder_nodes=False)   # as built, neither
 ```
 
 A rebase to the basis the mesh already has returns an untouched copy, and so
@@ -107,6 +107,6 @@ is unaffected either way.
   and elements, regenerates it, and returns the same object.
 
 ```python
-new = mesh.rebase([H3Basis]*3)                   # mesh is unchanged
-same = mesh.rebase([H3Basis]*3, in_place=True)   # same is mesh
+new = mesh.rebase([H3]*3)                   # mesh is unchanged
+same = mesh.rebase([H3]*3, in_place=True)   # same is mesh
 ```

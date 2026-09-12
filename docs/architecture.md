@@ -9,12 +9,12 @@ other.
 
 ```
 Basis  (basis_definitions.py)      – one frozen instance per 1-D basis
-  ├── H3Basis   – cubic Hermite
-  ├── L1Basis   – linear Lagrange
-  ├── L2Basis   – quadratic Lagrange
-  ├── L3Basis   – cubic Lagrange
-  ├── L4Basis   – quartic Lagrange
-  └── B3Basis   – cubic B-spline
+  ├── H3   – cubic Hermite
+  ├── L1   – linear Lagrange
+  ├── L2   – quadratic Lagrange
+  ├── L3   – cubic Lagrange
+  ├── L4   – quartic Lagrange
+  └── B3   – cubic B-spline
 BasisGroup(tuple)                  – the bases of one element, one per direction
 
 MeshNode(dict)  (mesh/node.py)
@@ -78,8 +78,8 @@ node = MeshNode(
 )
 ```
 
-The Hermite basis (`H3Basis`) requires derivative fields; the Lagrange bases
-(`L1Basis`–`L4Basis`) do not.  Parameters can be *fixed* (excluded from
+The Hermite basis (`H3`) requires derivative fields; the Lagrange bases
+(`L1`–`L4`) do not.  Parameters can be *fixed* (excluded from
 optimisation) via `node.fix_parameter(...)`.
 
 ---
@@ -92,11 +92,11 @@ per parametric direction:
 ```python
 # 2-D cubic-Hermite surface element: 2 × 2 = 4 nodes
 elem2d = MeshElement(node_indexes=[0, 1, 2, 3],
-                     basis_functions=(H3Basis, H3Basis))
+                     basis_functions=(H3, H3))
 
 # 3-D volume element with trilinear basis: 2 × 2 × 2 = 8 nodes
 elem3d = MeshElement(node_indexes=[0,1,2,3,4,5,6,7],
-                     basis_functions=(L1Basis, L1Basis, L1Basis))
+                     basis_functions=(L1, L1, L1))
 ```
 
 The element computes the **tensor-product weight matrix** at construction time
@@ -147,12 +147,12 @@ mesh but can use different basis functions.
 
 ## Bases and basis groups
 
-A basis is a *value*, not a type: `H3Basis`, `L1Basis`, … are frozen `Basis`
+A basis is a *value*, not a type: `H3`, `L1`, … are frozen `Basis`
 instances, interned by name in a registry.  Each carries:
 
 | Attribute | Description |
 |---|---|
-| `name` | Serialisation key and repr, e.g. `'H3Basis'` |
+| `name` | Serialisation key and repr, e.g. `'H3'` |
 | `fn` | Evaluation function `fn(x) → (n_pts, n_basis)` |
 | `deriv` | Tuple `(fn, d1, d2, …)` of derivative functions |
 | `weights` | Ordered weight names, e.g. `('x0', 'dx0', 'x1', 'dx1')` |
@@ -161,17 +161,18 @@ instances, interned by name in a registry.  Each carries:
 | `node_fields` | `DerivativeField` instance (Hermite), or `None` (Lagrange) |
 | `interpolatory` | Whether nodal parameters are field values at the nodes |
 
-An element's parametric directions are built with arithmetic — `*` repeats a
-basis across directions, `+` concatenates directions — and the result is a
-`BasisGroup`, a `tuple` subclass, so lists and tuples of bases remain valid
-input everywhere:
+An element's parametric directions are built with arithmetic — `*` joins
+directions, the operator nearest the outer product the element actually takes,
+and `**` is the tensor power.  Against an `int`, `*` repeats instead.  The
+result is a `BasisGroup`, a `tuple` subclass, so lists and tuples of bases
+remain valid input everywhere:
 
 ```python
-H3Basis * 3                # tricubic-Hermite volume
-H3Basis * 2 + L1Basis      # Hermite surface extruded linearly
-2 * H3Basis + B3Basis      # the same shape, the other way round
-(H3Basis + L1Basis) * 2    # H3, L1, H3, L1
-H3Basis ** 3               # tensor power, a spelling of H3Basis * 3
+H3 ** 3            # tricubic-Hermite volume
+H3**2 * L1         # Hermite surface extruded linearly
+H3 * H3 * L1       # the same shape, written out
+(H3 * L1)**2       # H3, L1, H3, L1
+H3 * 3             # a spelling of H3 ** 3
 ```
 
 Equality and hashing are by name, so a basis survives a deepcopy, a pickle

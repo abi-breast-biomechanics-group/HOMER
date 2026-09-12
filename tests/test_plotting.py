@@ -12,7 +12,7 @@ import numpy as np
 import pyvista as pv
 import pytest
 
-from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis
+from HOMER.basis_definitions import H3, L1, L2
 from HOMER.geometry import basic_surface, cube
 
 from _helpers import arr, hermite_cube, node_locs, unit_hex
@@ -24,7 +24,7 @@ def drawn_bounds(scene):
 
 @pytest.fixture(scope="module")
 def block():
-    mesh = cube(scale=2.0, centre=np.array([1.0, 2.0, 3.0]), basis=[L1Basis] * 3)
+    mesh = cube(scale=2.0, centre=np.array([1.0, 2.0, 3.0]), basis=[L1] * 3)
     mesh.refine(2)
     return mesh
 
@@ -59,7 +59,7 @@ def test_an_array_of_node_colours_is_accepted(block, plotter):
 
 
 def test_a_surface_mesh_draws(plotter):
-    mesh = basic_surface(basis=[L2Basis] * 2)
+    mesh = basic_surface(basis=[L2] * 2)
     mesh.refine(2)
 
     mesh.plot(plotter)
@@ -85,7 +85,7 @@ def test_a_node_can_draw_itself(plotter):
 
 
 def test_a_field_overlay_draws(plotter):
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.new_field('index', field_dimension=1, field_params=np.arange(8, dtype=float))
 
     mesh.plot(plotter, field_to_draw='index', default_xi_res=3)
@@ -120,7 +120,7 @@ def test_a_lattice_tiling_evaluates_onto_the_surface():
     What matters is that the tiling coordinates are valid xi and that the line
     connectivity indexes points that exist.
     """
-    mesh = basic_surface(basis=[L2Basis] * 2)
+    mesh = basic_surface(basis=[L2] * 2)
 
     points, lines = mesh.xi_grid(res=4, lattice=(1, 1))
 

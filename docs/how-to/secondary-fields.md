@@ -52,7 +52,7 @@ Secondary fields:
 mesh.new_field(
     field_name='field_key',        # access key: mesh['field_key']
     field_dimension=3,             # 1=scalar, 3=vector
-    new_basis=[H3Basis]*3,         # one basis per parametric direction
+    new_basis=[H3]*3,         # one basis per parametric direction
     field_locs=sample_pts,         # shape (N, 3) – physical sample locations
     field_values=sample_values,    # shape (N,) or (N, 3)
 )
@@ -71,15 +71,15 @@ The same workflow is exercised by `tests/test_fields.py`.
 import math
 import numpy as np
 import pyvista as pv
-from HOMER import Mesh, MeshNode, MeshElement, L1Basis, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, L1, H3
 
 # ── 1. Build a unit-cube mesh in H3×H3×H3 ──────────────────────────────────
 nodes = [MeshNode(loc=[x, y, z])
          for x in [0,1] for y in [0,1] for z in [0,1]]
 element = MeshElement(node_indexes=list(range(8)),
-                      basis_functions=(L1Basis, L1Basis, L1Basis))
+                      basis_functions=(L1, L1, L1))
 mesh = Mesh(nodes=nodes, elements=element)
-mesh.rebase([H3Basis]*3, in_place=True)
+mesh.rebase([H3]*3, in_place=True)
 
 # ── 2. Generate sample data ─────────────────────────────────────────────────
 def fibonacci_sphere(n, radius=0.5, centre=(0., 0., 0.)):
@@ -114,7 +114,7 @@ mesh.new_field(
     field_dimension=3,
     field_locs=data,
     field_values=normal_field,
-    new_basis=[H3Basis]*3,
+    new_basis=[H3]*3,
 )
 
 # ── 5. Fit the scalar field ──────────────────────────────────────────────────
@@ -123,7 +123,7 @@ mesh.new_field(
     field_dimension=1,
     field_locs=data,
     field_values=z_field,
-    new_basis=[L1Basis]*3,
+    new_basis=[L1]*3,
 )
 
 # ── 6. Evaluate the fitted field ─────────────────────────────────────────────
@@ -187,9 +187,9 @@ mesh.plot(field_to_draw='vec_dir', field_artist=arrow_artist)
 
 ## Tips
 
-- Use **`H3Basis`** for smooth vector fields (fibre directions, velocities)
+- Use **`H3`** for smooth vector fields (fibre directions, velocities)
   that must interpolate continuously across element boundaries.
-- Use **`L1Basis`** or **`L2Basis`** for simpler scalar fields (pressure,
+- Use **`L1`** or **`L2`** for simpler scalar fields (pressure,
   temperature) where smoothness is less critical.
 - Ensure you have **more sample points than nodal degrees of freedom**.  If
   `linear_fit` raises an assertion error, add more sample points or reduce

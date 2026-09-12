@@ -13,7 +13,7 @@ from copy import deepcopy
 import numpy as np
 
 from HOMER.mesh import Mesh, MeshField, MeshNode, MeshElement
-from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis, L3Basis, B3Basis
+from HOMER.basis_definitions import H3, L1, L2, L3, B3
 from HOMER.geometry import basic_surface, cube
 
 
@@ -58,7 +58,7 @@ def captured_warnings():
 ############################################### refinement
 
 def test_refine_preserves_corner_constraints():
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     mesh.nodes[node_at(mesh, [0, 0, 0])].fix_parameter('loc', inds=[2])
     mesh.nodes[node_at(mesh, [0, 1, 1])].fix_parameter(['loc', 'du', 'dv', 'dudv'])
     mesh.generate_mesh()
@@ -79,7 +79,7 @@ def test_refine_preserves_corner_constraints():
 
 
 def test_refine_restores_pinned_location_exactly():
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     mesh.nodes[node_at(mesh, [0, 1, 0])].fix_parameter('loc', values=np.array([0.0, 0.75, 0.25]))
     mesh.generate_mesh()
 
@@ -90,7 +90,7 @@ def test_refine_restores_pinned_location_exactly():
 
 
 def test_refine_preserves_interior_lagrange_node():
-    mesh = basic_surface(basis=[L2Basis] * 2)
+    mesh = basic_surface(basis=[L2] * 2)
     mesh.nodes[node_at(mesh, [0, 0.5, 0.5])].fix_parameter('loc')
     mesh.generate_mesh()
 
@@ -102,7 +102,7 @@ def test_refine_preserves_interior_lagrange_node():
 
 def test_refine_preserves_every_corner():
     corners = [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1]]
-    for basis in (L1Basis, L2Basis, L3Basis, H3Basis):
+    for basis in (L1, L2, L3, H3):
         mesh = basic_surface(basis=[basis] * 2)
         for corner in corners:
             mesh.nodes[node_at(mesh, corner)].fix_parameter('loc')
@@ -116,7 +116,7 @@ def test_refine_preserves_every_corner():
 
 
 def test_refine_by_non_uniform_xi_preserves_corners():
-    mesh = basic_surface(basis=[L1Basis] * 2)
+    mesh = basic_surface(basis=[L1] * 2)
     mesh.nodes[node_at(mesh, [0, 1, 1])].fix_parameter('loc', inds=[1])
     mesh.generate_mesh()
 
@@ -127,7 +127,7 @@ def test_refine_by_non_uniform_xi_preserves_corners():
 
 
 def test_refine_by_uniform_xi_preserves_interior_node():
-    mesh = basic_surface(basis=[L2Basis] * 2)
+    mesh = basic_surface(basis=[L2] * 2)
     mesh.nodes[node_at(mesh, [0, 0.5, 0.5])].fix_parameter('loc')
     mesh.generate_mesh()
 
@@ -137,7 +137,7 @@ def test_refine_by_uniform_xi_preserves_interior_node():
 
 
 def test_refine_can_be_opted_out_of():
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     mesh.nodes[node_at(mesh, [0, 0, 0])].fix_parameter('loc')
     mesh.generate_mesh()
 
@@ -148,7 +148,7 @@ def test_refine_can_be_opted_out_of():
 
 
 def test_refine_3d_preserves_corner_constraints():
-    mesh = cube(basis=[H3Basis] * 3)
+    mesh = cube(basis=[H3] * 3)
     mesh.nodes[node_at(mesh, [-0.5, -0.5, -0.5])].fix_parameter(['loc', 'dudvdw'])
     mesh.nodes[node_at(mesh, [0.5, 0.5, 0.5])].fix_parameter('loc', inds=[0])
     mesh.generate_mesh()
@@ -162,7 +162,7 @@ def test_refine_3d_preserves_corner_constraints():
 
 
 def test_refine_3d_preserves_all_eight_corners():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     corners = np.array(list(np.ndindex(2, 2, 2)), dtype=float) - 0.5
     for corner in corners:
         mesh.nodes[node_at(mesh, corner)].fix_parameter('loc')
@@ -177,11 +177,11 @@ def test_refine_3d_preserves_all_eight_corners():
 ############################################### rebasing
 
 def test_rebase_to_higher_order_keeps_loc_only():
-    mesh = basic_surface(basis=[L1Basis] * 2)
+    mesh = basic_surface(basis=[L1] * 2)
     mesh.nodes[node_at(mesh, [0, 0, 0])].fix_parameter('loc')
     mesh.generate_mesh()
 
-    out = mesh.rebase([H3Basis] * 2)
+    out = mesh.rebase([H3] * 2)
 
     corner = out.nodes[node_at(out, [0, 0, 0])]
     assert set(corner.fixed_params) == {'loc'} #the new derivatives have nothing to inherit from
@@ -189,24 +189,24 @@ def test_rebase_to_higher_order_keeps_loc_only():
 
 
 def test_rebase_to_lower_order_drops_derivative_constraints():
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     mesh.nodes[node_at(mesh, [0, 0, 0])].fix_parameter(['loc', 'du', 'dv', 'dudv'])
     mesh.generate_mesh()
 
     with captured_warnings() as warnings:
-        out = mesh.rebase([L1Basis] * 2)
+        out = mesh.rebase([L1] * 2)
 
     assert set(out.nodes[node_at(out, [0, 0, 0])].fixed_params) == {'loc'}
     assert any('dropped' in w for w in warnings)
 
 
 def test_rebase_adds_free_nodes_only():
-    mesh = basic_surface(basis=[L1Basis] * 2)
+    mesh = basic_surface(basis=[L1] * 2)
     for corner in ([0, 0, 0], [0, 1, 1]):
         mesh.nodes[node_at(mesh, corner)].fix_parameter('loc')
     mesh.generate_mesh()
 
-    out = mesh.rebase([L2Basis] * 2)
+    out = mesh.rebase([L2] * 2)
 
     assert len(out.nodes) == 9
     assert n_constrained(out) == 2
@@ -214,11 +214,11 @@ def test_rebase_adds_free_nodes_only():
 
 
 def test_rebase_to_same_basis_is_unchanged():
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     mesh.nodes[node_at(mesh, [0, 0, 0])].fix_parameter(['loc', 'du'])
     mesh.generate_mesh()
 
-    out = mesh.rebase([H3Basis] * 2)
+    out = mesh.rebase([H3] * 2)
 
     assert set(out.nodes[node_at(out, [0, 0, 0])].fixed_params) == {'loc', 'du'}
     assert n_constrained(out) == 1
@@ -227,9 +227,9 @@ def test_rebase_to_same_basis_is_unchanged():
 ############################################### control-net (non-interpolatory) bases
 
 def b3_surface():
-    mesh = basic_surface(basis=[L1Basis] * 2)
+    mesh = basic_surface(basis=[L1] * 2)
     mesh.refine(2) #B3 control points are shared, so more than one element is needed
-    return mesh.rebase([B3Basis] * 2)
+    return mesh.rebase([B3] * 2)
 
 
 def test_refine_b3_transfers_flag_without_restoring_the_coarse_value():
@@ -280,7 +280,7 @@ def test_refine_b3_warns_that_the_constraint_is_approximated():
 ############################################### secondary fields
 
 def test_field_constraints_survive_mesh_refine():
-    mesh = basic_surface(basis=[L1Basis] * 2)
+    mesh = basic_surface(basis=[L1] * 2)
     field = MeshField(nodes=[MeshNode(loc=np.zeros(1)) for _ in mesh.nodes],
                       elements=deepcopy(mesh.elements))
     field.nodes[node_at(mesh, [0, 1, 1])].fix_parameter('loc')

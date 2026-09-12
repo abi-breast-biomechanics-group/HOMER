@@ -63,8 +63,29 @@ version through its whole pre-release life.
   one second is tuned for a handful of large kernels; HOMER compiles many small
   ones, none of which reached the floor, so the cache stayed empty. The full
   test suite goes from 264s to 166s with it, and the cache converges at ~28MB.
+- Bases are combined with `*` rather than `+`, and are named without the
+  `Basis` suffix: `H3Basis * 2 + B3Basis` is now `H3**2 * B3`. `*` is the
+  operator nearest the outer product an element actually takes, and `**` is
+  its tensor power; against an `int`, `*` still repeats a direction, so
+  `H3 * 3` and `H3 ** 3` are the same group. A `BasisGroup` reprs as the
+  expression that builds it.
+- `Basis.name` — the serialisation key — follows the rename, so new mesh
+  files record `"H3"`. `basis_by_name` still resolves the pre-1.0 spellings,
+  so files written as `"H3Basis"` keep loading.
+- The raw basis evaluation functions are private (`H3` -> `_H3`), which is
+  what frees the short names for the bases themselves. Nothing outside
+  `basis_definitions.py` imported them.
+
+### Deprecated
+- The `H3Basis`, `L1Basis`, `L2Basis`, `L3Basis`, `L4Basis` and `B3Basis`
+  names. They remain importable and are the same objects as `H3`, `L1`, `L2`,
+  `L3`, `L4` and `B3`, but are absent from `HOMER.__all__`, so `import *` and
+  tab-completion offer one name per basis.
 
 ### Removed
+- `+` as a basis operator. `BasisGroup` subclasses `tuple`, so rather than
+  inherit `tuple.__add__` and silently return a plain tuple, `+` raises a
+  `TypeError` naming the `*` spelling to use instead.
 - `compat_functions/dep_mesh.py`, which had never parsed.
 - `compat_functions/convert_morphic.py`, which needed a dependency the
   project does not declare.

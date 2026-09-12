@@ -35,7 +35,7 @@ def _basis_node_fractions(basis: Basis, max_denominator: int = MAX_XI_DENOMINATO
 
     ``node_locs`` are fixed constants of the basis, so the snap to a rational is exact
     in intent.  Note that they are not required to lie inside ``[0, 1]``:
-    :class:`~HOMER.basis_definitions.B3Basis` places its shared control points
+    :class:`~HOMER.basis_definitions.B3` places its shared control points
     at ``[-1, 0, 1, 2]``.
     """
     return [Fraction(float(loc)).limit_denominator(max_denominator) for loc in basis.node_locs]
@@ -337,8 +337,8 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
     Constructs a new :class:`MeshField` with *new_basis*, sampling the
     current mesh on a dense xi grid and linearly fitting the new nodal
     parameters to match the sampled geometry.  This allows, for example,
-    converting a trilinear (``L1Basis``) mesh into a cubic-Hermite
-    (``H3Basis``) mesh without losing the shape.
+    converting a trilinear (``L1``) mesh into a cubic-Hermite
+    (``H3``) mesh without losing the shape.
 
     The three-step algorithm is:
 
@@ -352,7 +352,7 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
 
     :param new_basis:
         The new 1-D bases, one per parametric direction; a
-        :class:`~HOMER.basis_definitions.BasisGroup` such as ``H3Basis * 3``,
+        :class:`~HOMER.basis_definitions.BasisGroup` such as ``H3 * 3``,
         or any list or tuple of bases.
     :param in_place:
         When ``True``, replace this field's nodes and elements with the

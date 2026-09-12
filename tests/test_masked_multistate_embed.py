@@ -183,9 +183,9 @@ def test_jit_does_not_change_which_coarse_search_runs():
     import jax
     import HOMER.embedding as embedding
 
-    from HOMER.basis_definitions import L2Basis
+    from HOMER.basis_definitions import L2
 
-    mesh = cube(basis=[L2Basis] * 3)
+    mesh = cube(basis=[L2] * 3)
     rng = np.random.default_rng(0)
     pts = jnp.asarray(rng.random((16, 3)) * 0.8 + 0.1)
     params = jnp.asarray(mesh.optimisable_param_array)

@@ -17,7 +17,7 @@ described under [Node indexing](node-indexing.md#node-ordering-within-an-element
 
 ```python
 import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, L2Basis
+from HOMER import Mesh, MeshNode, MeshElement, L2
 
 # 9-node quadratic patch, xi_u and xi_v each at 0, 0.5, 1
 nodes = [
@@ -34,7 +34,7 @@ nodes = [
 
 element = MeshElement(
     node_indexes=list(range(9)),
-    basis_functions=(L2Basis, L2Basis),
+    basis_functions=(L2, L2),
 )
 mesh = Mesh(nodes=nodes, elements=element)
 mesh.plot()
@@ -44,19 +44,23 @@ mesh.plot()
 
 ## H3 × L2 Mixed Surface Mesh
 
-Use `H3Basis` in the xi_0 direction for smooth derivatives and `L2Basis` in
+Use `H3` in the xi_0 direction for smooth derivatives and `L2` in
 the xi_1 direction for simpler parametric variation:
 
 ```python
-from HOMER import H3Basis, L2Basis
+from HOMER import H3, L2
 
 # 2 × 3 = 6 nodes per element
 # Nodes at xi_u ∈ {0, 1} and xi_v ∈ {0, 0.5, 1}
 element = MeshElement(
     node_indexes=[0, 1, 2, 3, 4, 5],
-    basis_functions=(H3Basis, L2Basis),
+    basis_functions=H3 * L2,
 )
 ```
+
+`*` joins the directions in order, so `H3 * L2` is Hermite in xi_0 and
+quadratic Lagrange in xi_1.  A plain tuple — `(H3, L2)` — means the same
+thing and is still accepted everywhere.
 
 ---
 
@@ -64,10 +68,10 @@ element = MeshElement(
 
 | Requirement | Recommended basis |
 |---|---|
-| C¹ smooth geometry, shape optimisation | `H3Basis` |
-| Simple coarse mesh before rebasing | `L1Basis` |
-| Mid-order accuracy, fewer DoF than H3 | `L2Basis` or `L3Basis` |
-| High-accuracy Lagrange interpolation | `L4Basis` |
+| C¹ smooth geometry, shape optimisation | `H3` |
+| Simple coarse mesh before rebasing | `L1` |
+| Mid-order accuracy, fewer DoF than H3 | `L2` or `L3` |
+| High-accuracy Lagrange interpolation | `L4` |
 
 ---
 
@@ -79,12 +83,12 @@ Any mesh can be converted to a different basis with `rebase()`:
 # Start with a coarse linear mesh
 linear_mesh = Mesh(nodes=nodes, elements=MeshElement(
     node_indexes=list(range(4)),
-    basis_functions=(L1Basis, L1Basis),
+    basis_functions=L1**2,
 ))
 
 # Convert to cubic Hermite
-from HOMER import H3Basis
-smooth_mesh = linear_mesh.rebase([H3Basis, H3Basis])
+from HOMER import H3
+smooth_mesh = linear_mesh.rebase(H3**2)
 ```
 
 See the [Basis conversion guide](rebase.md) for full details.

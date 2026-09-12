@@ -12,7 +12,7 @@ geometry.
 `n` sub-intervals, creating `n ** ndim` sub-elements per original element.
 
 ```python
-from HOMER import Mesh, MeshNode, MeshElement, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, H3
 import numpy as np
 
 # 1. Build a coarse 3-D mesh
@@ -20,7 +20,7 @@ nodes = [MeshNode(loc=[x,y,z], du=np.zeros(3), dv=np.zeros(3), dw=np.zeros(3),
                   dudv=np.zeros(3), dudw=np.zeros(3), dvdw=np.zeros(3), dudvdw=np.zeros(3))
          for x in [0,1] for y in [0,1] for z in [0,1]]
 element = MeshElement(node_indexes=list(range(8)),
-                      basis_functions=(H3Basis, H3Basis, H3Basis))
+                      basis_functions=(H3, H3, H3))
 mesh = Mesh(nodes=nodes, elements=element)
 
 # 2. Refine: each element is subdivided into 2×2×2 = 8 sub-elements
@@ -57,7 +57,7 @@ fields simultaneously:
 
 ```python
 # mesh has a secondary field 'fibre'
-mesh.new_field('fibre', field_dimension=3, new_basis=[H3Basis]*3,
+mesh.new_field('fibre', field_dimension=3, new_basis=[H3]*3,
                field_locs=data_pts, field_values=fibre_vectors)
 
 # Refine both the geometry and the 'fibre' field
@@ -77,8 +77,8 @@ axis-aligned cube comes out in lexicographic `(z, y, x)` order, and the same
 mesh reached by two different routes numbers its nodes the same way:
 
 ```python
-a = cube(basis=[L1Basis]*3); a.refine(4)
-b = cube(basis=[L1Basis]*3); b.refine(2); b.refine(2)
+a = cube(basis=[L1]*3); a.refine(4)
+b = cube(basis=[L1]*3); b.refine(2); b.refine(2)
 # a and b now have identical node orderings
 ```
 

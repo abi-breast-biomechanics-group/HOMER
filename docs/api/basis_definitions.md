@@ -8,27 +8,27 @@
 
 ---
 
-::: HOMER.basis_definitions.H3Basis
+::: HOMER.basis_definitions.H3
 
 ---
 
-::: HOMER.basis_definitions.L1Basis
+::: HOMER.basis_definitions.L1
 
 ---
 
-::: HOMER.basis_definitions.L2Basis
+::: HOMER.basis_definitions.L2
 
 ---
 
-::: HOMER.basis_definitions.L3Basis
+::: HOMER.basis_definitions.L3
 
 ---
 
-::: HOMER.basis_definitions.L4Basis
+::: HOMER.basis_definitions.L4
 
 ---
 
-::: HOMER.basis_definitions.B3Basis
+::: HOMER.basis_definitions.B3
 
 ---
 

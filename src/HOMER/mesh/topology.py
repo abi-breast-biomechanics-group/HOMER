@@ -262,7 +262,7 @@ def get_xi_surface_nodes(self, xi_dim, bound_val):
     therefore a property of one 1-D basis and the element's node ordering, and needs
     no mesh evaluation.  For an interpolatory basis this is the single layer of nodes
     sitting on the face; for a control-net basis such as
-    :data:`~HOMER.basis_definitions.B3Basis` it is every layer with support there,
+    :data:`~HOMER.basis_definitions.B3` it is every layer with support there,
     which is the set that actually controls the surface.
 
     :param xi_dim:

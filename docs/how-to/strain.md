@@ -29,14 +29,14 @@ The Green-Lagrange strain tensor is then:
 ```python
 from copy import deepcopy
 import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, L1Basis, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, L1, H3
 
 # 1. Build a reference mesh
 nodes = [MeshNode(loc=[x,y,z])
          for x in [0,1] for y in [0,1] for z in [0,1]]
 element = MeshElement(node_indexes=list(range(8)),
-                      basis_functions=(L1Basis, L1Basis, L1Basis))
-mesh_ref = Mesh(nodes=nodes, elements=element).rebase([H3Basis]*3)
+                      basis_functions=(L1, L1, L1))
+mesh_ref = Mesh(nodes=nodes, elements=element).rebase([H3]*3)
 
 # 2. Copy and apply a deformation
 mesh_def = deepcopy(mesh_ref)

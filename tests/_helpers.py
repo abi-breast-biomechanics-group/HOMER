@@ -10,7 +10,7 @@ when it is reached by a fit or an iterative solve.
 import numpy as np
 
 from HOMER import Mesh, MeshElement, MeshNode
-from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis
+from HOMER.basis_definitions import H3, L1, L2
 
 EXACT = 1e-5   #float32 round-off on quantities that are exact in exact arithmetic
 CLOSE = 1e-3   #reached by least squares or Newton-Raphson, not by construction
@@ -33,7 +33,7 @@ def bulged_patch(jax_compile=False):
         [0, 0.5, 1], [0.5, 0.5, 0.5], [0, 0.5, 0],
         [0, 1, 1], [0, 1, 0.5], [0, 1, 0],
     ]
-    element = MeshElement(node_indexes=list(range(9)), basis_functions=(L2Basis, L2Basis))
+    element = MeshElement(node_indexes=list(range(9)), basis_functions=(L2, L2))
     return Mesh(nodes=[MeshNode(loc=l) for l in locs], elements=element,
                 jax_compile=jax_compile)
 
@@ -60,7 +60,7 @@ def hermite_cube():
                       dudv=zero, dudw=zero, dvdw=zero, dudvdw=zero)
              for loc, dw in corners]
     element = MeshElement(node_indexes=list(range(8)),
-                          basis_functions=(H3Basis, H3Basis, H3Basis))
+                          basis_functions=(H3, H3, H3))
     return Mesh(nodes=nodes, elements=element)
 
 
@@ -73,7 +73,7 @@ def unit_hex(basis=None):
     locs = [[0, 0, 1], [0, 0, 0], [0, 1, 1], [0, 1, 0],
             [1, 0, 1], [1, 0, 0], [1, 1, 1], [1, 1, 0]]
     element = MeshElement(node_indexes=list(range(8)),
-                          basis_functions=(L1Basis, L1Basis, L1Basis))
+                          basis_functions=(L1, L1, L1))
     mesh = Mesh(nodes=[MeshNode(loc=np.array(l, dtype=float)) for l in locs],
                 elements=element)
     return mesh if basis is None else mesh.rebase(tuple(basis))

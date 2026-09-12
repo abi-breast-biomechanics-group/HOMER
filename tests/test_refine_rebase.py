@@ -12,18 +12,18 @@ in ``test_fixed_param_preservation.py``.
 import numpy as np
 import pytest
 
-from HOMER.basis_definitions import (B3Basis, H3Basis, L1Basis, L2Basis,
-                                     L3Basis)
+from HOMER.basis_definitions import (B3, H3, L1, L2,
+                                     L3)
 from HOMER.geometry import basic_surface, cube
 
 from _helpers import CLOSE, EXACT, arr, hermite_cube, node_locs, unit_hex
 
 #(basis, nodes per direction added by a factor-r refinement of one element)
-NODE_COUNT = {L1Basis: lambda r: r + 1,
-              H3Basis: lambda r: r + 1,
-              L2Basis: lambda r: 2 * r + 1,
-              L3Basis: lambda r: 3 * r + 1,
-              B3Basis: lambda r: r + 3}
+NODE_COUNT = {L1: lambda r: r + 1,
+              H3: lambda r: r + 1,
+              L2: lambda r: 2 * r + 1,
+              L3: lambda r: 3 * r + 1,
+              B3: lambda r: r + 3}
 
 
 def sample_surface(mesh, res=6):
@@ -57,7 +57,7 @@ def test_refine_produces_the_expected_element_and_node_counts(basis, factor):
 
 
 def test_refine_accepts_a_per_direction_factor():
-    mesh = unit_hex(basis=[L1Basis] * 3)
+    mesh = unit_hex(basis=[L1] * 3)
 
     mesh.refine([2, 3, 2])
 
@@ -66,7 +66,7 @@ def test_refine_accepts_a_per_direction_factor():
     assert mesh.get_volume() == pytest.approx(1.0, abs=EXACT)
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, H3Basis], ids=lambda b: b.__name__)
+@pytest.mark.parametrize("basis", [L1, L2, H3], ids=lambda b: b.__name__)
 def test_refine_preserves_a_curved_surface(basis):
     """The visual check made numeric: the refined mesh still passes through
     every point of the original."""
@@ -78,7 +78,7 @@ def test_refine_preserves_a_curved_surface(basis):
     assert max_distance_to(mesh, before) < EXACT
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, L3Basis, H3Basis], ids=lambda b: b.__name__)
+@pytest.mark.parametrize("basis", [L1, L2, L3, H3], ids=lambda b: b.__name__)
 def test_uniform_refine_reaches_float32_round_off(basis):
     """Subdivision is exact in exact arithmetic; the question is whether the
     solve keeps it.
@@ -108,7 +108,7 @@ def test_uniform_refine_of_a_control_net_is_exact_away_from_the_domain_edge():
     worst samples sit 2-5x closer to a domain edge than average, while the
     mean is at round-off.  Still 40x better than before the equilibrated solve.
     """
-    mesh = hermite_cube().rebase([B3Basis] * 3)
+    mesh = hermite_cube().rebase([B3] * 3)
     before = sample_surface(mesh)
 
     mesh.refine(2)
@@ -119,7 +119,7 @@ def test_uniform_refine_of_a_control_net_is_exact_away_from_the_domain_edge():
 
 def test_refine_by_non_uniform_xi_breaks_is_exact_for_lagrange():
     """Lagrange nodal parameters are values, which do not care about the split."""
-    for basis in (L1Basis, L2Basis, L3Basis):
+    for basis in (L1, L2, L3):
         mesh = hermite_cube().rebase([basis] * 3)
         before = sample_surface(mesh)
 
@@ -131,7 +131,7 @@ def test_refine_by_non_uniform_xi_breaks_is_exact_for_lagrange():
         assert max_distance_to(mesh, before) < 1e-5, basis
 
 
-@pytest.mark.parametrize("basis", [H3Basis, B3Basis], ids=lambda b: b.__name__)
+@pytest.mark.parametrize("basis", [H3, B3], ids=lambda b: b.__name__)
 def test_non_uniform_refine_of_a_derivative_basis_cannot_be_exact(basis):
     """A representability limit, not a solver one -- so it is pinned, not fixed.
 
@@ -171,7 +171,7 @@ def test_get_volume_is_unchanged_by_refinement():
     The rule is now chosen to integrate det(J) exactly, so the answer is the
     same at every resolution.
     """
-    mesh = hermite_cube().rebase([L1Basis] * 3)
+    mesh = hermite_cube().rebase([L1] * 3)
 
     volumes = [float(mesh.get_volume())]
     for _ in range(3):
@@ -181,7 +181,7 @@ def test_get_volume_is_unchanged_by_refinement():
     np.testing.assert_allclose(volumes, volumes[0], rtol=EXACT)
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, L3Basis, H3Basis], ids=lambda b: b.__name__)
+@pytest.mark.parametrize("basis", [L1, L2, L3, H3], ids=lambda b: b.__name__)
 def test_refine_preserves_the_volume(basis):
     mesh = hermite_cube().rebase([basis] * 3)
     before = float(mesh.get_volume())
@@ -195,10 +195,10 @@ def test_refine_preserves_the_volume(basis):
 
 ############################################### rebasing
 
-@pytest.mark.parametrize("target", [L2Basis, L3Basis, H3Basis], ids=lambda b: b.__name__)
+@pytest.mark.parametrize("target", [L2, L3, H3], ids=lambda b: b.__name__)
 def test_rebase_to_a_richer_basis_is_exact_on_a_trilinear_cube(target):
     """L2, L3 and H3 all contain the trilinear space, so nothing may move."""
-    source = unit_hex(basis=[L1Basis] * 3)
+    source = unit_hex(basis=[L1] * 3)
     xi = source.xi_grid(5)
     reference = arr(source.evaluate_embeddings_ele_xi_pair(np.zeros(len(xi), int), xi))
 
@@ -215,11 +215,11 @@ def test_rebase_to_a_control_net_is_exact_on_a_trilinear_cube():
     (``cond(W) = 1.6e5``), which used to leave this fit 5.8e-4 off.  The
     equilibrated solve brings it to the same floor as every other basis.
     """
-    source = unit_hex(basis=[L1Basis] * 3)
+    source = unit_hex(basis=[L1] * 3)
     xi = source.xi_grid(5)
     reference = arr(source.evaluate_embeddings_ele_xi_pair(np.zeros(len(xi), int), xi))
 
-    out = source.rebase([B3Basis] * 3)
+    out = source.rebase([B3] * 3)
 
     got = arr(out.evaluate_embeddings_ele_xi_pair(np.zeros(len(xi), int), xi))
     np.testing.assert_allclose(got, reference, atol=EXACT)
@@ -228,15 +228,15 @@ def test_rebase_to_a_control_net_is_exact_on_a_trilinear_cube():
 def test_rebase_to_the_same_basis_is_a_no_op():
     source = hermite_cube()
 
-    out = source.rebase([H3Basis] * 3)
+    out = source.rebase([H3] * 3)
 
     np.testing.assert_allclose(arr(out.true_param_array), arr(source.true_param_array), atol=CLOSE)
 
 
 def test_rebase_returns_a_new_mesh_by_default():
-    source = unit_hex(basis=[L1Basis] * 3)
+    source = unit_hex(basis=[L1] * 3)
 
-    out = source.rebase([L2Basis] * 3)
+    out = source.rebase([L2] * 3)
 
     assert out is not source
     assert len(source.nodes) == 8
@@ -244,9 +244,9 @@ def test_rebase_returns_a_new_mesh_by_default():
 
 
 def test_rebase_in_place_mutates_the_original_and_returns_it():
-    mesh = unit_hex(basis=[L1Basis] * 3)
+    mesh = unit_hex(basis=[L1] * 3)
 
-    returned = mesh.rebase([L2Basis] * 3, in_place=True)
+    returned = mesh.rebase([L2] * 3, in_place=True)
 
     assert returned is mesh
     assert len(mesh.nodes) == 27
@@ -256,10 +256,10 @@ def test_rebase_in_place_mutates_the_original_and_returns_it():
 def test_rebase_in_place_keeps_secondary_fields():
     from HOMER import MeshField
 
-    mesh = unit_hex(basis=[L1Basis] * 3)
+    mesh = unit_hex(basis=[L1] * 3)
     mesh.new_field('scalar', field_dimension=1, field_params=np.arange(8, dtype=float))
 
-    mesh.rebase([L2Basis] * 3, in_place=True)
+    mesh.rebase([L2] * 3, in_place=True)
 
     assert 'scalar' in mesh.fields
     assert isinstance(mesh['scalar'], MeshField)
@@ -279,7 +279,7 @@ def test_rebase_down_is_a_least_squares_fit_not_a_corner_interpolation():
     corners = arr(curved.evaluate_embeddings(0, corner_xi))
     centre = arr(curved.evaluate_embeddings(0, centre_xi))
 
-    flat = curved.rebase([L1Basis] * 3)
+    flat = curved.rebase([L1] * 3)
 
     np.testing.assert_allclose(arr(flat.evaluate_embeddings(0, centre_xi)), centre, atol=EXACT)
     assert np.abs(arr(flat.evaluate_embeddings(0, corner_xi)) - corners).max() > 0.1
@@ -287,19 +287,19 @@ def test_rebase_down_is_a_least_squares_fit_not_a_corner_interpolation():
 
 def test_multi_element_rebase_keeps_the_surface():
     """Shared nodes are the interesting part: neighbours must stay stitched."""
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.refine(2)
     before = sample_surface(mesh)
 
-    out = mesh.rebase([H3Basis] * 3)
+    out = mesh.rebase([H3] * 3)
 
     assert max_distance_to(out, before) < EXACT
 
 
 def test_rebase_of_a_surface_mesh_keeps_it_in_plane():
-    mesh = basic_surface(basis=[L2Basis] * 2)
+    mesh = basic_surface(basis=[L2] * 2)
 
-    out = mesh.rebase([B3Basis] * 2)
+    out = mesh.rebase([B3] * 2)
 
     surface = arr(out.get_surface(res=8))
     np.testing.assert_allclose(surface[:, 0], 0.0, atol=CLOSE)

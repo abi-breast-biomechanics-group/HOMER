@@ -15,7 +15,7 @@ import numpy as np
 from jax.experimental import sparse
 
 from HOMER import Mesh, MeshElement, MeshNode
-from HOMER.basis_definitions import L2Basis
+from HOMER.basis_definitions import L2
 from HOMER.jacobian_evaluator import jacobian
 
 N_POINTS = 10_000
@@ -26,7 +26,7 @@ def build_mesh():
     locs = [[0, 0, 1], [0, 0, 0.5], [0, 0, 0],
             [0, 0.5, 1], [0.5, 0.5, 0.5], [0, 0.5, 0],
             [0, 1, 1], [0, 1, 0.5], [0, 1, 0]]
-    element = MeshElement(node_indexes=list(range(9)), basis_functions=(L2Basis, L2Basis))
+    element = MeshElement(node_indexes=list(range(9)), basis_functions=(L2, L2))
     mesh = Mesh(nodes=[MeshNode(loc=l) for l in locs], elements=element, jax_compile=True)
     for corner in (0, 2, 6, 8):
         mesh.nodes[corner].fix_parameter('loc')

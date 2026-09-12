@@ -37,14 +37,14 @@ Fix that mesh parameter - constrain a node to lie on a plane - express another a
 
 | Class | Type | Nodes per direction | Continuity | Derivative fields on node |
 |---|---|---|---|---|
-| `H3Basis` | Cubic Hermite | 2 | C¹ | `du`, `dv`, … |
-| `L1Basis` | Linear Lagrange | 2 | C⁰ | – |
-| `L2Basis` | Quadratic Lagrange | 3 | C⁰ | – |
-| `L3Basis` | Cubic Lagrange | 4 | C⁰ | – |
-| `L4Basis` | Quartic Lagrange | 5 | C⁰ | – |
-| `B3Basis` | Cubic B-spline | 4 control points | C² | – |
+| `H3` | Cubic Hermite | 2 | C¹ | `du`, `dv`, … |
+| `L1` | Linear Lagrange | 2 | C⁰ | – |
+| `L2` | Quadratic Lagrange | 3 | C⁰ | – |
+| `L3` | Cubic Lagrange | 4 | C⁰ | – |
+| `L4` | Quartic Lagrange | 5 | C⁰ | – |
+| `B3` | Cubic B-spline | 4 control points | C² | – |
 
-`B3Basis` is not interpolatory: its nodal parameters are control points shared
+`B3` is not interpolatory: its nodal parameters are control points shared
 with the neighbouring elements, so they do not sit on the curve.
 
 ---
@@ -60,10 +60,10 @@ ___
 
 ```python
 import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, H3
 
 # 1. Define four corner nodes for a flat 2-D patch
-#    (H3Basis requires du, dv, and dudv on every node)
+#    (H3 requires du, dv, and dudv on every node)
 nodes = [
     MeshNode(loc=np.array([0., 0., 0.]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3)),
     MeshNode(loc=np.array([1., 0., 0.]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3)),
@@ -73,7 +73,7 @@ nodes = [
 
 # 2. Create a bicubic-Hermite element
 element = MeshElement(node_indexes=[0, 1, 2, 3],
-                      basis_functions=(H3Basis, H3Basis))
+                      basis_functions=(H3, H3))
 
 # 3. Build and visualise the mesh
 mesh = Mesh(nodes=nodes, elements=element)

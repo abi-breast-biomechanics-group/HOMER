@@ -15,7 +15,7 @@ import pytest
 from scipy.optimize import least_squares
 from scipy.spatial import cKDTree
 
-from HOMER.basis_definitions import B3Basis, H3Basis, L1Basis, L2Basis, L3Basis
+from HOMER.basis_definitions import B3, H3, L1, L2, L3
 from HOMER.fitting import point_cloud_fit
 from HOMER.geometry import basic_surface, cube
 from HOMER.jacobian_evaluator import (estimate_column_norms, estimate_sparsity,
@@ -69,7 +69,7 @@ def test_the_weight_blocks_scatter_to_the_weight_matrix():
     np.testing.assert_allclose(scattered, arr(mesh.get_xi_weight_mat(eles, grid)), atol=EXACT)
 
 
-@pytest.mark.parametrize('basis', [[L1Basis] * 3, [H3Basis] * 3, [B3Basis] * 3],
+@pytest.mark.parametrize('basis', [[L1] * 3, [H3] * 3, [B3] * 3],
                          ids=['L1', 'H3', 'B3'])
 def test_the_sparse_solve_fits_at_least_as_well_as_the_dense_one(basis):
     """The system a mesh builds is block-sparse, and solving it sparse is not a
@@ -81,7 +81,7 @@ def test_the_sparse_solve_fits_at_least_as_well_as_the_dense_one(basis):
     same geometry -- which is the distinction ``column_equilibrated_lstsq``'s
     own docstring draws.
     """
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.refine(2)
     mesh = mesh.rebase(basis)
 
@@ -209,7 +209,7 @@ def test_equilibration_does_not_change_the_answer():
         jax.config.update("jax_enable_x64", False)
 
 
-@pytest.mark.parametrize("basis,improvement", [(L2Basis, 1), (H3Basis, 10), (B3Basis, 10)],
+@pytest.mark.parametrize("basis,improvement", [(L2, 1), (H3, 10), (B3, 10)],
                          ids=lambda x: getattr(x, '__name__', x))
 def test_equilibration_recovers_precision_on_a_real_weight_matrix(basis, improvement):
     """The matrices HOMER actually builds are why this exists.
@@ -289,8 +289,8 @@ def test_equilibration_accepts_a_scalar_target():
 
 def test_linear_fit_is_exact_when_the_target_is_representable():
     """L1 geometry sampled onto an L3 mesh: the cubic space contains it."""
-    target = unit_hex(basis=[L1Basis] * 3)
-    fitted = unit_hex(basis=[L3Basis] * 3)
+    target = unit_hex(basis=[L1] * 3)
+    fitted = unit_hex(basis=[L3] * 3)
     grid = fitted.xi_grid(6)
     eles = np.zeros(len(grid), dtype=int)
     targets = arr(target.evaluate_embeddings_ele_xi_pair(eles, grid))
@@ -310,7 +310,7 @@ def test_linear_fit_across_several_elements():
     """
     target = bulged_patch()
     target.refine(2)
-    fitted = basic_surface(basis=[L3Basis] * 2)
+    fitted = basic_surface(basis=[L3] * 2)
     fitted.refine(2)
 
     res = 8
@@ -325,7 +325,7 @@ def test_linear_fit_across_several_elements():
 
 
 def test_linear_fit_return_params_does_not_touch_the_mesh():
-    mesh = unit_hex(basis=[L2Basis] * 3)
+    mesh = unit_hex(basis=[L2] * 3)
     grid = mesh.xi_grid(5)
     eles = np.zeros(len(grid), dtype=int)
     before = arr(mesh.true_param_array)
@@ -345,7 +345,7 @@ def test_linear_fit_does_not_respect_fixed_parameters():
     :func:`point_cloud_fit` when constraints matter.
     """
     target = bulged_patch()
-    fitted = basic_surface(basis=[L2Basis] * 2)
+    fitted = basic_surface(basis=[L2] * 2)
     fitted.nodes[0].fix_parameter('loc')
     fitted.generate_mesh()
     pinned = np.array(fitted.nodes[0].loc, dtype=float)
@@ -359,7 +359,7 @@ def test_linear_fit_does_not_respect_fixed_parameters():
 
 
 def test_linear_fit_rejects_an_underdetermined_system():
-    mesh = unit_hex(basis=[L3Basis] * 3)
+    mesh = unit_hex(basis=[L3] * 3)
     grid = mesh.xi_grid(2)                       #8 samples, 64 unknowns
     eles = np.zeros(len(grid), dtype=int)
 
@@ -370,19 +370,19 @@ def test_linear_fit_rejects_an_underdetermined_system():
 
 def test_linear_fit_ignores_rows_marked_empty():
     """Rows equal to ``target_empty`` drop out of the solve."""
-    target = unit_hex(basis=[L1Basis] * 3)
-    grid = unit_hex(basis=[L2Basis] * 3).xi_grid(6)
+    target = unit_hex(basis=[L1] * 3)
+    grid = unit_hex(basis=[L2] * 3).xi_grid(6)
     eles = np.zeros(len(grid), dtype=int)
     targets = arr(target.evaluate_embeddings_ele_xi_pair(eles, grid))
 
-    fitted = unit_hex(basis=[L2Basis] * 3)
+    fitted = unit_hex(basis=[L2] * 3)
     weights = arr(fitted.get_xi_weight_mat(eles, grid))
     fitted.linear_fit(targets, weight_mat=weights)
     reference = arr(fitted.true_param_array)
 
     spoiled = np.concatenate([targets, np.full((20, 3), -1.0)])
     spoiled_weights = np.concatenate([weights, np.zeros((20, weights.shape[1]))])
-    with_junk = unit_hex(basis=[L2Basis] * 3)
+    with_junk = unit_hex(basis=[L2] * 3)
     with_junk.linear_fit(spoiled, weight_mat=spoiled_weights)
 
     np.testing.assert_allclose(arr(with_junk.true_param_array), reference, atol=CLOSE)
@@ -399,7 +399,7 @@ def curved_target():
 
 def test_point_cloud_fit_moves_the_mesh_onto_the_cloud(curved_target):
     """``optimise_mesh_test.py`` drew the before and after; this measures them."""
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     fit_fn, jac_fn = point_cloud_fit(mesh, curved_target, compile=True, sob_weight=0.0)
     start = arr(mesh.optimisable_param_array)
 
@@ -414,7 +414,7 @@ def test_point_cloud_fit_moves_the_mesh_onto_the_cloud(curved_target):
 
 def test_point_cloud_fit_holds_fixed_nodes(curved_target):
     """The constrained pathway: a pinned corner must not move."""
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     mesh.nodes[1].fix_parameter('loc')
     mesh.nodes[2].fix_parameter('loc')
     mesh.generate_mesh()
@@ -436,7 +436,7 @@ def test_the_sobolev_term_actually_reaches_the_optimiser(curved_target):
     its Jacobian rows are identically zero, and ``sob_weight`` silently does
     nothing.
     """
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     n_sobolev = arr(mesh.evaluate_sobolev()).size
     start = arr(mesh.optimisable_param_array)
 
@@ -450,7 +450,7 @@ def test_the_sobolev_term_actually_reaches_the_optimiser(curved_target):
 
 
 def test_sobolev_weight_changes_the_cost(curved_target):
-    mesh = basic_surface(basis=[H3Basis] * 2)
+    mesh = basic_surface(basis=[H3] * 2)
     start = arr(mesh.optimisable_param_array)
 
     light = point_cloud_fit(mesh, curved_target, compile=True, sob_weight=0.01)[0]
@@ -549,7 +549,7 @@ def test_mesh_residual_jacobian_is_block_sparse():
 
 ############################################### the matrix-free jacobian
 
-def hermite_weights(refine=2, basis=H3Basis):
+def hermite_weights(refine=2, basis=H3):
     """A weight matrix whose column norms span orders of magnitude.
 
     The derivative dofs of a Hermite basis carry weights an order of magnitude

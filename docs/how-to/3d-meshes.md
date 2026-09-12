@@ -9,10 +9,11 @@ hexahedral meshes.
 
 A tri-cubic-Hermite volume mesh requires 8 corner nodes, each carrying seven
 derivative vectors.
+HOMER uses the lexicographical ordering of mesh nodes within each element.
 
 ```python
 import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, H3
 
 # Eight corner nodes of a unit cube
 # Every node needs: du, dv, dw, dudv, dudw, dvdw, dudvdw
@@ -37,7 +38,7 @@ nodes = [
 
 element = MeshElement(
     node_indexes=[0, 1, 2, 3, 4, 5, 6, 7],
-    basis_functions=(H3Basis, H3Basis, H3Basis),
+    basis_functions=(H3, H3, H3),
 )
 
 mesh = Mesh(nodes=nodes, elements=element)
@@ -48,20 +49,20 @@ mesh.plot()
 
 ## H3 × H3 × L1 Mixed Volume Mesh
 
-Use `L1Basis` in the *w* direction for a mesh that is linear along one axis
+Use `L1` in the *w* direction for a mesh that is linear along one axis
 but smooth in the other two:
 
 ```python
-from HOMER import L1Basis
+from HOMER import L1
 
 element = MeshElement(
     node_indexes=[0, 1, 2, 3, 4, 5, 6, 7],
-    basis_functions=(H3Basis, H3Basis, L1Basis),
+    basis_functions=H3**2 * L1,
 )
 ```
 
 !!! note
-    Nodes used with `L1Basis` in a given direction do **not** need a derivative field.
+    Nodes used with `L1` in a given direction do **not** need a derivative field.
     By convention, we use `du`for the first derivative dimension, `dv` the second, and `dw` the third.
     An L1H3H3 mesh will still have the derivative fields `du`, `dv`, `dudv`.
 
@@ -80,13 +81,13 @@ an index collapses that part of the element:
 # element has four distinct nodes instead of eight
 collapsed_element = MeshElement(
     node_indexes=[0, 1, 2, 3, 0, 1, 2, 3],
-    basis_functions=(H3Basis, H3Basis, H3Basis),
+    basis_functions=(H3, H3, H3),
 )
 
 # 6-node wedge: the top face collapses to the edge (4, 5)
 wedge_element = MeshElement(
     node_indexes=[0, 1, 2, 3, 4, 5, 4, 5],
-    basis_functions=(H3Basis, H3Basis, H3Basis),
+    basis_functions=(H3, H3, H3),
 )
 ```
 
@@ -107,12 +108,12 @@ from HOMER.geometry import cube
 mesh = cube(scale=1.0)
 
 # Or manually:
-from HOMER import L1Basis
+from HOMER import L1
 seed = Mesh(nodes=nodes, elements=MeshElement(
     node_indexes=list(range(8)),
-    basis_functions=(L1Basis, L1Basis, L1Basis),
+    basis_functions=(L1, L1, L1),
 ))
-mesh = seed.rebase([H3Basis, H3Basis, H3Basis])
+mesh = seed.rebase([H3, H3, H3])
 ```
 
 ---

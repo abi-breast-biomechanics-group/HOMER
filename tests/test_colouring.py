@@ -13,7 +13,7 @@ so it could not have run as written.
 import numpy as np
 import pytest
 
-from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis, L3Basis
+from HOMER.basis_definitions import H3, L1, L2, L3
 from HOMER.geometry import cube
 
 from _helpers import arr
@@ -37,7 +37,7 @@ def element_columns(mesh, fields_separable):
 
 @pytest.fixture(scope="module")
 def coloured_mesh():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.refine([3, 3, 3])
     return mesh
 
@@ -98,7 +98,7 @@ def test_the_seed_matrix_has_exactly_one_entry_per_parameter(coloured_mesh):
         assert indices[parameter, colour] == parameter
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, H3Basis], ids=lambda b: b.__name__)
+@pytest.mark.parametrize("basis", [L1, L2, H3], ids=lambda b: b.__name__)
 def test_colouring_works_for_every_basis(basis):
     mesh = cube(basis=[basis] * 3)
     mesh.refine(2)
@@ -111,7 +111,7 @@ def test_colouring_works_for_every_basis(basis):
 
 
 def test_fixed_parameters_are_left_out_of_the_colouring():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.refine(2)
     mesh.nodes[0].fix_parameter('loc')
     mesh.generate_mesh()

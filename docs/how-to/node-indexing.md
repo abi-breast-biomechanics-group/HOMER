@@ -13,7 +13,7 @@ By default, `MeshElement` uses **integer indices** into the parent `Mesh`'s
 `nodes` list:
 
 ```python
-from HOMER import Mesh, MeshNode, MeshElement, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, H3
 import numpy as np
 
 node0 = MeshNode(loc=[0., 0., 0.], du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
@@ -24,7 +24,7 @@ node3 = MeshNode(loc=[1., 1., 0.], du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros
 # Indices 0, 1, 2, 3 refer to positions in [node0, node1, node2, node3]
 element = MeshElement(
     node_indexes=[0, 1, 2, 3],
-    basis_functions=(H3Basis, H3Basis),
+    basis_functions=(H3, H3),
 )
 mesh = Mesh(nodes=[node0, node1, node2, node3], elements=element)
 ```
@@ -49,7 +49,7 @@ node3 = MeshNode(loc=[1., 1., 0.], id='corner_11',
 # Reference by ID instead of index
 element = MeshElement(
     node_ids=['corner_00', 'corner_10', 'corner_01', 'corner_11'],
-    basis_functions=(H3Basis, H3Basis),
+    basis_functions=(H3, H3),
 )
 mesh = Mesh(nodes=[node0, node1, node2, node3], elements=element)
 ```
@@ -77,8 +77,8 @@ all_nodes = [
     MeshNode(loc=[2.,1.,0.], du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3)),  # 5
 ]
 
-elem_left  = MeshElement(node_indexes=[0,1,2,3], basis_functions=(H3Basis, H3Basis))
-elem_right = MeshElement(node_indexes=[1,4,3,5], basis_functions=(H3Basis, H3Basis))
+elem_left  = MeshElement(node_indexes=[0,1,2,3], basis_functions=(H3, H3))
+elem_right = MeshElement(node_indexes=[1,4,3,5], basis_functions=(H3, H3))
 
 mesh = Mesh(nodes=all_nodes, elements=[elem_left, elem_right])
 ```

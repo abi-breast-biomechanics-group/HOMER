@@ -19,7 +19,7 @@ only need to update nodal values.
 
 ```python
 import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, H3
 
 # 1. Assume you have a mesh and some target points
 mesh = ...   # your MeshField or Mesh

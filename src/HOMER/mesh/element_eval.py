@@ -296,7 +296,7 @@ def quadrature_order(basis_functions: BasisGroup) -> list[int]:
     because the rule was never refined at all.
 
     The tabulated rules stop at :data:`GAUSS`'s highest order, which covers
-    every basis HOMER ships (``L4Basis``, degree 4, needs 6 points in 3-D).  A
+    every basis HOMER ships (``L4``, degree 4, needs 6 points in 3-D).  A
     higher-degree basis is clamped to the table and warned about, since an
     approximate answer beats no answer.
 

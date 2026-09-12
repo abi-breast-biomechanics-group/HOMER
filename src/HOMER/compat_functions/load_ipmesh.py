@@ -5,7 +5,7 @@ import numpy as np
 from functools import reduce
 
 from HOMER.mesh import Mesh, MeshElement, MeshNode
-from HOMER.basis_definitions import H3Basis, L2Basis, L1Basis
+from HOMER.basis_definitions import H3, L2, L1
 
 def extract_numbers(text):
     """Pull every number out of a line of an ipnode/ipelem file.
@@ -434,7 +434,7 @@ def load_elem(loc, basis_def):
     # return [e for e, t in elem]
 
 
-def load_mesh(ipnode, ipelem, basis=(H3Basis, H3Basis, L2Basis), keys=('du', 'dv', 'dudv')):
+def load_mesh(ipnode, ipelem, basis=(H3, H3, L2), keys=('du', 'dv', 'dudv')):
     """Read an OpenCMISS ipnode/ipelem pair into a mesh.
 
     :param ipnode:

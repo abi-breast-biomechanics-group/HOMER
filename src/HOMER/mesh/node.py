@@ -22,7 +22,7 @@ class MeshNode(dict):
     :class:`numpy.ndarray` objects of the same length as ``loc``.
 
     For a 2-D manifold mesh with cubic-Hermite basis in both directions
-    (``H3Basis``, ``H3Basis``), each node must carry ``du``, ``dv``, and
+    (``H3``, ``H3``), each node must carry ``du``, ``dv``, and
     ``dudv`` derivatives::
 
         node = MeshNode(
@@ -32,7 +32,7 @@ class MeshNode(dict):
             dudv=np.zeros(3),
         )
 
-    For a 3-D volume mesh with ``H3Basis`` in all three directions, the
+    For a 3-D volume mesh with ``H3`` in all three directions, the
     additional derivatives ``dw``, ``dudw``, ``dvdw``, and ``dudvdw`` are
     also required::
 

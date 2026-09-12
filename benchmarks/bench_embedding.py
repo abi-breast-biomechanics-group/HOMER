@@ -10,7 +10,7 @@ import jax
 import numpy as np
 
 from HOMER import Mesh, MeshElement, MeshNode
-from HOMER.basis_definitions import L2Basis
+from HOMER.basis_definitions import L2
 
 N_POINTS = 1_000_000
 N_ITERS = 5
@@ -20,7 +20,7 @@ def build_mesh(refinement=5):
     locs = [[0, 0, 1], [0, 0, 0.5], [0, 0, 0],
             [0, 0.5, 1], [0.5, 0.5, 0.5], [0, 0.5, 0],
             [0, 1, 1], [0, 1, 0.5], [0, 1, 0]]
-    element = MeshElement(node_indexes=list(range(9)), basis_functions=(L2Basis, L2Basis))
+    element = MeshElement(node_indexes=list(range(9)), basis_functions=(L2, L2))
     mesh = Mesh(nodes=[MeshNode(loc=l) for l in locs], elements=element, jax_compile=True)
     mesh.refine(refinement)
     mesh.generate_mesh()

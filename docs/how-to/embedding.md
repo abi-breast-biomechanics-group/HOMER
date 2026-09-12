@@ -1,12 +1,13 @@
 # Embedding Points into a Mesh
 
 `embed_points()` finds the parametric coordinates `(element_id, xi)` that
-correspond to given physical-space points.  This is the first step in many
-workflows: fitting secondary fields, evaluating data at mesh locations, or
+correspond to given physical-space points.
+If these points lie outside of the mesh, it will find the parametric coordinates that minimise the distance 
+to the physical-space points.
+
+This is the first step in many workflows: fitting secondary fields, evaluating data at mesh locations, or
 computing embedding errors.
-The solve runs on a JAX backend.  Its closures are built once per
-`generate_mesh()` call rather than per `embed_points()` call, so repeated
-embeddings against the same mesh do not retrace.
+The solve runs on a JAX backend.  
 
 ---
 
@@ -14,7 +15,7 @@ embeddings against the same mesh do not retrace.
 
 ```python
 import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, H3
 
 # ... build your mesh ...
 
@@ -55,9 +56,12 @@ import numpy as np
 mean_error = np.mean(np.linalg.norm(residuals, axis=-1))
 ```
 
+This is intended for use as a fitting metric, allowing optimisation over the 
+data-to-model distance from each point in pts to the mesh.
+
 ---
 
-## Providing Initial Estimates
+## Initial Estimates
 
 If you already have approximate embeddings (e.g. from a previous solve), pass
 them as `init_elexi` to skip the coarse nearest-neighbour search:
@@ -69,6 +73,11 @@ them as `init_elexi` to skip the coarse nearest-neighbour search:
     return_residual=True,
 )
 ```
+
+If an estimate is not provided, an initial estimate is found using either a
+Morton Z-curve or approximate K-nn algorithm, depending on field dimension
+and the provided `dim mask`.
+
 
 ---
 
@@ -96,13 +105,17 @@ converged; raise it when an element is strongly curved relative to its size:
                                           return_residual=True)
 ```
 
+The embedding algorithm allows for early stopping if all points are converged, so 
+this will only increase runtime if the worst case embeddings were slow.
+
 ---
 
 ## Embedding in a Subset of Dimensions
 
 `dim_mask` restricts the residual to some components of the field, which is
-how you embed against a projection: a silhouette, a single slice, or a
-multi-state field where only some states are observed.
+how you embed against a projection: a silhouette, a single slice, a
+multi-state field where only some states are observed, or a time-varying mesh.
+
 
 ```python
 # match x and y only, and let z fall where it may
@@ -129,8 +142,7 @@ so it cannot express "these components only".
 
 `embed_points` carries a custom JVP, so it can sit inside a larger
 differentiable pipeline — a loss defined on where data lands in parametric
-space, say.  The JVP reuses the Jacobian the Newton solve already converged
-to rather than recomputing one.
+space, or on the embedding residual.
 
 ```python
 import jax
@@ -145,8 +157,10 @@ grad = jax.grad(loss)(mesh.optimisable_param_array)
 ```
 
 `approx_jac=True` drops the sliding term from the residual gradient.  It is
-less accurate but keeps the derivative separable by dimension, which
-compresses the Jacobian further; the estimate keeps the right sign.
+less accurate but keeps the derivative separable by dimension.
+This approximation increases the sparsitty of the jacobian by a factor of the mesh field dimension.
+As the estimate keeps the right sign, the worse convergence per step is often worth the speed up,
+or only possible because of the reduced memory usage.
 
 ---
 
