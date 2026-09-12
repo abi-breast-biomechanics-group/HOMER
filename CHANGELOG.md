@@ -1,9 +1,11 @@
 # Changelog
 
-Notable changes to HOMER. No releases have been tagged yet, so everything to
-date sits under Unreleased.
+Notable changes to HOMER.
 
-## Unreleased
+## 1.0.0 - 2026-09-12
+
+Everything below is the first tagged release; HOMER carried a `0.2.2.x`
+version through its whole pre-release life.
 
 ### Added
 - Predictable node numbering after `refine` and `rebase`, with `'lattice'`,
@@ -30,7 +32,8 @@ date sits under Unreleased.
   deepcopy, a pickle or a JSON round trip.
 - Point embedding is roughly 8x faster — its closures are built once per
   `generate_mesh()` instead of per call, and the iteration count is traced so
-  changing it does not retrace.
+  changing it does not retrace. `benchmarks/bench_embedding.py` embeds a
+  million points in 0.55s.
 - `linear_fit` solves column-equilibrated, recovering several digits in
   float32 for Hermite and B-spline weight matrices.
 - The test suite was rebuilt: the scripts that ended at `plotter.show()` are
@@ -67,3 +70,5 @@ date sits under Unreleased.
   project does not declare.
 - `bspline.py`, which nothing imported; the B-spline basis lives in
   `basis_definitions.py`.
+- `mesher.pyi`, alongside the `mesher.py` split; the generated stub now sits
+  next to the class it describes, as `mesh/field.pyi`.
