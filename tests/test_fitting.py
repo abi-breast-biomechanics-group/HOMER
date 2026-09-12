@@ -19,7 +19,7 @@ from HOMER.fitting import point_cloud_fit
 from HOMER.geometry import basic_surface, cube
 from HOMER.jacobian_evaluator import (estimate_column_norms, estimate_sparsity,
                                       jacobian, matrix_free_jacobian)
-from HOMER.mesh import column_equilibrated_lstsq, sparse_equilibrated_lstsq
+from HOMER.mesh import column_equilibrated_lstsq
 
 from _helpers import CLOSE, EXACT, arr, bulged_patch, unit_hex
 
@@ -52,53 +52,6 @@ def test_weight_matrix_rows_sum_to_one_for_a_lagrange_basis():
     weights = arr(mesh.get_xi_weight_mat(np.zeros(len(grid), int), grid))
 
     np.testing.assert_allclose(weights.sum(-1), 1.0, atol=1e-5)
-
-
-def test_the_weight_blocks_scatter_to_the_weight_matrix():
-    """``get_xi_weight_blocks`` is ``get_xi_weight_mat`` before the scatter."""
-    mesh = bulged_patch()
-    grid = mesh.xi_grid(5)
-    eles = np.zeros(len(grid), dtype=int)
-
-    weights, columns = mesh.get_xi_weight_blocks(eles, grid)
-    scattered = np.zeros_like(arr(mesh.get_xi_weight_mat(eles, grid)))
-    np.add.at(scattered, (np.repeat(np.arange(len(grid)), columns.shape[1]),
-                          np.asarray(columns).ravel()), arr(weights).ravel())
-
-    np.testing.assert_allclose(scattered, arr(mesh.get_xi_weight_mat(eles, grid)), atol=EXACT)
-
-
-@pytest.mark.parametrize('basis', [[L1Basis] * 3, [H3Basis] * 3, [B3Basis] * 3],
-                         ids=['L1', 'H3', 'B3'])
-def test_the_sparse_solve_fits_at_least_as_well_as_the_dense_one(basis):
-    """The system a mesh builds is block-sparse, and solving it sparse is not a
-    compromise: it minimises the same residual, in float64 rather than float32,
-    so it lands no further from the targets than the dense solve does.
-
-    Stated as a comparison of residuals rather than of parameters, because for
-    a rank-deficient system the two tie-break differently while fitting the
-    same geometry -- which is the distinction ``column_equilibrated_lstsq``'s
-    own docstring draws.
-    """
-    mesh = cube(basis=[L1Basis] * 3)
-    mesh.refine(2)
-    mesh = mesh.rebase(basis)
-
-    grid = mesh.xi_grid(4)
-    eles = np.repeat(np.arange(len(mesh.elements)), len(grid))
-    xis = np.tile(grid, (len(mesh.elements), 1))
-    targets = arr(mesh.evaluate_embeddings_ele_xi_pair(eles, xis))
-
-    W = arr(mesh.get_xi_weight_mat(eles, xis))
-    weights, columns = mesh.get_xi_weight_blocks(eles, xis)
-    n_cols = mesh.true_param_array.shape[0] // mesh.fdim
-
-    p_dense = arr(column_equilibrated_lstsq(W, targets)[0])
-    p_sparse = arr(sparse_equilibrated_lstsq(weights, columns, n_cols, targets))
-
-    assert p_sparse.shape == p_dense.shape
-    residual = lambda p: np.linalg.norm(W @ p - targets)
-    assert residual(p_sparse) <= residual(p_dense) + EXACT
 
 
 ############################################### the preconditioned solve

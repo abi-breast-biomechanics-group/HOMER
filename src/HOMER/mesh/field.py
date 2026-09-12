@@ -118,7 +118,6 @@ class MeshField:
     update_from_params = parameters.update_from_params
     unfix_mesh = parameters.unfix_mesh
     get_xi_weight_mat = parameters.get_xi_weight_mat
-    get_xi_weight_blocks = parameters.get_xi_weight_blocks
     linear_fit = parameters.linear_fit
     associated_node_index = topology.associated_node_index
     _explore_topology = topology._explore_topology

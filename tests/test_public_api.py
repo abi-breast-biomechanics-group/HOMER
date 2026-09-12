@@ -25,7 +25,7 @@ BOUND = {
                    'gauss_grid', 'eval_surface', 'embed_points',
                    'evaluate_sobolev', 'get_volume', 'evaluate_strain'],
     'parameters': ['get_element_params', 'update_from_params', 'unfix_mesh',
-                   'get_xi_weight_mat', 'get_xi_weight_blocks', 'linear_fit'],
+                   'get_xi_weight_mat', 'linear_fit'],
     'topology': ['associated_node_index', '_explore_topology',
                  'get_xi_surface_nodes', 'get_faces', 'topo_chain_check',
                  '_update_id_mappings', '_clean_pts', 'get_colouring_dict'],
