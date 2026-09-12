@@ -250,7 +250,7 @@ def process_elem(lines: list[str], basis_def) -> MeshElement:
         else:
             versions.append(0)
 
-    node_inds = [str(n) + f"_{v}" if v is not 0 else str(n) for n,v in zip(nodes, versions)] 
+    node_inds = [str(n) + f"_{v}" if v != 0 else str(n) for n,v in zip(nodes, versions)] 
 
     elem = MeshElement(node_ids=node_inds, basis_functions=basis_def, id=element_number)
     return elem
