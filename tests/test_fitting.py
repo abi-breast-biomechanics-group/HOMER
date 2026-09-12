@@ -8,6 +8,7 @@ target is representable in the fitting basis the answer is exact -- so that
 is what is asserted here.
 """
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -99,6 +100,77 @@ def test_the_sparse_solve_fits_at_least_as_well_as_the_dense_one(basis):
     assert p_sparse.shape == p_dense.shape
     residual = lambda p: np.linalg.norm(W @ p - targets)
     assert residual(p_sparse) <= residual(p_dense) + EXACT
+
+
+def test_the_sparse_solve_differentiates_like_the_dense_one():
+    """A refinement can sit inside a loss function.
+
+    Only the square solve leaves JAX, inside ``jax.lax.custom_linear_solve``,
+    so JAX derives the JVP and the transpose from its own rule rather than
+    from anything written here.  What that has to buy is agreement with the
+    dense path, which JAX differentiates natively -- for the targets, and for
+    the weights, which enter through the closure rather than the residual.
+    """
+    rng = np.random.default_rng(1)
+    n_rows, K, n_cols = 300, 6, 30
+    columns = jnp.asarray(rng.integers(0, n_cols, (n_rows, K)))
+    weights = jnp.asarray(rng.random((n_rows, K)) + 0.5, dtype=jnp.float32)
+    targets = jnp.asarray(rng.random((n_rows, 3)), dtype=jnp.float32)
+
+    def densify(w):
+        rows = jnp.repeat(jnp.arange(n_rows), K)
+        return jnp.zeros((n_rows, n_cols)).at[rows, columns.ravel()].add(w.ravel())
+
+    sparse = lambda w, b: (sparse_equilibrated_lstsq(w, columns, n_cols, b) ** 2).sum()
+    dense = lambda w, b: (column_equilibrated_lstsq(densify(w), b)[0] ** 2).sum()
+
+    np.testing.assert_allclose(sparse(weights, targets), dense(weights, targets), atol=EXACT)
+    for argnums in (0, 1):
+        np.testing.assert_allclose(arr(jax.grad(sparse, argnums=argnums)(weights, targets)),
+                                   arr(jax.grad(dense, argnums=argnums)(weights, targets)),
+                                   atol=EXACT)
+
+
+def test_the_sparse_solve_agrees_forwards_backwards_and_under_jit():
+    """Both modes come from one operator, so they must not disagree.
+
+    ``jax.lax.custom_linear_solve`` derives the JVP and the transpose from the
+    augmented system itself rather than from a rule written here, so the check
+    is the defining identity between them: the pairing ``<w, J v>`` taken
+    forwards has to equal ``<J.T w, v>`` taken backwards.
+    """
+    rng = np.random.default_rng(2)
+    n_rows, K, n_cols = 200, 4, 20
+    columns = jnp.asarray(rng.integers(0, n_cols, (n_rows, K)))
+    weights = jnp.asarray(rng.random((n_rows, K)) + 0.5, dtype=jnp.float32)
+    targets = jnp.asarray(rng.random((n_rows, 2)), dtype=jnp.float32)
+
+    solve = lambda b: sparse_equilibrated_lstsq(weights, columns, n_cols, b)
+
+    np.testing.assert_allclose(arr(jax.jit(solve)(targets)), arr(solve(targets)), atol=EXACT)
+    np.testing.assert_allclose(arr(jax.jit(jax.grad(lambda b: solve(b).sum()))(targets)),
+                               arr(jax.grad(lambda b: solve(b).sum())(targets)), atol=EXACT)
+
+    tangent = jnp.asarray(rng.standard_normal((n_rows, 2)), dtype=jnp.float32)
+    cotangent = jnp.asarray(rng.standard_normal((n_cols, 2)), dtype=jnp.float32)
+    forwards = (cotangent * jax.jvp(solve, (targets,), (tangent,))[1]).sum()
+    backwards = (jax.vjp(solve, targets)[1](cotangent)[0] * tangent).sum()
+    np.testing.assert_allclose(arr(forwards), arr(backwards), rtol=1e-5)
+
+
+def test_a_one_dimensional_target_comes_back_one_dimensional():
+    """A secondary field fits a scalar per point, and refines through here too."""
+    rng = np.random.default_rng(3)
+    n_rows, K, n_cols = 120, 4, 15
+    columns = jnp.asarray(rng.integers(0, n_cols, (n_rows, K)))
+    weights = jnp.asarray(rng.random((n_rows, K)) + 0.5, dtype=jnp.float32)
+    targets = jnp.asarray(rng.random(n_rows), dtype=jnp.float32)
+
+    flat = sparse_equilibrated_lstsq(weights, columns, n_cols, targets)
+    column = sparse_equilibrated_lstsq(weights, columns, n_cols, targets[:, None])
+
+    assert flat.shape == (n_cols,)
+    np.testing.assert_allclose(arr(flat), arr(column)[:, 0], atol=EXACT)
 
 
 ############################################### the preconditioned solve

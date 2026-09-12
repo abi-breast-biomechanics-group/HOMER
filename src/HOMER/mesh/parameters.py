@@ -141,52 +141,63 @@ def get_xi_weight_blocks(self, eles, xis):
     return jnp.squeeze(weights), columns
 
 
-def _splu_solve(weights, columns, n_cols, b):
-    """The numpy side of :func:`sparse_equilibrated_lstsq`."""
+def _splu_augmented_solve(weights, columns, n_cols, top, bottom):
+    """Solve the augmented least-squares system for the matrix *W* given by its blocks.
+
+    ``[[I, W], [W.T, 0]] @ [r, y] = [top, bottom]``, whose second block row
+    makes ``y`` the least-squares solution and ``r`` the residual::
+
+        r = top - W y          W.T W y = W.T top - bottom
+
+    Solved through the normal matrix, which is where the sparsity pays: it is
+    symmetric positive definite, so a sparse LU under a symmetric ordering
+    keeps the factor sparse.  Squaring the condition number to get there is
+    safe only in float64 and only after the columns are equilibrated -- a
+    B-spline control net starts at 1.6e5, which float32 cannot carry -- so this
+    runs in float64 whatever the field's precision.
+    """
     weights = np.asarray(weights, dtype=np.float64)
     columns = np.asarray(columns)
-    b = np.atleast_2d(np.asarray(b, dtype=np.float64).T).T
+    top = np.asarray(top, dtype=np.float64)
+    bottom = np.asarray(bottom, dtype=np.float64)
 
     n_rows, K = columns.shape
-    rows = np.repeat(np.arange(n_rows), K)
-    #coo sums duplicate (row, column) pairs, which is what the dense form's
-    #scatter-add does for a node an element refers to more than once
-    W = sp.coo_matrix((weights.reshape(-1), (rows, columns.reshape(-1))),
+    #coo sums duplicate (row, column) pairs, as the dense form's scatter-add
+    #does for a node an element refers to more than once
+    W = sp.coo_matrix((weights.reshape(-1),
+                       (np.repeat(np.arange(n_rows), K), columns.reshape(-1))),
                       shape=(n_rows, n_cols)).tocsc()
 
-    scale = np.sqrt(W.multiply(W).sum(axis=0)).A1
-    scale[scale == 0] = 1.0
-    W = W @ sp.diags(1.0 / scale)
-
-    normal = (W.T @ W).tocsc()
-    #the normal matrix is symmetric positive definite, so the symmetric
-    #ordering is the one that keeps the factor sparse
-    factor = splu(normal, permc_spec='MMD_AT_PLUS_A')
-    return (factor.solve(W.T @ b) / scale[:, None])
+    y = splu((W.T @ W).tocsc(), permc_spec='MMD_AT_PLUS_A').solve(W.T @ top - bottom)
+    return top - W @ y, y
 
 
 def sparse_equilibrated_lstsq(weights, columns, n_cols, b):
-    """Least squares on a sparse weight matrix, by equilibrated normal equations.
+    """Least squares on a mesh's block-sparse weight matrix.
 
     The sparse counterpart of :func:`column_equilibrated_lstsq`, for the
     systems built out of a mesh rather than handed in by a caller.  Those are
-    block-sparse by construction -- a query point sees one element, so its row
-    touches only that element's nodes -- and the density falls as the mesh
+    block-sparse by construction -- a query point lies in one element, so its
+    row touches only that element's nodes -- and the density falls as the mesh
     grows: a refined cube reaches 0.16% at four thousand elements, where the
     dense form is a 2.2 GB array that is 99.84% zeros.
 
-    Columns are equilibrated exactly as in the dense solve, and for the same
-    reason it costs nothing and buys several digits.  Here it does something
-    more: forming ``W.T @ W`` squares the condition number, which would be
-    fatal at the 4.4e4 a refined tricubic Hermite mesh starts from, and merely
-    uninteresting at the 4.1e2 equilibration leaves.  The factorisation runs in
-    float64 whatever the field's precision, so the squaring costs nothing that
-    the float32 result can see.
+    Columns are equilibrated exactly as in the dense solve.  Here it does more
+    than recover digits: the solve forms ``W.T @ W``, squaring the condition
+    number, which would be fatal at the 4.4e4 a refined tricubic Hermite mesh
+    starts from and is merely uninteresting at the 4.1e2 equilibration leaves.
 
-    Runs through :func:`jax.pure_callback`, so it can be called from traced
-    code.  It carries no differentiation rule: nothing differentiates through
-    a refinement, and a JVP written for a caller that does not exist is a
-    liability rather than a feature.
+    Differentiable in both directions, so a refinement can sit inside a loss
+    function.  The square system handed to :func:`jax.lax.custom_linear_solve`
+    is the augmented one -- ``[[I, W], [W.T, 0]]`` against ``[b, 0]`` -- rather
+    than the normal equations, and that choice is about precision, not
+    elegance.  The normal form would put ``W.T @ b`` on the JAX side of the
+    boundary, where it is summed in float32 before the solve ever sees it, and
+    that rounding alone costs a B-spline fit a factor of 46.  The augmented
+    form passes *b* across untouched and forms the product in float64 inside.
+    JAX derives the JVP and the transpose from the operator either way, so
+    forward and reverse mode both work and agree by construction, and gradients
+    reach the weights as well as the targets.
 
     :param weights:
         Non-zero weights per row, shape ``(n_pts, K)``, from
@@ -201,12 +212,40 @@ def sparse_equilibrated_lstsq(weights, columns, n_cols, b):
 
     :returns:
         jax.numpy.ndarray
-            Fitted parameters, shape ``(n_cols, fdim)``.
+            Fitted parameters, ``(n_cols,)`` or ``(n_cols, fdim)`` to match *b*.
     """
-    fdim = 1 if jnp.ndim(b) == 1 else jnp.shape(b)[1]
-    out = jax.ShapeDtypeStruct((n_cols, fdim), jnp.asarray(b).dtype)
-    return jax.pure_callback(lambda w, c, t: _splu_solve(w, c, n_cols, t).astype(out.dtype),
-                             out, weights, columns, b)
+    weights, columns, b = jnp.asarray(weights), jnp.asarray(columns), jnp.asarray(b)
+    one_dimensional = b.ndim == 1
+    b = b[:, None] if one_dimensional else b
+
+    squares = jnp.zeros(n_cols).at[columns].add(weights ** 2)
+    #a column with no entries constrains nothing; leave it unscaled rather than
+    #divide by ~0, which would amplify its round-off instead
+    scale = jnp.where(squares > 0, jnp.sqrt(jnp.where(squares > 0, squares, 1.0)), 1.0)
+    equilibrated = weights / scale[columns]
+
+    n_rows = b.shape[0]
+
+    def matvec(v):
+        """``[[I, W], [W.T, 0]] @ v``, as gathers and scatter-adds."""
+        r, y = v[:n_rows], v[n_rows:]
+        return jnp.concatenate([
+            r + (equilibrated[..., None] * y[columns]).sum(1),
+            jnp.zeros_like(y).at[columns].add(equilibrated[..., None] * r[:, None, :])])
+
+    def solve(_, rhs):
+        out = jax.ShapeDtypeStruct(rhs.shape, rhs.dtype)
+        return jax.pure_callback(
+            lambda w, c, v: np.concatenate(
+                _splu_augmented_solve(w, c, n_cols, v[:n_rows], v[n_rows:])).astype(out.dtype),
+            out, equilibrated, columns, rhs)
+
+    #one array rather than a pair: a tuple leaves the zero block with a
+    #symbolic zero tangent, which custom_linear_solve will not take
+    rhs = jnp.concatenate([b, jnp.zeros((n_cols, b.shape[1]), dtype=b.dtype)])
+    y = jax.lax.custom_linear_solve(matvec, rhs, solve, symmetric=True)[n_rows:]
+    y = y / scale[:, None]
+    return y[:, 0] if one_dimensional else y
 
 
 def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, skip_bool=False,

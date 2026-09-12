@@ -43,7 +43,8 @@ date sits under Unreleased.
   being formed dense and handed to an SVD: 2.2GB, 99.84% zeros, 49 of the 56
   seconds a `refine(16)` took. `refine(16)` is now 2.5s, and the cost grows
   with the mesh rather than with its cube. The sparse solve runs in float64,
-  so it is also several digits more accurate than the float32 dense one.
+  so it is also several digits more accurate than the float32 dense one, and
+  it differentiates in both directions, so a refit can sit inside a loss.
 - `get_xi_surface_nodes` reads a face off the basis and the element node
   ordering instead of building a weight matrix over a tiled xi query. It no
   longer allocates a dense `(25 * n_elements) x n_parameters` array, and no
