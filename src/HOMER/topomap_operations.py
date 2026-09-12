@@ -19,17 +19,19 @@ from scipy.sparse.csgraph import connected_components
 def global_nodes_from_ele_localnodes(local_points, connectivity, tol=1e-7):
     """
     Builds a global indexing for points of interest across a hypercube mesh.
-    
-    Args:
-        local_points: (N, D) array of local coordinates.
-        connectivity: (m, D, 2) array. -1 means no connection.
-                      connectivity[e1, d, side] = e2
-        tol: Tolerance for floating point coordinate matching.
-        
-    Returns:
-        unique_representatives: (U, 2) array of (element_idx, local_point_idx) 
-                                for each unique global point.
-        per_simplex_idx: (m, N) array mapping each local point to its global ID.
+
+    :param local_points:
+        ``(N, D)`` array of local coordinates, the same in every element.
+    :param connectivity:
+        ``(m, D, 2)`` neighbour array; ``connectivity[e1, d, side] = e2``,
+        with ``-1`` for no connection.
+    :param tol:
+        Tolerance for matching coordinates across an element boundary.
+
+    :returns:
+        ``(unique_representatives, per_simplex_idx)`` -- an ``(U, 2)`` array of
+        ``(element_idx, local_point_idx)`` naming each unique global point,
+        and an ``(m, N)`` array mapping every local point to its global id.
     """
     m, D, _ = connectivity.shape
     N = local_points.shape[0]
@@ -104,16 +106,16 @@ def refine_connectivity(connectivity, R):
     """
     Refines an m x D x 2 connectivity array by a length D refinement array R.
     Uses Fortran ordering (dimension 0 changes fastest) for sub-hypercubes.
-    
-    Parameters:
-    connectivity (np.ndarray): Shape (m, D, 2). Values are -1 or neighbor index.
-    R (list or np.ndarray): Length D array containing the subdivision factors.
-    
-    Returns:
-    tuple: 
-        - new_conn (np.ndarray): Refined connectivity of shape (m * prod(R), D, 2).
-        - local_coords (np.ndarray): The Fortran-ordered grid indices inside the 
-                                     parent element, shape (m * prod(R), D).
+
+    :param connectivity:
+        Shape ``(m, D, 2)``; values are ``-1`` or a neighbour index.
+    :param R:
+        Length ``D``, the subdivision factor per direction.
+
+    :returns:
+        ``(new_conn, local_coords)`` -- the refined connectivity, shape
+        ``(m * prod(R), D, 2)``, and the Fortran-ordered grid index of each
+        new element inside its parent, shape ``(m * prod(R), D)``.
     """
     m, D, _ = connectivity.shape
     R = np.array(R, dtype=int)

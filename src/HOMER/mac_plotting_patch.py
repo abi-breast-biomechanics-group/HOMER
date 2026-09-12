@@ -99,6 +99,9 @@ def exit_fullscreen(plotter):
 
     Safe to call on any platform, on already-closed plotters and on off-screen
     plotters; it silently does nothing when there is nothing to do.
+
+    :param plotter:
+        The plotter whose window to take out of full screen.
     """
     if sys.platform != "darwin":
         return

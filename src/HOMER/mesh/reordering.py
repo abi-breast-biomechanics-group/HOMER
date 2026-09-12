@@ -84,6 +84,16 @@ def resolve_strategy(strategy) -> Optional[str]:
     ``None`` means "leave the numbering alone", which is what a caller checks
     when it wants to know whether to do the work of building a parent-node map
     at all.
+
+    :param strategy:
+        One of :data:`STRATEGIES`, ``True`` for :data:`DEFAULT_NODE_ORDERING`,
+        or ``False``/``None`` for no reordering.
+
+    :returns:
+        The strategy name, or ``None`` to leave the numbering alone.
+
+    :raises ValueError:
+        If *strategy* is not a known ordering.
     """
     if strategy is None or strategy is False:
         return None
@@ -258,10 +268,13 @@ def node_permutation(field: 'MeshField', strategy=True, topo_lookup=None,
         Neighbour array to use for the ``'lattice'`` ordering.  Defaults to the
         field's own ``_topo_lookup``; pass it explicitly when the field's copy
         is stale, as it is midway through a refinement.
-    parent_of_new, n_old:
-        The map from each new node to the old node it coincides with, and the
-        old node count.  When the two describe a one-to-one correspondence the
-        old numbering is reproduced and *strategy* is not consulted - see
+    :param parent_of_new:
+        For each new node, the index of the old node it coincides with, or
+        ``-1``.
+    :param n_old:
+        How many nodes the field had before the operation.  When these two
+        describe a one-to-one correspondence the old numbering is reproduced
+        and *strategy* is not consulted - see
         :func:`preserving_permutation`.
     """
     strategy = resolve_strategy(strategy)
@@ -298,6 +311,17 @@ def apply_node_permutation(field: 'MeshField', perm: np.ndarray, generate=True) 
 
     Elements that reference their nodes by index are rewritten; ones that
     reference them by id need no rewriting, since the id travels with the node.
+
+    :param field:
+        The field to renumber.
+    :param perm:
+        Index array, where ``field.nodes[perm[i]]`` becomes position *i*.
+    :param generate:
+        Rebuild the mesh afterwards.  Pass ``False`` when the caller is about
+        to call :meth:`~HOMER.mesh.field.MeshField.generate_mesh` anyway.
+
+    :raises ValueError:
+        If *perm* does not have one entry per node.
     """
     perm = np.asarray(perm, dtype=int)
     if perm.shape != (len(field.nodes),):
@@ -341,8 +365,12 @@ def reorder_nodes(field: 'MeshField', strategy=True, topo_lookup=None,
     :param generate:
         Rebuild the mesh afterwards.  Pass ``False`` when the caller is about
         to call :meth:`~HOMER.mesh.field.MeshField.generate_mesh` anyway.
-    parent_of_new, n_old:
-        Where the new nodes came from, if the caller knows - see
+    :param parent_of_new:
+        For each new node, the index of the old node it coincides with, or
+        ``-1``.
+    :param n_old:
+        How many nodes the field had before the operation.  Together these
+        say where the new nodes came from, if the caller knows - see
         :func:`node_permutation`.  Passed by
         :meth:`~HOMER.mesh.refinement.refine` and
         :meth:`~HOMER.mesh.refinement.rebase` so that an operation which

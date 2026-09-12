@@ -165,8 +165,12 @@ class MeshElement:
         """
         Given a derivs struct defined iternally, returns the canonical ordering according to a given order dict.
 
-        :params derivs_struct: The calculated derivative pairs to evaluate.
-        :params order_dict: The ordering to follow
+        :param derivs_struct: The calculated derivative pairs to evaluate.
+        :param order_dict: Maps a derivative tuple to its rank, giving the
+            ordering to follow.
+
+        :returns: Indices that put *derivs_struct* into canonical order,
+            sorted by derivative magnitude and then by *order_dict*.
         """
 
         indexed_keys = [

@@ -108,6 +108,22 @@ class Mesh(MeshField):
         *reorder_nodes* is passed straight through to
         :meth:`MeshField.rebase`; the secondary fields are not rebased here,
         so their numbering is untouched.
+
+        :param new_basis:
+            The new 1-D bases, one per parametric direction.
+        :param in_place:
+            Replace this mesh's nodes and elements with the rebased ones and
+            return *self*, rather than returning a new mesh.
+        :param res:
+            xi grid points per direction used for the linear fit.
+        :param preserve_fixed_params:
+            Carry fixed parameters across to coincident nodes of the rebased
+            geometry.
+        :param reorder_nodes:
+            Passed straight through to :meth:`MeshField.rebase`.
+
+        :returns:
+            The rebased mesh, carrying the same secondary fields.
         """
         temp_meshField = super().rebase(new_basis, in_place=False, res=res,
                                         preserve_fixed_params=preserve_fixed_params,
@@ -191,6 +207,13 @@ class Mesh(MeshField):
             # Retrieve and evaluate
             normal_field = mesh['normals']
             values_at_xis = normal_field.evaluate_embeddings(elem_ids, xis)
+
+        :param field_params:
+            The field's nodal parameters given directly, as a flat vector,
+            instead of being fitted from *field_locs* and *field_values*.  It
+            must have exactly one entry per nodal degree of freedom of the new
+            field, or :exc:`ValueError` is raised.  Use it to copy parameters
+            between fields that share a topology, or to resample them.
         """
 
         if new_basis is None:
@@ -263,6 +286,13 @@ class Mesh(MeshField):
     def from_dict(cls, dict_rep: dict) -> "Mesh":
         """
         Build a Mesh from a dictionary representation.
+
+        :param dict_rep:
+            Either the ``{'main', 'fields'}`` schema or the legacy
+            ``{'nodes', 'elements'}`` one.
+
+        :returns:
+            The reconstructed mesh, with any secondary fields attached.
         """
         from HOMER.io import parse_mesh_from_dict
         return parse_mesh_from_dict(dict_rep)
@@ -271,6 +301,12 @@ class Mesh(MeshField):
     def load(cls, loc: PathLike) -> "Mesh":
         """
         Load a Mesh (including fields) from a JSON file.
+
+        :param loc:
+            Path to the JSON file.
+
+        :returns:
+            The loaded mesh, already generated.
         """
         from HOMER.io import load_mesh
         return load_mesh(loc)
@@ -285,6 +321,9 @@ class Mesh(MeshField):
     def save(self, loc: PathLike):
         """
         Saves the mesh (including fields) to a .json formated file in the given location
+
+        :param loc:
+            Path to write the JSON file to.  Any existing file is overwritten.
         """
         from HOMER.io import save_mesh #avoid the circular import here
         save_mesh(self, loc)

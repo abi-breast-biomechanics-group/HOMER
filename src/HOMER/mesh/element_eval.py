@@ -18,7 +18,19 @@ from HOMER.basis_definitions import N2_weights, N3_weights, BasisGroup
 
 def make_eval(basis_funcs: BasisGroup, bp_inds:list[tuple[int]]):
     """
-        Returns a jax compliant function which evaluates a single element from a 
+    Returns a jax compliant function which evaluates a single element from a
+    flat parameter vector and a set of xi coordinates.
+
+    :param basis_funcs:
+        The element's 1-D bases, one per parametric direction.  Only 2-D and
+        3-D elements are supported.
+    :param bp_inds:
+        The element's tensor-product weight indices
+        (``MeshElement.BasisProductInds``).  Static, so the trace is reused.
+
+    :returns:
+        ``xi_eval(elem_params, xis) -> values``, flattened; callers reshape to
+        ``(n_pts, fdim)``.
     """
     if len(basis_funcs) == 2:
         def xi_eval(elem_params, xis, b_inds = bp_inds):
@@ -45,6 +57,15 @@ def make_deriv_eval(basis_funcs, bp_inds):
     Returns a JAX-compliant evaluator function.
     - basis_funcs length must be 2 or 3
     - bp_inds should be static for best compilation behavior
+
+    :param basis_funcs:
+        The element's 1-D bases, one per parametric direction.
+    :param bp_inds:
+        The element's tensor-product weight indices.
+
+    :returns:
+        ``xi_eval(elem_params, xis, d_inds) -> values``, where *d_inds* gives
+        the derivative order to take in each direction.
     """
     bp_inds = jnp.asarray(bp_inds, dtype=jnp.int32)
     ndim = len(basis_funcs)
@@ -131,7 +152,12 @@ def make_value_jac_eval(basis_funcs: BasisGroup, bp_inds):
     Falls back to the plain weight-array formulation when ``bp_inds`` is not
     a permutation of the full tensor-product lattice, so an element with a
     hand-supplied ``BP_inds`` still evaluates correctly.
-    """
+    
+    :param basis_funcs:
+        The element's 1-D bases, one per parametric direction.
+    :param bp_inds:
+        The element's tensor-product weight indices.
+"""
     ndim = len(basis_funcs)
     if ndim not in (2, 3):
         raise ValueError("Currently, meshes must be 2D or 3D")
@@ -211,6 +237,23 @@ def _make_value_jac_eval_fallback(basis_funcs: BasisGroup, bp_inds, ndim: int):
 
 
 def make_weight_eval(basis_funcs: BasisGroup, bp_inds):
+    """Return an evaluator giving the tensor-product weights at *xis*.
+
+    The same weights :func:`make_eval` contracts against the element
+    parameters, returned without the contraction -- which is what builds the
+    weight matrix a linear fit solves against.
+
+    :param basis_funcs:
+        The element's 1-D bases, one per parametric direction.
+    :param bp_inds:
+        The element's tensor-product weight indices.
+
+    :returns:
+        ``xi_eval(xis) -> weights``, shaped ``(n_basis, n_pts)``.
+
+    :raises ValueError:
+        If the element is not 2-D or 3-D.
+    """
     if len(basis_funcs) == 2:
         def xi_eval(xis, b_inds = bp_inds):
             w0 = basis_funcs[0].fn(xis[:, 0])  
@@ -241,9 +284,10 @@ def quadrature_order(basis_functions: BasisGroup) -> list[int]:
     ``n_d = ceil(ndim * p_d / 2)``.
 
     This is the order for a *square* Jacobian, where the parametric and
-    physical dimensions agree.  A 2-D manifold in 3-D space has a ``(3, 2)``
-    Jacobian whose area element is a square root, not a polynomial, so no
-    finite Gauss rule is exact there and this order does not apply.
+    physical dimensions agree.  A 2-D manifold in 3-D space has a
+    ``(3, 2)`` Jacobian whose area element is a square root, not a
+    polynomial, so no finite Gauss rule is exact there and this order does
+    not apply.
 
     Using the basis order itself -- the obvious choice, and what this used to
     do -- under-integrates every element that is not affine.  A distorted
@@ -255,6 +299,13 @@ def quadrature_order(basis_functions: BasisGroup) -> list[int]:
     every basis HOMER ships (``L4Basis``, degree 4, needs 6 points in 3-D).  A
     higher-degree basis is clamped to the table and warned about, since an
     approximate answer beats no answer.
+
+    :param basis_functions:
+        The element's 1-D bases, one per parametric direction.
+
+    :returns:
+        Gauss points per direction, clamped to the highest tabulated rule in
+        :data:`GAUSS` with a warning if a basis needs more.
     """
     ndim = len(basis_functions)
     max_order = max(GAUSS)

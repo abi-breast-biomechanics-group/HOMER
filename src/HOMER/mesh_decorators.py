@@ -44,6 +44,18 @@ DEFAULT_EVAL_CHUNK_SIZE = 100_000
 DEFAULT_EVAL_REMAT = False
 
 def wide_eval(fn):
+    """Mark *fn* as an evaluator that gets the generated variants.
+
+    Sets ``_is_derived``, which :func:`expand_wide_evals` reads off the class
+    body to decide what needs ``*_in_every_element`` and ``*_ele_xi_pair``
+    siblings.
+
+    :param fn:
+        The evaluator, taking ``(self, element_ids, xis, ...)``.
+
+    :returns:
+        *fn* unchanged, now marked.
+    """
     fn._is_derived = True
     return fn
 
@@ -111,6 +123,17 @@ def _chunked_vmap(fn, mapped_args, chunk_size, remat=False):
     )
 
 def depreciation(fn):
+    """Wrap *fn* so calling it warns that the name is deprecated.
+
+    Prints a stack trace alongside the warning, so the call site still using
+    the old name is visible.
+
+    :param fn:
+        The function to wrap.
+
+    :returns:
+        A wrapper that warns and then calls *fn*.
+    """
     def new_fn(*a, **kw):
         traceback.print_stack()
         logging.warning(f"This old naming order is depreciated, and may be removed in a future update")
@@ -118,6 +141,17 @@ def depreciation(fn):
     return new_fn
 
 def make_iee(name):
+    """Build the ``*_in_every_element`` variant of the evaluator called *name*.
+
+    :param name:
+        Attribute name of the base evaluator on the field.  Looked up on the
+        instance at call time, so it picks up the compiled version
+        :meth:`~HOMER.mesh.field.MeshField.generate_mesh` installs.
+
+    :returns:
+        The variant, which evaluates the same xis in every element and
+        flattens the result to ``(n_elements * n_xi, ...)``.
+    """
     # @partial(jax.jit, static_argnames=['self' 'othr'])
     def iee(self, *a, fit_params=None, chunk_size=None, remat=None, **kw): 
         """Evaluates the base function in every element of the mesh
@@ -145,7 +179,17 @@ def make_iee(name):
         return mapped.reshape(-1, *mapped.shape[2:])
     return iee
 
-def make_ele_xi_pair(name):  
+def make_ele_xi_pair(name):
+    """Build the ``*_ele_xi_pair`` variant of the evaluator called *name*.
+
+    :param name:
+        Attribute name of the base evaluator on the field, looked up on the
+        instance at call time.
+
+    :returns:
+        The variant, which evaluates paired ``(element, xi)`` entries rather
+        than the cross product of the two.
+    """
     # @partial(jax.jit, static_argnames=['self', 'othr'])
     def ele_xi_pair(self, eles, xis, *a, fit_params=None, chunk_size=None, remat=None, **kw):
         """

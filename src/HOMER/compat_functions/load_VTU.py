@@ -60,6 +60,18 @@ def read_vtu_to_lexmaps(filename):
     """
     Reads a VTU file containing L3 Hexahedrons and reconstructs 
     the point_pool and lexmaps lists.
+
+    :param filename:
+        Path to the VTU file.
+
+    :returns:
+        ``(point_pool, lexmaps)`` -- the global points, and an
+        ``(n_elements, 64)`` integer array of each element's node indices,
+        reordered from VTK's own hexahedron ordering into HOMER's
+        lexicographic one.
+
+    :raises ValueError:
+        If any cell is not a 64-point cubic-Lagrange hexahedron.
     """
     mesh = pv.read(filename)
     
@@ -97,6 +109,17 @@ def read_vtu_to_lexmaps(filename):
     return point_pool, np.array(lexmaps)
 
 def load_L3_vtu_as_HOMER(vtu_file):
+    """Read a VTU of cubic-Lagrange hexahedra into a mesh.
+
+    :param vtu_file:
+        Path to the VTU file.
+
+    :returns:
+        A mesh of ``L3Basis * 3`` elements over the file's points.
+
+    :raises ValueError:
+        If any cell is not a 64-point cubic-Lagrange hexahedron.
+    """
     recovered_point_pool, recovered_lexmaps = read_vtu_to_lexmaps(vtu_file)
     mesh_nodes = [MeshNode(pt) for pt in recovered_point_pool]
     mesh_elemens = [MeshElement(node_indexes=pts, basis_functions = [L3Basis]*3) for pts in recovered_lexmaps]

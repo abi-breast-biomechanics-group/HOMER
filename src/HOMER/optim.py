@@ -31,6 +31,24 @@ if TYPE_CHECKING:
 import scipy
 
 def kdtree_distance_query(fit_data, kdtree_args=None):
+    """Differentiable nearest-neighbour distance to a fixed point cloud.
+
+    Builds a :class:`scipy.spatial.KDTree` over *fit_data* once, then wraps
+    queries against it in a :func:`jax.custom_jvp` callback so a JAX residual
+    can use it and still differentiate.  The tree runs on the host, so each
+    call costs a round-trip off the accelerator.
+
+    :param fit_data:
+        The reference cloud to measure against, shape ``(n_ref, 3)``.
+    :param kdtree_args:
+        Extra keyword arguments for ``tree.query``, e.g. ``{"workers": -1}``.
+        ``None`` uses the SciPy defaults.
+
+    :returns:
+        ``distances(data)``, taking query points ``(n_pts, 3)`` and returning
+        the flattened per-component offsets to their nearest reference
+        points, shape ``(n_pts * 3,)``.
+    """
     kd_tree_args = {} if kdtree_args is None else kdtree_args
     local_fit_data = fit_data
     tree = scipy.spatial.KDTree(fit_data)
@@ -63,6 +81,25 @@ def kdtree_distance_query(fit_data, kdtree_args=None):
         
         
 def kdtree_normal_distance_query(fit_data, normals, kdtree_args=None):
+    """As :func:`kdtree_distance_query`, projected along the reference normals.
+
+    Each offset is multiplied component-wise by the unit normal of the
+    reference point it matched, so the residual measures distance along the
+    surface and lets a point slide within the tangent plane.  That is what you
+    want when fitting an oriented cloud, where the sample positions are less
+    trustworthy than the surface they lie on.
+
+    :param fit_data:
+        The reference cloud, shape ``(n_ref, 3)``.
+    :param normals:
+        Unit normal at each reference point, same shape.
+    :param kdtree_args:
+        Extra keyword arguments for ``tree.query``.
+
+    :returns:
+        ``distances(data)``, with the same signature as
+        :func:`kdtree_distance_query`'s.
+    """
     kd_tree_args = {} if kdtree_args is None else kdtree_args
     local_fit_data = fit_data
     tree = scipy.spatial.KDTree(fit_data)

@@ -258,6 +258,15 @@ class MeshField:
     def add_node(self, node:MeshNode) -> None:
         """
         Add a node to the node list.
+
+        :param node:
+            The node to append to :attr:`nodes`.
+
+        The field is deliberately *not* regenerated.  Until an element
+        references it the node is orphaned -- it has no parameters and no
+        place in the evaluation -- so there is nothing to generate.  Add the
+        nodes, add the element that uses them, and let :meth:`add_element`
+        regenerate.
         """
         self.nodes.append(node)
         # self.generate_mesh()
@@ -265,6 +274,13 @@ class MeshField:
     def add_element(self, element:MeshElement, generate_mesh=True) -> None:
         """
         Adds an element to the element list.
+
+        :param element:
+            The element to append to :attr:`elements`.  Its nodes must
+            already be in :attr:`nodes`.
+        :param generate_mesh:
+            Regenerate the field afterwards.  Pass ``False`` while adding
+            several elements and regenerate once at the end.
         """
         self.elements.append(element)
         if generate_mesh:
@@ -273,6 +289,16 @@ class MeshField:
     def drop_elements(self, inds_to_drop, generate_mesh=True, clean_points=True) -> None:
         """
         Drops the specified elements.
+
+        :param inds_to_drop:
+            Index, or list of indices, into :attr:`elements`.  A bare index
+            is accepted and wrapped.
+        :param generate_mesh:
+            Regenerate the field afterwards.
+        :param clean_points:
+            Drop nodes that no surviving element references.  This renumbers
+            the remaining nodes, so indices held across the call stop being
+            valid.
         """
         if not isinstance(inds_to_drop, list):
             inds_to_drop = [inds_to_drop]
@@ -286,12 +312,36 @@ class MeshField:
     def get_element(self, element_ids: list) -> list[MeshElement]:
         """
         Returns the element with the associated id.
+
+        :param element_ids:
+            A user-assigned element id, or a list of them.  A bare id returns
+            a single element; a list returns a list.  Ids only -- for
+            positional access use ``field.elements[i]``.
+
+        :returns:
+            The matching element, or list of elements.
+
+        :raises KeyError:
+            If an id has not been assigned to any element.
         """
         if not isinstance(element_ids, list):
             return self.get_element([element_ids])[0]
         return [self.elements[self.element_id_to_ind[id]] for id in element_ids]
 
     def get_node(self, node_ids: list | int | str) -> list[MeshNode] | MeshNode:
+        """Return nodes by their user-assigned id.
+
+        :param node_ids:
+            A node id, or a list of them.  A bare id returns a single node; a
+            list returns a list.  Ids only -- an integer is looked up as an
+            id, not as a position, so use ``field.nodes[i]`` to index.
+
+        :returns:
+            The matching node, or list of nodes.
+
+        :raises KeyError:
+            If an id has not been assigned to any node.
+        """
         if not isinstance(node_ids, list):
             return self.get_node([node_ids])[0]
         return [self.nodes[self.node_id_to_ind[id]] for id in node_ids]
@@ -315,6 +365,14 @@ class MeshField:
     def transform(self, tform):
         """
         Apply a 4x4 3D homogenous transform to the mesh.
+
+        :param tform:
+            A 4x4 homogeneous transform.  Applied to each node's ``loc`` with
+            a homogeneous fill of 1 and to every derivative field with a fill
+            of 0, so a translation moves positions without shifting
+            derivatives.
+
+        The field is regenerated afterwards.
         """
         for node in self.nodes:
             node.loc = h_tform(node.loc, tform, fill=1)
@@ -390,6 +448,16 @@ class MeshField:
         should do it once through this method and pass the result down.  A
         vector that is already full length is returned unchanged, which is
         what makes the hoist transparent to the evaluators below.
+
+        :param fit_params:
+            The optimisable subset, an already-full-length vector, or
+            ``None``.
+
+        :returns:
+            A full-length parameter vector: the subset scattered into
+            :attr:`true_param_array`, *fit_params* unchanged when it is
+            already full length, or :attr:`true_param_array` itself when
+            ``None``.
         """
         param_data = jnp.asarray(self.true_param_array)
         if fit_params is None:
@@ -452,6 +520,9 @@ class MeshField:
     def save(self, loc: PathLike):
         """
         Saves the field to a .json formated file in the given location
+
+        :param loc:
+            Path to write the JSON file to.  Any existing file is overwritten.
         """
         from HOMER.io import save_mesh #avoid the circular import here
         save_mesh(self, loc)

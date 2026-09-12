@@ -29,6 +29,19 @@ from jax.experimental import sparse
 def bcoo_repeat_scalar(mat: sparse.BCOO, repeats: int, axis: int) -> sparse.BCOO:
     """
     Repeats an unbatched BCOO sparse array along a specified axis by a scalar integer.
+
+    :param mat:
+        A fully sparse, unbatched ``BCOO`` array.
+    :param repeats:
+        How many times to repeat along *axis*.
+    :param axis:
+        Axis to repeat along.  Negative values count from the end.
+
+    :returns:
+        A new ``BCOO`` with *axis* scaled by *repeats*.
+
+    :raises NotImplementedError:
+        If *mat* has batch or dense dimensions.
     """
     # Ensure this handles standard unbatched, fully sparse arrays
     if mat.n_batch > 0 or mat.n_dense > 0:
@@ -98,6 +111,14 @@ def _build_full_lookup_jax(lookup_arr, ndim):
 def build_full_lookup(lookup_arr):
     """
     Wrapper to extract static ndim before dispatching to JIT.
+
+    :param lookup_arr:
+        Neighbour array of shape ``(n_elements, ndim, 2)``, ``-1`` where an
+        element has no neighbour on that face -- a field's ``_topo_lookup``.
+
+    :returns:
+        The ``3 ** ndim`` neighbour map, covering every combination of
+        stepping down, staying, or stepping up in each direction.
     """
     return _build_full_lookup_jax(lookup_arr, lookup_arr.shape[1])
 
@@ -105,6 +126,19 @@ def validate_and_extract_topology_2d(m):
     """
     Validates if the mapping array m represents a valid 2D grid homotopic to a square,
     and returns the grid shape and mapping tables.
+
+    :param m:
+        Neighbour array of shape ``(n_elements, 2, 2)``, ``-1`` where there is
+        no neighbour.
+
+    :returns:
+        ``(N, grid_to_e, e_to_grid)`` -- the grid shape, the element index at
+        each grid position, and the grid position of each element.
+
+    :raises ValueError:
+        If the topology is not a single regular grid: no unique origin, an
+        element count that does not match the grid, or a neighbour that
+        disagrees with the grid position.
     """
     m = np.asarray(m)
     num_elements = m.shape[0]
@@ -164,6 +198,15 @@ def validate_and_extract_topology_2d(m):
 def build_square_mappings(m):
     """
     Consumes mapping array `m` and returns JAX-compatible forward and inverse mapping functions for 2D.
+
+    :param m:
+        Neighbour array of shape ``(n_elements, 2, 2)``, validated by
+        :func:`validate_and_extract_topology_2d`.
+
+    :returns:
+        ``(macro_to_local, local_to_macro)``, both jitted.  The first maps a
+        macro ``(u, v)`` over the whole grid to ``(element, local xi)``; the
+        second maps an element and its local xi back to ``(u, v)``.
     """
     # Validate and build discrete mappings purely in NumPy first
     N_np, grid_to_e_np, e_to_grid_np = validate_and_extract_topology_2d(m)
@@ -216,6 +259,19 @@ def validate_and_extract_topology(m):
     """
     Validates if the mapping array m represents a valid grid homotopic to a cube,
     and returns the grid shape and mapping tables.
+
+    :param m:
+        Neighbour array of shape ``(n_elements, 3, 2)``, ``-1`` where there is
+        no neighbour.
+
+    :returns:
+        ``(N, grid_to_e, e_to_grid)`` -- the grid shape, the element index at
+        each grid position, and the grid position of each element.
+
+    :raises ValueError:
+        If the topology is not a single regular grid: no unique origin, an
+        element count that does not match the grid, or a neighbour that
+        disagrees with the grid position.
     """
     m = np.asarray(m)
     num_elements = m.shape[0]
@@ -280,6 +336,15 @@ def validate_and_extract_topology(m):
 def build_cube_mappings(m):
     """
     Consumes mapping array `m` and returns JAX-compatible forward and inverse mapping functions.
+
+    :param m:
+        Neighbour array of shape ``(n_elements, 3, 2)``, validated by
+        :func:`validate_and_extract_topology`.
+
+    :returns:
+        ``(macro_to_local, local_to_macro)``, both jitted.  The first maps a
+        macro ``(u, v, w)`` over the whole grid to ``(element, local xi)``;
+        the second maps an element and its local xi back to ``(u, v, w)``.
     """
     # Validate and build discrete mappings purely in NumPy first
     N_np, grid_to_e_np, e_to_grid_np = validate_and_extract_topology(m)
@@ -332,17 +397,16 @@ def build_cube_mappings(m):
 @jax.jit
 def spherical_to_hex_surface(angles):
     """
-    Maps (theta, phi) spherical coordinates to the surface of a 
+    Maps (theta, phi) spherical coordinates to the surface of a
     hexahedral element with coordinates in [0, 1].
-    
-    Args:
-        angles: A JAX array of shape (..., 2) containing (theta, phi).
-                theta is the polar angle [0, pi].
-                phi is the azimuthal angle [0, 2pi).
-                
-    Returns:
-        A JAX array of shape (..., 3) containing the mapped (xi, eta, zeta)
-        coordinates on the surface of the [0, 1]^3 hexahedron.
+
+    :param angles:
+        Shape ``(..., 2)`` of ``(theta, phi)``: *theta* the polar angle in
+        ``[0, pi]``, *phi* the azimuthal angle in ``[0, 2pi)``.
+
+    :returns:
+        Shape ``(..., 3)`` of ``(xi, eta, zeta)`` on the surface of the
+        ``[0, 1]**3`` hexahedron.
     """
     # 1. Unpack angles
     theta = angles[..., 0]
@@ -362,17 +426,16 @@ def spherical_to_hex_surface(angles):
 @jax.jit
 def hex_surface_to_spherical(xi_coords):
     """
-    Maps coordinates on the surface of a [0, 1]^3 hexahedral element 
+    Maps coordinates on the surface of a [0, 1]^3 hexahedral element
     back to (theta, phi) spherical coordinates.
-    
-    Args:
-        xi_coords: A JAX array of shape (..., 3) containing (xi, eta, zeta)
-                   coordinates on the surface of the [0, 1]^3 hexahedron.
-                   
-    Returns:
-        A JAX array of shape (..., 2) containing (theta, phi).
-            theta is the polar angle [0, pi].
-            phi is the azimuthal angle [0, 2pi).
+
+    :param xi_coords:
+        Shape ``(..., 3)`` of ``(xi, eta, zeta)`` on the surface of the
+        ``[0, 1]**3`` hexahedron.
+
+    :returns:
+        Shape ``(..., 2)`` of ``(theta, phi)``: *theta* the polar angle in
+        ``[0, pi]``, *phi* the azimuthal angle in ``[0, 2pi)``.
     """
     # 1. Reverse the mapping from [0, 1]^3 back to the [-1, 1]^3 cube centered at origin
     cube_coords = xi_coords * 2.0 - 1.0
@@ -398,7 +461,14 @@ def hex_surface_to_spherical(xi_coords):
     return jnp.stack([theta, phi], axis=-1)
 
 def skew_symmetric(w):
-    """Returns the 3x3 skew-symmetric matrix of a 3D vector."""
+    """Returns the 3x3 skew-symmetric matrix of a 3D vector.
+
+    :param w:
+        A 3-vector.
+
+    :returns:
+        The 3x3 matrix ``W`` with ``W @ v == cross(w, v)``.
+    """
     return jnp.array([
         [0.0, -w[2], w[1]],
         [w[2], 0.0, -w[0]],
@@ -409,12 +479,13 @@ def skew_symmetric(w):
 def rodrigues_exp(w):
     """
     Computes the SO(3) matrix exponential using Rodrigues' formula.
-    
-    Args:
-        w: A 3D array representing the rotation vector (axis * angle).
-           The direction is the axis of rotation, and the L2 norm is the angle.
-           
-    Returns:
+
+    :param w:
+        Rotation vector, ``axis * angle``: the direction is the axis and the
+        L2 norm is the angle.  Small angles take a series expansion instead of
+        dividing by the norm.
+
+    :returns:
         A 3x3 rotation matrix.
     """
     theta2 = jnp.sum(w**2)
@@ -439,7 +510,26 @@ def rodrigues_exp(w):
     return R
 
 def surface_normal_mapping(mesh, eles, xis, derivs):
-    """A default mapping function that can be used for evaluation of strain over 2D surfaces."""
+    """A default mapping function that can be used for evaluation of strain over 2D surfaces.
+
+    A 2-D manifold in 3-D has a ``(3, 2)`` Jacobian, which has no determinant
+    and no inverse, so :func:`~HOMER.mesh.evaluation.evaluate_strain` cannot
+    form a deformation gradient from it.  This prepends the unit surface
+    normal as a third column, giving a square ``(3, 3)`` Jacobian in a frame
+    where the out-of-plane direction carries no stretch.
+
+    :param mesh:
+        The field the Jacobians came from.
+    :param eles:
+        Element index per evaluation point.
+    :param xis:
+        Parametric coordinate per evaluation point.
+    :param derivs:
+        The ``(n_pts, 3, 2)`` Jacobians to extend.
+
+    :returns:
+        ``(n_pts, 3, 3)`` Jacobians, normal first.
+    """
     normal = mesh.evaluate_normals(eles, xis)
     normal = normal / jnp.linalg.norm(normal, axis=-1, keepdims=True)
     return jnp.concatenate((normal[..., None], derivs), axis=-1)
@@ -477,6 +567,18 @@ def spheres_to_polydata(verts: np.ndarray, faces: np.ndarray) -> pv.PolyData:
 def morton_nd_32bit(pts, bbox_min, bbox_max):
     """
     Converts ND points into 1D Morton codes using a strict 32-bit budget.
+
+    :param pts:
+        Points to encode, shape ``(..., ndim)``.
+    :param bbox_min:
+        Lower corner of the box the codes are computed against.
+    :param bbox_max:
+        Upper corner.  Points outside the box are clamped to it.
+
+    :returns:
+        One ``uint32`` Morton code per point.  The 32-bit budget is split
+        evenly, so each dimension keeps only ``32 // ndim`` bits -- 10 for a
+        3-D field, 2 for a 12-D one.
     """
     N = pts.shape[-1]
     # Total budget is 32 bits distributed across N dimensions
@@ -569,6 +671,18 @@ def aknn_closest_indices(A, B, chunk_size=4096):
     ``chunk_size`` bounds peak memory to ``O(chunk_size * len(A))``;
     :func:`jax_aknn` on its own materialises the full ``(len(B), len(A))``
     distance matrix.
+
+    :param A:
+        Reference points, shape ``(n_ref, fdim)``.
+    :param B:
+        Query points, shape ``(n_query, fdim)``.
+    :param chunk_size:
+        Query points per mapped chunk, bounding peak memory at
+        ``O(chunk_size * len(A))``.
+
+    :returns:
+        Index into *A* of the nearest reference point for each point of *B*,
+        shape ``(n_query,)``.
     """
     A = jnp.asarray(A)
     B = jnp.asarray(B)
@@ -631,6 +745,22 @@ def approx_closest_indices_Morton_nd(A, B, window_size=32):
     """
     Queries two offset Morton-code radix trees and returns the closest index 
     in A for each point in B, eliminating Z-curve spatial discontinuities.
+
+    :param A:
+        Reference points, shape ``(n_ref, fdim)``.
+    :param B:
+        Query points, shape ``(n_query, fdim)``.
+    :param window_size:
+        How many code-sorted neighbours around each query's insertion point
+        are checked by true distance.  Wider is more accurate and slower.
+
+    :returns:
+        Index into *A* of the approximate nearest reference point for each
+        point of *B*.  Two trees are searched, the second with its bounding
+        box shifted by 0.137 of its extent so the octree planes fall
+        elsewhere, and the better of the two true distances wins -- which is
+        what removes the Z-curve discontinuities a single tree suffers at its
+        division lines.
     """
     # --- TREE 1: Standard Bounding Box ---
     bbox_min_1 = jnp.min(A, axis=0)
@@ -699,7 +829,15 @@ def approx_closest_indices_Morton_nd(A, B, window_size=32):
 
 @jax.jit
 def expand_bits(v):
-    """Expands a 10-bit integer into 30 bits for Morton interleaving."""
+    """Expands a 10-bit integer into 30 bits for Morton interleaving.
+
+    :param v:
+        A ``uint32`` holding a 10-bit value.
+
+    :returns:
+        The same bits spread to every third position, ready to be shifted and
+        OR-ed into a 30-bit 3-D Morton code.
+    """
     v = jnp.bitwise_and(jnp.bitwise_or(v, jnp.left_shift(v, 16)), 0x030000FF)
     v = jnp.bitwise_and(jnp.bitwise_or(v, jnp.left_shift(v, 8)),  0x0300F00F)
     v = jnp.bitwise_and(jnp.bitwise_or(v, jnp.left_shift(v, 4)),  0x030C30C3)
@@ -708,7 +846,20 @@ def expand_bits(v):
 
 @jax.jit
 def morton_3d(pts, bbox_min, bbox_max, resolution=1024):
-    """Converts 3D points into 1D Morton codes."""
+    """Converts 3D points into 1D Morton codes.
+
+    :param pts:
+        Points to encode, shape ``(n_pts, 3)``.
+    :param bbox_min:
+        Lower corner of the box the codes are computed against.
+    :param bbox_max:
+        Upper corner.
+    :param resolution:
+        Grid cells per axis, 1024 for the 10 bits :func:`expand_bits` spreads.
+
+    :returns:
+        One 30-bit Morton code per point.
+    """
     normalized_pts = (pts - bbox_min) / (bbox_max - bbox_min)
     grid_pts = jnp.clip(jnp.floor(normalized_pts * resolution), 0, resolution - 1).astype(jnp.uint32)
     x = expand_bits(grid_pts[:, 0])
@@ -722,6 +873,15 @@ def approx_closest_Morton(A, B):
     Given a reference point cloud A (N, 3) and a query point cloud B (M, 3),
     returns an array of shape (M,) containing the index of the approximate 
     closest point in A for each point in B.
+
+    :param A:
+        Reference point cloud, shape ``(N, 3)``.
+    :param B:
+        Query point cloud, shape ``(M, 3)``.
+
+    :returns:
+        Index into *A* of the approximate closest point for each point of
+        *B*, shape ``(M,)``.
     """
     # 1. Establish the bounding box based strictly on A
     bbox_min = jnp.min(A, axis=0)
@@ -761,6 +921,18 @@ def jax_aknn(d0, d1, k):
     """
     Jax implementation of approximate nearest neighbours. 
     Trust in jax that it's actualy not as inefficient as it appears!
+
+    :param d0:
+        Query points, shape ``(n_query, fdim)``.
+    :param d1:
+        Reference points, shape ``(n_ref, fdim)``.
+    :param k:
+        How many neighbours to return.  Static.
+
+    :returns:
+        ``(distances, indices)``, each ``(n_query, k)``, indices into *d1*.
+        The full ``(n_query, n_ref)`` distance matrix is materialised, so wrap
+        it in :func:`aknn_closest_indices` for anything large.
     """
     test_data = jax.numpy.linalg.norm(d0[:, None] - d1[None, :], axis=-1)
     # print(test_data.shape)
@@ -847,6 +1019,17 @@ base_line = np.array([
 combined_ls = np.concatenate((unit_0[None], unit_1[None]))
 
 def make_tiling(xn, yn):
+    """Build the hexagonal unit surface repeated over a parametric face.
+
+    :param xn:
+        Repetitions of the unit cell in the first direction.
+    :param yn:
+        Repetitions in the second.
+
+    :returns:
+        ``(points, lines)`` -- the tiling's xi coordinates, shape
+        ``(n_pts, 2)``, and the PyVista flat line array indexing them.
+    """
     base_unit = (combined_ls / [[[xn, yn]]])
     up_grid = np.column_stack([a.flatten() for a in np.mgrid[:xn, :yn]]) / [[xn, yn]]
     long_grid = base_unit[None] + up_grid[:, None, None, :]

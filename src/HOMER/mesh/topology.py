@@ -25,6 +25,27 @@ def associated_node_index(self, index_list:list, nodes_to_gather: Optional[list]
     """
     Given an index list, returns the associated indexes of features in that index in the input param array.
     Used to perform manipulations, and identify which features to fix 
+
+    :param index_list:
+        The node field names to gather, e.g. ``['loc', 'du']``.  A node that
+        lacks one raises :exc:`ValueError`.
+    :param nodes_to_gather:
+        Restrict the search to these nodes, given as indices into
+        :attr:`nodes` or, with *node_by_id*, as user-assigned node ids.
+        ``None`` gathers from every node.
+    :param node_by_id:
+        Read *nodes_to_gather* as node ids rather than positions.
+
+    :returns:
+        One list per gathered node, holding the parameter-vector indices of
+        each requested field, in the order *index_list* gives them.
+
+    :raises ValueError:
+        If a gathered node does not carry one of the requested fields.
+
+    The parameter vector is briefly overwritten with index values and
+    restored before returning, so this is not safe to call from inside a
+    traced region.
     """
     true_param_array = np.concatenate([np.concatenate([node.loc] + [d.flatten() for d in node.values()]) for node in self.nodes]).copy()
     self.update_from_params(np.arange(true_param_array.shape[-1]), generate=False)
@@ -233,6 +254,16 @@ def get_xi_surface_nodes(self, xi_dim, bound_val):
     Given a xi dim, and the boundary value, uses the known mesh topology to find all elements 
     which have no neighbouring elements at that boundary.
     Then uses the xi_weight mat to find the relative weightings of values in the mesh.
+
+    :param xi_dim:
+        Parametric direction whose boundary to look at, 0-based.
+    :param bound_val:
+        Which end of that direction: ``0`` for xi = 0, ``1`` for xi = 1.
+
+    :returns:
+        ``(valid_elements, valid_nodes)`` -- the elements with no neighbour on
+        that boundary, and a boolean mask over the parameter vector selecting
+        the parameters those elements' surface nodes contribute to.
     """
     if self.ndim == 2:
         # find the elements
@@ -302,6 +333,14 @@ def get_faces(self, rounding_res = 5) -> list[tuple[int]]:
     Faces are indicated as tuples (elem_id, dim, {0,1}).
     By definition, A manifold is a face, indicated as (elem_id, -1, -1).
     Faces are determined by spatial hashing of the face center i.e (0.5,0.5, {0,1})
+
+    :param rounding_res:
+        Decimal places the face centres are rounded to before hashing, so two
+        faces that meet are recognised as the same point.  Only used on the
+        first call; afterwards the cached :attr:`faces` is returned.
+
+    :returns:
+        One tuple per external face.
     """
     if self.faces is not None:
         return self.faces
@@ -338,6 +377,20 @@ def topo_chain_check(self, ele, xi, at_lo, at_hi):
     If a point fails, it leaves the boundary active, then moves onto the next point.
     Has a for loop, but XLA compiles down to appropriate quick checks when used in a vmap
     boundary states returns if the point has an active boundary
+
+    :param ele:
+        Element index the point sits in.
+    :param xi:
+        Parametric coordinate of the point.
+    :param at_lo:
+        Per-direction flags for sitting on the ``xi = 0`` boundary.
+    :param at_hi:
+        Per-direction flags for sitting on the ``xi = 1`` boundary.
+
+    :returns:
+        A boolean per parametric direction, ``True`` where the point is on a
+        boundary :func:`topomap` could not map across -- an active boundary,
+        with no neighbour on the far side.
     """
     boundary_states = []
     for i_range in range(self.ndim): #iterate over the topological dimension.
@@ -399,6 +452,20 @@ def get_colouring_dict(self, fields_seperable=False, seed_matrix=False):
     """
     Returns a colouring dict which describes which mesh parameters will never effect the same output variable.
     The fields seperable option notes if the output of fields produce seperate responses. (e.g. embedding evaluation is seperable, but local jac det is not).
+
+    :param fields_seperable:
+        Treat each field component as producing its own response, giving one
+        graph row per component rather than one per element.  Embedding
+        evaluation is separable this way; a local Jacobian determinant is not.
+    :param seed_matrix:
+        Also build the seed matrices a coloured Jacobian is reconstructed
+        from.
+
+    :returns:
+        The colouring as ``{parameter index: colour}``, or, with
+        *seed_matrix*, a tuple of that dict, a unit-valued seed matrix and an
+        index-weighted one -- both ``BCOO`` of shape
+        ``(n_parameters, n_colours)``.
     """
     from sparsejac.sparsejac import _greedy_color, _input_connectivity_from_sparsity
     from jax.experimental.sparse import BCOO

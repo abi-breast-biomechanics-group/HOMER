@@ -135,6 +135,16 @@ def basis_by_name(name: str) -> "Basis":
     The name is the serialisation key: :mod:`HOMER.io` writes ``basis.name``
     into the mesh JSON and reads it back through here, so any basis a user
     defines round-trips as soon as it has been constructed.
+
+    :param name:
+        The registered name, e.g. ``'H3Basis'``.
+
+    :returns:
+        The basis instance.
+
+    :raises KeyError:
+        If no basis is registered under that name; the message lists the ones
+        that are.
     """
     try:
         return BASIS_REGISTRY[name]
@@ -388,6 +398,20 @@ AbstractBasis = Basis
 
 @jax.jit
 def N2_weights(w0, w1, bp_inds):
+    """Tensor-product weights for a 2-D element.
+
+    :param w0:
+        1-D basis values in the first direction, shape
+        ``(n_pts, n_basis_0)``.
+    :param w1:
+        The same for the second direction.
+    :param bp_inds:
+        ``(B, 2)`` pairs picking which 1-D weight to multiply for each of the
+        element's ``B`` tensor-product weights.
+
+    :returns:
+        Weights of shape ``(B, n_pts)``.
+    """
     bp_inds = jnp.asarray(bp_inds, dtype=jnp.int32)  # (B, 2)
     def one_pair(ind):
         i, j = ind[0], ind[1]
@@ -397,6 +421,22 @@ def N2_weights(w0, w1, bp_inds):
 
 @jax.jit
 def N3_weights(w0, w1, w2, bp_inds):
+    """Tensor-product weights for a 3-D element.
+
+    :param w0:
+        1-D basis values in the first direction, shape
+        ``(n_pts, n_basis_0)``.
+    :param w1:
+        The same for the second direction.
+    :param w2:
+        The same for the third.
+    :param bp_inds:
+        ``(B, 3)`` triples picking which 1-D weights to multiply for each of
+        the element's ``B`` tensor-product weights.
+
+    :returns:
+        Weights of shape ``(B, n_pts)``.
+    """
     bp_inds = jnp.asarray(bp_inds, dtype=jnp.int32)  # (B, 3)
     def one_triplet(ind):
         i, j, k = ind[0], ind[1], ind[2]
@@ -424,7 +464,6 @@ def N3_weights(w0, w1, w2, bp_inds):
 def B3(x) -> jnp.ndarray:
     """
     Cubic bezier basis function.
-    :param x: points to interpolaet
 
     :param x: points to interpolate
     :return: basis weights
@@ -437,6 +476,11 @@ def B3(x) -> jnp.ndarray:
         (x**3)/6,
     ))
 def B3d1(x) -> jnp.ndarray:
+    """First derivative of the cubic B-spline basis.
+
+    :param x: points to interpolate
+    :return: basis weight derivatives
+    """
     return jnp.column_stack((
         -(1 - x)**2 / 2,
         (3*x**2 - 4*x) / 2,
@@ -444,6 +488,11 @@ def B3d1(x) -> jnp.ndarray:
         (x**2) / 2,
     ))
 def B3d1d1(x) -> jnp.ndarray:
+    """Second derivative of the cubic B-spline basis.
+
+    :param x: points to interpolate
+    :return: basis weight second derivatives
+    """
     return jnp.column_stack((
         1 - x,
         3 * x - 2,
@@ -734,6 +783,15 @@ def Lagrange(order: int) -> Basis:
     ``Lagrange(3) is L3Basis``.  Useful where the order is a variable::
 
         mesh.rebase(Lagrange(order) * 3)
+
+    :param order:
+        Polynomial order, 1 to 4.
+
+    :returns:
+        The corresponding registered basis.
+
+    :raises ValueError:
+        If HOMER defines no Lagrange basis of that order.
     """
     try:
         return LAGRANGE_BASES[order]

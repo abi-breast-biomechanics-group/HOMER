@@ -14,6 +14,13 @@ import jax.numpy as jnp
 def get_element_params(self, ele_num: int) -> np.ndarray:
     """
     returns the flat vector of node parameters associated with this element.
+
+    :param ele_num:
+        Index of the element.
+
+    :returns:
+        The element's node parameters, gathered from
+        :attr:`true_param_array` in the element's own node order.
     """
     return self.true_param_array[self.ele_map[ele_num].astype(int)]
 
@@ -125,6 +132,14 @@ def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, 
         shape ``(n_pts, n_nodes)``.
     :param target_empty:
         Sentinel value used to mask out unused target rows.
+    :param return_params:
+        Return the fitted parameter vector instead of writing it into the
+        field, leaving the mesh untouched.
+    :param skip_bool:
+        Skip the *target_empty* masking and the overdetermined-system
+        assertion, solving against *weight_mat* and *targets* as given.
+        For callers inside a traced region, where masking would give a
+        data-dependent shape.
 
     **Notes**
 

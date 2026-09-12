@@ -150,6 +150,24 @@ def eval_numeric_jac(self, element_ids, xis, locals=None, step=2e-1, fit_params=
     """ 
     Evaluates the jacobian at a set of xis within an element
     Uses numeric derivatives, useful when the underlying mesh field has zero derivative boundaries.
+
+    :param element_ids:
+        1-D integer array, shape ``(n_pts,)``.
+    :param xis:
+        Parametric coordinates, shape ``(n_pts, ndim)``.
+    :param locals:
+        The embedded positions at *xis*, if already computed; saves an
+        evaluation.  ``None`` computes them.
+    :param step:
+        Finite-difference step in xi.  Steps are taken inward from the
+        element boundary -- the sign flips above ``xi = 0.5`` -- so the
+        default of ``2e-1`` stays inside the element without clamping.
+    :param fit_params:
+        Optional override of :attr:`optimisable_param_array`.
+
+    :returns:
+        Jacobians of shape ``(n_pts, fdim, ndim)``, physical directions as
+        rows and parametric as columns, matching :func:`evaluate_jacobians`.
     """
     if fit_params is None:
         fit_params = self.optimisable_param_array
@@ -336,6 +354,19 @@ def gauss_grid(self, ng):
 
 
 def eval_surface(self, res, boundary_points=False):
+    """Evaluate the mesh on its external faces.
+
+    Samples each face in :attr:`faces` on a uniform xi grid and concatenates
+    the results, giving a point cloud over the outside of a 3-D mesh.
+
+    :param res:
+        xi samples per direction on each face.
+    :param boundary_points:
+        Include the samples that sit exactly on the face edges.
+
+    :returns:
+        Surface points, shape ``(n_faces * res ** 2, fdim)``.
+    """
     faces = self.faces
     face_pts = []
     elem_pts = []
@@ -548,6 +579,21 @@ def evaluate_sobolev(self, weights=None, fit_params=None,flatten=True):
     """
     Works out and defines the Sobolev values associated with the derivatives of the input elements.
     Then calculates the appropriate gauss points, and returns the elements assessed with the appropriate weighting. 
+
+    :param weights:
+        One weight per Sobolev term, where the terms are every non-trivial
+        combination of derivative orders across the element's directions.
+        ``None`` weights them all equally.  A length that does not match the
+        number of terms raises :exc:`ValueError`.
+    :param fit_params:
+        Optional override of :attr:`optimisable_param_array`.
+    :param flatten:
+        Ravel each term before concatenating, which is the shape
+        ``scipy.optimize.least_squares`` wants.  ``False`` keeps each term as
+        ``(n_elements, n_gauss_points, fdim)``.
+
+    :raises ValueError:
+        If *weights* is given with the wrong length.
     """
 
     n_derivs = [len(b.deriv) for b in self.elements[0].basis_functions]
@@ -589,8 +635,17 @@ def get_volume(self, fit_params = None, element_wise=False):
     float round-off) for any element the basis can describe -- not just
     affine ones.
 
-    :param fit_params: an overide of the standard mesh parameters to use for fitting.
-    :returns vol: The volume of the mesh, signed by element orientation.
+    :param fit_params:
+        An override of the standard mesh parameters.
+    :param element_wise:
+        Return each element's volume separately instead of the total.  A
+        per-element integral of ``det(J)`` against the Gauss weights is what
+        a weak-form assembly needs, so this is the entry point for
+        approximating weak-form mechanics on the mesh.
+
+    :returns:
+        The volume of the mesh, signed by element orientation, or one signed
+        volume per element when *element_wise*.
     """
     if self.ndim != 3:
         raise ValueError(f"Volume is only defined on a 3-D mesh, this one is {self.ndim}-D")

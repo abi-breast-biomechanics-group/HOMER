@@ -43,6 +43,37 @@ def jacobian(
     """
     Given a jax compatible callable, returns both a compiled jax function, but also 
     the autodifferentiated jacobian of the function.
+
+    :param cost_function:
+        The JAX-compatible residual function, differentiated with respect to
+        its first argument.  ``None`` returns a partially-applied
+        :func:`jacobian`, so it can be used as a decorator factory.
+    :param init_estimate:
+        A representative parameter vector, used to probe the sparsity
+        pattern.  Required unless *sparsity* is given.
+    :param sparsity:
+        A known pattern as a ``BCOO``, which skips the probing step.  A
+        callable raises: patterns that change between calls are not
+        supported.
+    :param further_args:
+        Extra keyword arguments bound into *cost_function* before the
+        sparsity is estimated.
+    :param sparse:
+        When ``True`` (default), build the Jacobian with :mod:`sparsejac`
+        forward-mode AD over the pattern.  ``False`` gives a dense
+        ``jax.jacfwd``, which is the better choice for small problems.
+    :param return_sparsity:
+        Also return the pattern that was used or estimated.
+
+    :raises ValueError:
+        If neither *init_estimate* nor *sparsity* is given, or if *sparsity*
+        is a callable.
+
+    :returns:
+        ``(fwd_func, jac_func)``, both taking the parameter vector and
+        suitable for ``scipy.optimize.least_squares``; the Jacobian returns a
+        ``scipy.sparse.coo_array``.  With *return_sparsity*, the pattern is
+        appended.
     """
     if init_estimate is None and sparsity is None:
         raise ValueError("Code needs an initial estimate for meaningful sparsity estimation")
@@ -92,6 +123,28 @@ def jacobian(
     return fwd_func, scipy_sparse_jac
     
 def estimate_sparsity(callable_fn, init_estimate) -> jax.experimental.sparse.BCOO:
+    """Probe which outputs of *callable_fn* depend on which inputs.
+
+    Perturbs one input at a time by 1.0 and records the outputs that move by
+    more than ``1e-8``.  The probe runs under :func:`jax.lax.scan` rather than
+    as one batched call, so peak memory is ``O(N)`` rather than ``O(N**2)`` in
+    the parameter count.
+
+    This detects structural dependence, not the size of the derivative: an
+    output that happens not to move under a unit step at *init_estimate* is
+    recorded as independent, so pass an estimate representative of where the
+    optimiser will actually work.
+
+    :param callable_fn:
+        A JAX-compatible function of one parameter vector, with any other
+        arguments already bound.
+    :param init_estimate:
+        The parameter vector to perturb, shape ``(N,)``.
+
+    :returns:
+        The pattern as a ``BCOO`` of shape ``(M, N)`` with unit entries, in
+        the form :mod:`sparsejac` expects.
+    """
     init_estimate = jnp.asarray(init_estimate)
     init_val = callable_fn(init_estimate)
     

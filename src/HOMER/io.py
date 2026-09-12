@@ -91,6 +91,12 @@ def dump_mesh_to_dict(obj_mesh: Mesh | MeshField) -> dict:
     Mesh objects are stored with a ``'main'`` field and optional named
     ``'fields'``.  Passing a :class:`MeshField` returns the legacy
     ``{'nodes', 'elements'}`` structure for compatibility.
+
+    :param obj_mesh:
+        The mesh or field to serialise.
+
+    :returns:
+        A JSON-serialisable dictionary.
     """
     if isinstance(obj_mesh, Mesh):
         return {
@@ -150,7 +156,15 @@ def _parse_field_from_dict(dict_rep: dict, field_cls: type[MeshField]) -> MeshFi
 
 
 def parse_meshfield_from_dict(dict_rep: dict) -> MeshField:
-    """Deserialise a :class:`~HOMER.mesh.field.MeshField` from a dictionary."""
+    """Deserialise a :class:`~HOMER.mesh.field.MeshField` from a dictionary.
+
+    :param dict_rep:
+        A ``{'nodes', 'elements'}`` dictionary, as written by
+        :func:`dump_meshfield_to_dict`.
+
+    :returns:
+        The reconstructed field, already generated.
+    """
     return _parse_field_from_dict(dict_rep, MeshField)
 
 
@@ -161,6 +175,14 @@ def parse_mesh_from_dict(dict_rep: dict) -> Mesh:
     bases by name), and calls :meth:`~HOMER.mesh.field.MeshField.generate_mesh`
     before returning.  Accepts both the legacy ``{'nodes','elements'}`` format
     and the newer ``{'main','fields'}`` schema.
+
+    :param dict_rep:
+        Either the newer ``{'main', 'fields'}`` schema or the legacy
+        ``{'nodes', 'elements'}`` one.
+
+    :returns:
+        The reconstructed :class:`~HOMER.mesh.mesh.Mesh`, with any secondary
+        fields attached.
     """
     if 'main' in dict_rep or 'fields' in dict_rep:
         main_dict = dict_rep.get('main')

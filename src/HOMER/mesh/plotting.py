@@ -24,6 +24,24 @@ pv.global_theme.allow_empty_mesh = True
 def get_surface(self, element_ids: Optional[np.ndarray] = None, res:int = 20, just_faces=False, tiling=None, fit_params=None) -> np.ndarray|tuple[np.ndarray, np.ndarray]:
     """
     Returns a set of points evaluated over the mesh surface.
+
+    :param element_ids:
+        Restrict the sampling to these elements.  ``None`` samples every
+        element.
+    :param res:
+        xi samples per direction.
+    :param just_faces:
+        Sample only the external faces of a 3-D mesh, rather than the full
+        parametric surface of each element.
+    :param tiling:
+        ``(xn, yn)`` repetition of the hexagonal unit surface used for the
+        face sampling.  Only read when *just_faces*.
+    :param fit_params:
+        Optional override of :attr:`optimisable_param_array`.
+
+    :returns:
+        Surface points, or ``(points, connectivity)`` when the sampling
+        produces a tiling.
     """
     ele_iter  = [element_ids] if not isinstance(element_ids, list) else element_ids
     elements_to_iter = self.elements if element_ids is None else ele_iter
@@ -73,7 +91,16 @@ def get_hex_surface(self, element_ids=None, tiling = (10, 6), fit_params=None) -
     """
     Returns lines evaluating a hexagon tiling of the element surface
 
+    :param element_ids:
+        Elements to sample.  ``None`` samples every element, matching
+        :func:`get_surface`.
     :param tiling: the repetitions of the underlying unit surface (5/3 ratio "looks good")
+    :param fit_params:
+        Optional override of :attr:`optimisable_param_array`.
+
+    :returns:
+        ``(surface_points, connectivity)``, connectivity as integer indices
+        into the points.
     """
     surface_points, single_face_connectivity = self.get_surface(element_ids, just_faces=True, tiling=tiling, fit_params=fit_params)
     return surface_points, single_face_connectivity.astype(int)
@@ -83,8 +110,14 @@ def get_triangle_surface(self, element_ids: Optional[np.ndarray] = None, res:int
     """
     Returns a set of points evaluated over the mesh surface, and triangles to create the surface.
 
-    :returns surface pts: Surface points evaluated over the mesh.
-    :returns tris: the triangles creatign the mesh surface.
+    :param element_ids:
+        Elements to sample.  ``None`` samples every element.
+    :param res:
+        xi samples per direction on each face.
+
+    :returns:
+        ``(surface_pts, tris)`` -- the sampled points, and the triangles
+        indexing them, two per grid cell of each face.
     """
     base_0 = np.array([0, 1, res])[None, None] + np.arange(res - 1)[None, :, None] + (np.arange(res - 1) * res)[:, None, None] 
     base_1 = np.array([res, 1, res + 1])[None, None] + np.arange(res - 1)[None, :, None] + (np.arange(res - 1) * res)[:, None, None] 
@@ -98,6 +131,16 @@ def get_triangle_surface(self, element_ids: Optional[np.ndarray] = None, res:int
 def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=20, fit_params=None) -> pv.PolyData:
     """
     Returns a pv.PolyData object containing lines defining the edges of the mesh surface.
+
+    :param element_ids:
+        Elements to draw.  ``None`` draws every element.
+    :param res:
+        Samples per edge.
+    :param fit_params:
+        Optional override of :attr:`optimisable_param_array`.
+
+    :returns:
+        A ``pv.PolyData`` holding the edge lines.
     """
 
     line_points = np.empty((0, 3))
@@ -165,15 +208,31 @@ def plot(self, scene:Optional[pv.Plotter] = None,
     Draws the mesh as a pyvista scene.
 
     :param scene: A pyvista scene, if provided will not call .show().
-    :param node_colour: The colour to draw the node values.
+    :param node_colour: The colour to draw the node values.  An array
+        colour-maps them.
+    :param node_col_scalar_name: Scalar array name used when *node_colour* is
+        an array.
     :param node_size: The size of the node points.
     :param labels: Whether to label the node numbers.
     :param tiling: Repetitions of the hexagonal unit surface used to draw each
         element; a 5/3 ratio looks good.
     :param mesh_colour: The mesh surface colour.
     :param mesh_opacity: The mesh surface opacity.
+    :param mesh_width: Line width of the surface wireframe.
+    :param mesh_col_scalar_name: Scalar array name used when *mesh_colour* is
+        an array.
+    :param line_colour: Colour of the structural edge lines.  An array
+        colour-maps them.
+    :param line_opacity: Edge line opacity.
+    :param line_width: Edge line width.
+    :param line_col_scalar_name: Scalar array name used when *line_colour* is
+        an array.
     :param elem_labels: Whether to label the mesh elements.
-
+    :param render_name: Prefix for the actors this call creates, so a later
+        call with the same name replaces them rather than stacking a second
+        copy.
+    :param fit_params: Draw under these parameters instead of the field's own
+        -- an optimiser's current iterate, without writing it back.
     """
 
     if labels:
@@ -246,6 +305,25 @@ def plot(self, scene:Optional[pv.Plotter] = None,
 def plot_strains(self, eles, xis, strains, scene:Optional[pv.Plotter]=None, cmap='coolwarm', spacer=4, show_max=False):
     """
     Given ele, xi locations, and the strain tensors evaluated at those locations, evaluates local strain ellipsoids, and plots them.
+
+    :param eles:
+        Element index per evaluation point.
+    :param xis:
+        Parametric coordinate per evaluation point.
+    :param strains:
+        Green-Lagrange strain tensors at those points, shape
+        ``(n_pts, 3, 3)``, as :func:`~HOMER.mesh.evaluation.evaluate_strain`
+        returns.
+    :param scene:
+        Existing plotter to draw into.  ``None`` creates one and shows it.
+    :param cmap:
+        Colour map for the length-change scalar.
+    :param spacer:
+        Divides the median nearest-neighbour spacing to set the ellipsoid
+        radius, so a larger value draws smaller ellipsoids.
+    :param show_max:
+        Colour every ellipsoid by its own maximum length change rather than
+        by the change along each direction.
     """
     def get_batch_stretch_tensors(strains):
         m = strains.shape[0]
@@ -311,7 +389,9 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         Existing :class:`pyvista.Plotter`.  When ``None``, a new plotter
         is created and shown.
     :param node_colour:
-        Colour for node spheres.
+        Colour for node spheres.  An array colour-maps them.
+    :param node_col_scalar_name:
+        Scalar array name used when *node_colour* is an array.
     :param node_size:
         Node sphere size.
     :param labels:
@@ -356,6 +436,8 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         Point size used by the default scalar field artist.
     :param default_xi_res:
         Xi grid resolution for the secondary field visualisation.
+    :param fit_params:
+        Draw under these parameters instead of the mesh's own.
     """
     s_flag = False
     if scene is None:

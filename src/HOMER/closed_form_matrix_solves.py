@@ -10,12 +10,31 @@ whole step inside one XLA kernel, so these are used in place of
 import jax.numpy as jnp
 
 def explicit_solve_2x2(A, b):
+    """Solve ``A x = b`` for a 2x2 system by Cramer's rule.
+
+    :param A: The 2x2 matrix.
+    :param b: The 2-vector right-hand side.
+
+    :returns:
+        The 2-vector solution.  ``1e-12`` is added to the determinant, so a
+        singular system returns a large finite value rather than a NaN --
+        which keeps a vmapped Newton step from poisoning its whole batch.
+    """
     det = A[0, 0] * A[1, 1] - A[0, 1] * A[1, 0] + 1e-12
     ans_0 = (A[1, 1] * b[0] - A[0, 1] * b[1]) / det
     ans_1 = (-A[1, 0] * b[0] + A[0, 0] * b[1]) / det
     return jnp.array([ans_0, ans_1])
 
 def explicit_solve_3x3(A, b):
+    """Solve ``A x = b`` for a 3x3 system by cofactor expansion.
+
+    :param A: The 3x3 matrix.
+    :param b: The 3-vector right-hand side.
+
+    :returns:
+        The 3-vector solution, with the same ``1e-12`` determinant guard as
+        :func:`explicit_solve_2x2`.
+    """
     C00 = A[1, 1] * A[2, 2] - A[1, 2] * A[2, 1]
     C01 = A[1, 2] * A[2, 0] - A[1, 0] * A[2, 2]
     C02 = A[1, 0] * A[2, 1] - A[1, 1] * A[2, 0]
