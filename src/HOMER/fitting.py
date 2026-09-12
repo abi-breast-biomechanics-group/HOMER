@@ -21,7 +21,7 @@ import numpy as np
 import jax.numpy as jnp
 
 from HOMER.mesh import Mesh
-from HOMER.optim import jax_comp_kdtree_distance_query, jax_comp_kdtree_normal_distance_query
+from HOMER.optim import kdtree_distance_query, kdtree_normal_distance_query
 from HOMER.jacobian_evaluator import jacobian
 
 from matplotlib import pyplot as plt
@@ -33,9 +33,10 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
     that measures the distance from the mesh surface to the target point cloud,
     with an optional Sobolev smoothness regularisation term.
 
-    A KD-tree is built from *data* (and *normals* when provided) at
-    construction time.  Every evaluation then queries this tree against the
-    current mesh surface.
+    A SciPy KD-tree is built from *data* (and *normals* when provided) at
+    construction time, behind a JAX custom-JVP callback (see
+    :mod:`HOMER.optim`).  Every evaluation queries that tree against the
+    current mesh surface, which costs a host round-trip per evaluation.
 
     :param mesh:
         The :class:`~HOMER.mesh.mesh.Mesh` to fit.
@@ -74,9 +75,9 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
         mesh.update_from_params(result.x)
     """
     if normals is None:
-        data_tree = jax_comp_kdtree_distance_query(data, kdtree_args={"workers":-1})
+        data_tree = kdtree_distance_query(data, kdtree_args={"workers":-1})
     else:
-        data_tree = jax_comp_kdtree_normal_distance_query(data, normals, kdtree_args={"workers":-1})
+        data_tree = kdtree_normal_distance_query(data, normals, kdtree_args={"workers":-1})
     eval_points = mesh.xi_grid(res, surface=surface_only)
     # sob_points = mesh.gauss_grid([4, 4])
 

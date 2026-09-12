@@ -1,17 +1,22 @@
 """
-optim.py – JAX-compatible optimisation helper functions.
+optim.py - how :func:`~HOMER.fitting.point_cloud_fit` measures distance to a
+target point cloud.
 
-Provides:
+Both functions here build a :class:`scipy.spatial.KDTree` over the reference
+cloud and put it behind a :func:`jax.custom_jvp` callback, so a JAX residual
+can query it and still differentiate.  The tree itself is SciPy's and runs on
+the host: every query leaves the accelerator and comes back, which is why
+these are used once per residual evaluation over a whole point cloud rather
+than inside an inner loop.
 
-* :func:`jax_comp_kdtree_distance_query` – wraps a SciPy KD-tree inside a
-  JAX custom JVP callback, enabling gradient-based optimisation against an
-  arbitrary reference point cloud.
-* :func:`jax_comp_kdtree_normal_distance_query` – the same, but projects the
-  distance along the reference surface normals (useful when fitting oriented
-  point clouds).
+* :func:`kdtree_distance_query` - nearest-neighbour distance to the cloud.
+* :func:`kdtree_normal_distance_query` - the same, projected along the
+  reference surface normals, for fitting an oriented cloud.
 
-These functions are consumed by :func:`~HOMER.fitting.point_cloud_fit` and
-can be used directly when building custom fitting pipelines.
+This module exists to serve ``point_cloud_fit``; it is not a general
+nearest-neighbour interface.  The approximate nearest-neighbour search that
+seeds :meth:`~HOMER.mesh.evaluation.embed_points` is a different thing
+entirely, is written in JAX, and lives in :mod:`HOMER.utils`.
 """
 
 import numpy as np
@@ -25,7 +30,7 @@ if TYPE_CHECKING:
 
 import scipy
 
-def jax_comp_kdtree_distance_query(fit_data, kdtree_args=None):
+def kdtree_distance_query(fit_data, kdtree_args=None):
     kd_tree_args = {} if kdtree_args is None else kdtree_args
     local_fit_data = fit_data
     tree = scipy.spatial.KDTree(fit_data)
@@ -60,7 +65,7 @@ def jax_comp_kdtree_distance_query(fit_data, kdtree_args=None):
     return distances
         
         
-def jax_comp_kdtree_normal_distance_query(fit_data, normals, kdtree_args=None):
+def kdtree_normal_distance_query(fit_data, normals, kdtree_args=None):
     kd_tree_args = {} if kdtree_args is None else kdtree_args
     local_fit_data = fit_data
     tree = scipy.spatial.KDTree(fit_data)

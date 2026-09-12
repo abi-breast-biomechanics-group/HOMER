@@ -21,7 +21,7 @@ Fix that mesh parameter - constrain a node to lie on a plane - express another a
 ## Features
 - Cubic Hermite, Linear, Quadratic, Cubic and Quartic Lagrange elements
 - Automatic Jacobian sparsity evaluation
-- JAX-friendly implementations of KDTree evaluations
+- Differentiable point embedding, seeded by an approximate nearest-neighbour search in JAX
 - Secondary mesh fields for fibre directions, stresses, and arbitrary vector/scalar data
 - Mesh refinement and basis conversion (rebase)
 - JSON serialisation/deserialisation
