@@ -179,25 +179,23 @@ class Basis:
     Equality and hashing are by :attr:`name`, so a basis compares equal to
     itself across a deepcopy, a pickle, and a JSON round-trip.
 
-    Attributes
-    ----------
-    name : str
+    :ivar name: str
         Serialisation key and repr, e.g. ``'H3Basis'``.
-    fn : Callable
+    :ivar fn: Callable
         Basis evaluation function ``fn(x) -> ndarray (n_pts, n_basis)``.
-    weights : tuple[str, ...]
+    :ivar weights: tuple[str, ...]
         Ordered weight names, e.g. ``('x0', 'dx0', 'x1', 'dx1')``.
         Names starting with ``'dx'`` indicate derivative entries.
-    deriv : tuple[Callable, ...]
+    :ivar deriv: tuple[Callable, ...]
         Derivative evaluation functions, ``(fn, d1_fn, d2_fn, ...)``.
-    order : int
+    :ivar order: int
         Polynomial order of the basis.
-    node_locs : tuple[float, ...]
+    :ivar node_locs: tuple[float, ...]
         Canonical node positions in [0, 1].
-    node_fields : AbstractField or None
+    :ivar node_fields: AbstractField or None
         Describes the derivative quantities each node must carry.
         ``None`` for pure Lagrange bases.
-    interpolatory : bool
+    :ivar interpolatory: bool
         ``True`` when the nodal parameters *are* the field values at
         ``node_locs`` (Lagrange and Hermite bases).  ``False`` for control-net
         bases such as :data:`B3Basis`, whose parameters are control points that
@@ -669,7 +667,7 @@ Each node contributes only a *position* weight.  No derivative fields are
 required on the associated :class:`~HOMER.mesh.node.MeshNode` objects.
 
 Useful for coarse linear meshes that are subsequently
-:meth:`~HOMER.mesh.field.MeshField.rebase`-d to a higher-order basis.
+:meth:`~HOMER.mesh.refinement.rebase`-d to a higher-order basis.
 """
 
 L2Basis = Basis(

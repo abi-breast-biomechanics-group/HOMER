@@ -43,25 +43,21 @@ class MeshNode(dict):
             dudvdw=np.zeros(3),
         )
 
-    Parameters
-    ----------
-    loc:
+    :param loc:
         Physical-space coordinates of the node, shape ``(fdim,)``.
-    id:
+    :param id:
         Optional unique identifier.  When provided, nodes can be referenced
         by ID rather than list index in a :class:`MeshElement`.
-    **kwargs:
+    :param **kwargs:
         Named derivative arrays, e.g. ``du``, ``dv``, ``dw``, ``dudv``, …
         All values must be ``numpy.ndarray`` (or list / JAX array, which
         are automatically converted).
 
-    Attributes
-    ----------
-    loc : numpy.ndarray
+    :ivar loc: numpy.ndarray
         Physical-space coordinates, shape ``(fdim,)``.
-    id :
+    :ivar id:
         The node identifier (or ``None``).
-    fixed_params : dict
+    :ivar fixed_params: dict
         Maps parameter name → array of fixed component indices.  Populated
         by :meth:`fix_parameter`.
     """
@@ -69,20 +65,15 @@ class MeshNode(dict):
     def __init__(self, loc, id=None, **kwargs):
         """Initialise a :class:`MeshNode`.
 
-        Parameters
-        ----------
-        loc:
+        :param loc:
             Physical-space coordinates, shape ``(fdim,)``.
-        id:
+        :param id:
             Optional unique identifier.
-        **kwargs:
+        :param **kwargs:
             Named derivative arrays (``du``, ``dv``, ``dw``, …).
             Each value must be an array of the same length as ``loc``.
 
-        Raises
-        ------
-        ValueError
-            If any keyword-argument value is not an array-like type.
+        :raises ValueError: If any keyword-argument value is not an array-like type.
         """
         self.loc = np.asarray(loc)
         self.id = id
@@ -106,16 +97,14 @@ class MeshNode(dict):
         exposed by :class:`MeshField`.  Optionally, the parameter can also be
         set to a specified value at the same time.
 
-        Parameters
-        ----------
-        param_names:
+        :param param_names:
             Name or list of names of the parameters to fix, e.g.
             ``'loc'``, ``'du'``, ``['loc', 'dv']``.
-        values:
+        :param values:
             Optional value(s) to assign at the time of fixing.  Must match
             the shape implied by ``inds`` (or the full parameter dimension
             when ``inds`` is ``None``).
-        inds:
+        :param inds:
             Component indices to fix within the parameter array (e.g.
             ``[0, 2]`` to fix the *x* and *z* components of ``loc``).
             When ``None``, all components are fixed.

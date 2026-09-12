@@ -1,3 +1,17 @@
+"""
+topomap_operations.py - connectivity arithmetic for mesh topology.
+
+Two operations that work on element connectivity as plain arrays, with no
+:class:`~HOMER.mesh.field.MeshField` involved, so that
+:mod:`HOMER.mesh.refinement` can rebuild a node list before a field exists to
+hold it:
+
+* :func:`global_nodes_from_ele_localnodes` - collapse per-element local node
+  coordinates into a shared global node list, merging nodes that coincide to
+  within *tol*.
+* :func:`refine_connectivity` - the connectivity of the same topology after
+  every element is subdivided *R* times per direction.
+"""
 import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components

@@ -1,3 +1,12 @@
+"""
+closed_form_matrix_solves.py - explicit 2x2 and 3x3 linear solves.
+
+The Newton-Raphson refinement in :mod:`HOMER.embedding` solves one tiny
+system per query point per iteration, vmapped over the whole point cloud.
+Cramer's rule written out beats a general solver at that size and keeps the
+whole step inside one XLA kernel, so these are used in place of
+``jnp.linalg.solve``.
+"""
 import jax.numpy as jnp
 
 def explicit_solve_2x2(A, b):

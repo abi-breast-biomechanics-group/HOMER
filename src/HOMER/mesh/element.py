@@ -29,38 +29,34 @@ class MeshElement:
     * H3Basis × H3Basis × H3Basis → 2 × 2 × 2 = 8 nodes (3-D)
     * L2Basis × L2Basis → 3 × 3 = 9 nodes (2-D)
 
-    Parameters
-    ----------
-    basis_functions:
+    :param basis_functions:
         The 1-D bases of the element, one per parametric direction, defining the
         parametric-direction interpolation.  E.g.
         ``H3Basis * 2`` for a 2-D cubic-Hermite element.
-    node_indexes:
+    :param node_indexes:
         Zero-based integer indices into the parent mesh's ``nodes`` list.
         Exactly one of *node_indexes* or *node_ids* must be given.
-    node_ids:
+    :param node_ids:
         User-supplied node identifiers (alternative to *node_indexes*).
-    BP_inds:
+    :param BP_inds:
         Pre-computed basis-product index pairs.  Computed automatically
         when ``None``; supply a cached value to skip recomputation.
-    id:
+    :param id:
         Optional element identifier.
 
-    Attributes
-    ----------
-    ndim : int
+    :ivar ndim: int
         Parametric dimensionality (2 or 3).
-    nodes : list
+    :ivar nodes: list
         The ordered node references (indexes or ids).
-    basis_functions : BasisGroup
+    :ivar basis_functions: BasisGroup
         The 1-D bases, one per parametric direction.
-    used_node_fields : list[str]
+    :ivar used_node_fields: list[str]
         Derivative field names (``'du'``, ``'dv'``, …) that each node must
         carry for this element's basis.
-    BasisProductInds : list[tuple[int, ...]]
+    :ivar BasisProductInds: list[tuple[int, ...]]
         Ordered index pairs/triplets defining the tensor-product weight
         computation.
-    num_nodes : int
+    :ivar num_nodes: int
         Total number of nodes in this element.
     """
 
@@ -68,26 +64,21 @@ class MeshElement:
                  node_ids: Optional[list] = None, BP_inds: Optional = None, id=None):
         """Initialise a :class:`MeshElement`.
 
-        Parameters
-        ----------
-        basis_functions:
+        :param basis_functions:
             The 1-D bases of the element, one per parametric direction (1, 2
             or 3 of them).  Accepts a :class:`~HOMER.basis_definitions.BasisGroup`
             (``H3Basis * 2 + L1Basis``), a list or tuple of bases, or a single
             basis for a 1-D element.
-        node_indexes:
+        :param node_indexes:
             Zero-based indices into the parent mesh's node list.
-        node_ids:
+        :param node_ids:
             User-supplied node identifiers.
-        BP_inds:
+        :param BP_inds:
             Pre-computed basis-product index pairs (optional optimisation).
-        id:
+        :param id:
             Optional element identifier.
 
-        Raises
-        ------
-        ValueError
-            If neither *node_indexes* nor *node_ids* is provided, or if
+        :raises ValueError: If neither *node_indexes* nor *node_ids* is provided, or if
             both are provided.
         """
         if node_ids is None and node_indexes is None:

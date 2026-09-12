@@ -37,38 +37,35 @@ def point_cloud_fit(mesh:Mesh, data, normals = None, res=20, compile=True, surfa
     construction time.  Every evaluation then queries this tree against the
     current mesh surface.
 
-    Parameters
-    ----------
-    mesh:
+    :param mesh:
         The :class:`~HOMER.mesh.mesh.Mesh` to fit.
-    data:
+    :param data:
         Target point cloud, shape ``(n_pts, 3)``.
-    normals:
+    :param normals:
         Optional surface normals at each target point, shape ``(n_pts, 3)``.
         When provided, the distance metric is projected along the normal
         direction (useful for fitting to noisy oriented point clouds).
-    res:
+    :param res:
         Number of xi grid points per direction used to sample the mesh
         surface.
-    compile:
+    :param compile:
         When ``True``, JIT-compiles the mesh evaluation functions
         (recommended for iterative optimisation).
-    surface_only:
+    :param surface_only:
         When ``True``, only sample the mesh surface faces (for volume meshes).
-    sob_weight:
+    :param sob_weight:
         Scalar weight applied to the Sobolev smoothness term.  Increase to
         produce smoother fits at the cost of surface accuracy.
 
-    Returns
-    -------
-    fitting_function : Callable
-        Residual function ``(params) → residuals`` compatible with
-        ``scipy.optimize.least_squares``.
-    jacobian_fun : Callable
-        Sparse Jacobian function ``(params) → scipy.sparse.coo_array``.
+    :returns:
+        fitting_function : Callable
+            Residual function ``(params) → residuals`` compatible with
+            ``scipy.optimize.least_squares``.
+        jacobian_fun : Callable
+            Sparse Jacobian function ``(params) → scipy.sparse.coo_array``.
 
-    Examples
-    --------
+    **Examples**
+
     ::
 
         fitting_fn, jac_fn = point_cloud_fit(mesh, target_pts, compile=True)

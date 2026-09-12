@@ -39,18 +39,14 @@ class Mesh(MeshField):
                        new_basis=[H3Basis]*3)
         fibre_field = mesh['fibre']   # MeshField
 
-    Parameters
-    ----------
-    nodes:
+    :param nodes:
         Nodes defining the primary geometry.
-    elements:
+    :param elements:
         Elements of the mesh.
-    jax_compile:
+    :param jax_compile:
         Pre-compile JAX functions at construction time.
 
-    Attributes
-    ----------
-    fields : dict[str, MeshField]
+    :ivar fields: dict[str, MeshField]
         Named secondary fields.
     """
 
@@ -60,13 +56,11 @@ class Mesh(MeshField):
     def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False) -> None:
         """Initialise a :class:`Mesh`.
 
-        Parameters
-        ----------
-        nodes:
+        :param nodes:
             Node list (may be ``None`` for incremental construction).
-        elements:
+        :param elements:
             Element or element list.
-        jax_compile:
+        :param jax_compile:
             If ``True``, JIT-compile internal functions at construction.
         """
         super().__init__(nodes, elements, jax_compile)
@@ -86,18 +80,16 @@ class Mesh(MeshField):
         Calls :meth:`MeshField.refine` on the coordinate mesh and on every
         field in :attr:`fields`.
 
-        Parameters
-        ----------
-        refinement_factor:
+        :param refinement_factor:
             Uniform refinement multiplier (≥ 2).
-        by_xi_refinement:
+        :param by_xi_refinement:
             Per-direction xi breakpoint arrays.
-        clean_nodes:
+        :param clean_nodes:
             Remove unreferenced nodes after refinement.
-        preserve_fixed_params:
+        :param preserve_fixed_params:
             Carry each node's :attr:`MeshNode.fixed_params` across to the
             coincident nodes of the refined geometry, and of every field.
-        reorder_nodes:
+        :param reorder_nodes:
             Renumber the refined nodes into a predictable order - see
             :func:`~HOMER.mesh.reordering.reorder_nodes`.  Each field is
             ordered from its own topology, so a field and the geometry stay
@@ -153,34 +145,32 @@ class Mesh(MeshField):
         If possible, this will preserve the node and element level topology.
         This allows, as an example, repeating or subsampling the field parameters.
 
-        Parameters
-        ----------
-        field_name:
+        :param field_name:
             Key used to store and retrieve the new field, e.g.
             ``'fibre_direction'``.
-        field_dimension:
+        :param field_dimension:
             Dimensionality of the field values:
 
             * ``1`` – scalar field (e.g. pressure, temperature, Z-coordinate)
             * ``3`` – 3-D vector field (e.g. fibre direction, velocity)
-        new_basis:
+        :param new_basis:
             The 1-D bases for the new field, one per
             parametric direction.  May differ from the primary mesh basis.
             For example, use ``[H3Basis]*3`` for a smooth vector field or
             ``[L1Basis]*3`` for a piecewise-linear scalar field.
-        field_locs:
+        :param field_locs:
             Physical-space sample locations where field values are known,
             shape ``(n_samples, fdim)``.  When ``None``, an empty field is
             created without fitting.
-        field_values:
+        :param field_values:
             Target field values at *field_locs*, shape
             ``(n_samples,)`` for scalars or ``(n_samples, field_dimension)``
             for vectors.  Required if *field_locs* is provided.
-        res:
+        :param res:
             Unused (reserved for future use).
 
-        Examples
-        --------
+        **Examples**
+
         Fit a unit-normal vector field and a scalar height field::
 
             mesh.new_field(
@@ -217,7 +207,11 @@ class Mesh(MeshField):
         used_fields = new_field.elements[0].used_node_fields
 
         for idn, node in enumerate(new_field.nodes):
-            new_field.nodes[idn] = MeshNode(loc=[0] * field_dimension, **{uf:np.zeros(field_dimension) for uf in used_fields})
+            #np.zeros, not [0] * field_dimension: MeshNode does np.asarray(loc),
+            #so an int list seeds an integer parameter array.  A lagrange basis
+            #has no derivative dofs to promote it back to float, and every
+            #parameter written to the field afterwards is then truncated.
+            new_field.nodes[idn] = MeshNode(loc=np.zeros(field_dimension), **{uf:np.zeros(field_dimension) for uf in used_fields})
 
 
         n_vals_per_node = (len(new_field.elements[0].used_node_fields) + 1) * field_dimension #plus 1 is for the spatial field

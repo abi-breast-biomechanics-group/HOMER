@@ -7,8 +7,8 @@ neighbour search, ``mesh_embed_points`` with its custom JVP) out of
 once per ``generate_mesh()`` call and reused across every
 ``embed_points`` invocation.
 
-Performance notes
------------------
+**Performance notes**
+
 * **B1** – The JIT-compiled ``mesh_embed_points`` and its JVP are
   created once in :func:`build_embedding_fn` (called from
   ``generate_mesh``) instead of being redefined on every
@@ -634,14 +634,12 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
     The callable delegates to a ``@jax.custom_jvp`` function that is
     JIT-compiled once and reused, avoiding repeated XLA retracing.
 
-    Parameters
-    ----------
-    mesh :
+    :param mesh:
         The :class:`~HOMER.mesh.field.MeshField` instance.
-    approx_jac :
+    :param approx_jac:
         If ``True``, drops the sliding term from the residual gradient
         estimation for the custom JVP (see ``embed_points`` docs).
-    robust_init_est :
+    :param robust_init_est:
         If ``True``, uses a numeric Jacobian for the initial NR step.
     """
     ndim = mesh.ndim

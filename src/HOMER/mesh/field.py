@@ -12,6 +12,10 @@ lives in a sibling module and is bound into the class body below:
 * :mod:`HOMER.mesh.refinement` - refine and rebase
 * :mod:`HOMER.mesh.plotting`   - drawing
 
+:mod:`HOMER.mesh.reordering` is a sibling too, but is deliberately *not*
+bound: renumbering is done to a field, not by one, so it stays a plain
+function.
+
 Binding rather than inheriting is deliberate: ``@expand_wide_evals`` reads
 ``vars(cls)``, so a method reached through a base class would be invisible to
 it and the generated ``*_in_every_element`` / ``*_ele_xi_pair`` variants would
@@ -61,35 +65,31 @@ class MeshField:
     ``*_in_every_element`` and ``*_ele_xi_pair`` variants for every method
     decorated with ``@wide_eval``.
 
-    Parameters
-    ----------
-    nodes:
+    :param nodes:
         List of :class:`MeshNode` objects.  May be ``None`` when building a
         mesh incrementally with :meth:`add_node`.
-    elements:
+    :param elements:
         List (or single instance) of :class:`MeshElement` objects.
-    jax_compile:
+    :param jax_compile:
         When ``True``, JIT-compiles evaluation functions at construction time
         (recommended for iterative fitting loops).
 
-    Attributes
-    ----------
-    nodes : list[MeshNode]
+    :ivar nodes: list[MeshNode]
         All nodes belonging to this field.
-    elements : list[MeshElement]
+    :ivar elements: list[MeshElement]
         All elements belonging to this field.
-    fdim : int
+    :ivar fdim: int
         Physical dimensionality of the field values (e.g. 3 for XYZ).
-    ndim : int
+    :ivar ndim: int
         Parametric dimensionality (2 or 3).
-    true_param_array : numpy.ndarray
+    :ivar true_param_array: numpy.ndarray
         Flat vector of *all* nodal parameters (free and fixed).
-    optimisable_param_array : numpy.ndarray
+    :ivar optimisable_param_array: numpy.ndarray
         Subset of *true_param_array* that is not fixed.
-    optimisable_param_bool : numpy.ndarray
+    :ivar optimisable_param_bool: numpy.ndarray
         Boolean mask selecting optimisable parameters from
         *true_param_array*.
-    ele_map : numpy.ndarray
+    :ivar ele_map: numpy.ndarray
         ``(n_elements, n_params_per_element)`` index array mapping element
         slots to positions in *true_param_array*.
     """
@@ -133,13 +133,11 @@ class MeshField:
     def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False, skip_generate=False) -> None:
         """Initialise a :class:`MeshField`.
 
-        Parameters
-        ----------
-        nodes:
+        :param nodes:
             Node list (or ``None`` for incremental construction).
-        elements:
+        :param elements:
             Element or list of elements (or ``None``).
-        jax_compile:
+        :param jax_compile:
             If ``True``, JIT-compile internal evaluation functions
             immediately after construction.
         """

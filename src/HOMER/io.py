@@ -50,15 +50,12 @@ def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
       ``'nodes'`` (list of node indexes/ids), ``'basis'`` (list of basis
       class name strings), and ``'used_index'`` (bool).
 
-    Parameters
-    ----------
-    obj_field:
+    :param obj_field:
         The field to serialise.
 
-    Returns
-    -------
-    dict
-        JSON-serialisable dictionary representation of the field.
+    :returns:
+        dict
+            JSON-serialisable dictionary representation of the field.
     """
     dict_rep = {}
     nodes = {}
@@ -178,11 +175,9 @@ def parse_mesh_from_dict(dict_rep: dict) -> Mesh:
 def save_mesh(obj_mesh: Mesh | MeshField, file_location: PathLike):
     """Serialise a mesh (or field) to a JSON file.
 
-    Parameters
-    ----------
-    obj_mesh:
+    :param obj_mesh:
         The :class:`~HOMER.mesh.mesh.Mesh` (or :class:`MeshField`) to save.
-    file_location:
+    :param file_location:
         Destination path.  A ``.json`` extension is recommended.
     """
     if not isinstance(file_location, Path):
@@ -196,15 +191,12 @@ def save_mesh(obj_mesh: Mesh | MeshField, file_location: PathLike):
 def load_mesh(file_location: PathLike) -> Mesh:
     """Load a mesh from a JSON file produced by :func:`save_mesh`.
 
-    Parameters
-    ----------
-    file_location:
+    :param file_location:
         Path to the ``.json`` mesh file.
 
-    Returns
-    -------
-    Mesh
-        A fully initialised :class:`~HOMER.mesh.mesh.Mesh` object.
+    :returns:
+        Mesh
+            A fully initialised :class:`~HOMER.mesh.mesh.Mesh` object.
     """
     if not isinstance(file_location, Path):
         file_location = Path(file_location)

@@ -450,18 +450,15 @@ def spheres_to_polydata(verts: np.ndarray, faces: np.ndarray) -> pv.PolyData:
     Build a single PolyData from many 'sphere' instances.
     The sphere doesn't actually need to be spherical, just keeps similar connectvitiy.
 
-    Parameters
-    ----------
-    verts : np.ndarray, shape (M, N, 3)
+    :param verts: np.ndarray, shape (M, N, 3)
         M spheres, each with N vertices (x, y, z).
-    faces : np.ndarray, shape (F,)
+    :param faces: np.ndarray, shape (F,)
         Shared connectivity in PyVista flat format: [3, i, j, k, 3, ...].
         Must be triangles (all polygons size 3).
 
-    Returns
-    -------
-    pv.PolyData
-        A single merged mesh representing all M spheres.
+    :returns:
+        pv.PolyData
+            A single merged mesh representing all M spheres.
     """
     M, N, _ = verts.shape
 
@@ -603,23 +600,20 @@ def masked_closest_indices(A, B, dim_mask, chunk_size=256):
     the masked case; ``chunk_size`` bounds peak memory to
     ``O(chunk_size * len(A))`` by mapping over queries in batches.
 
-    Parameters
-    ----------
-    A:
+    :param A:
         Candidate points, shape ``(n_cand, fdim)``.
-    B:
+    :param B:
         Query points, shape ``(n_query, fdim)``.  Components where
         ``dim_mask`` is ``False`` are never read, so sentinel values there
         are harmless.
-    dim_mask:
+    :param dim_mask:
         Bool array broadcastable to ``B.shape``.
-    chunk_size:
+    :param chunk_size:
         Queries per batch.  Static.
 
-    Returns
-    -------
-    jnp.ndarray
-        Index into *A* of the masked-closest candidate, shape ``(n_query,)``.
+    :returns:
+        jnp.ndarray
+            Index into *A* of the masked-closest candidate, shape ``(n_query,)``.
     """
     A = jnp.asarray(A)
     B = jnp.asarray(B)
@@ -779,15 +773,12 @@ def block_diagonal_jacobian(n: int, m: int, num_blocks: int) -> csr_array:
     Build a block-diagonal sparse matrix with `num_blocks` dense blocks,
     each of shape (n, m), filled with placeholder 1s.
 
-    Parameters
-    ----------
-    n           : number of rows per block
-    m           : number of columns per block
-    num_blocks  : number of blocks along the diagonal
+    :param n: number of rows per block
+    :param m: number of columns per block
+    :param num_blocks: number of blocks along the diagonal
 
-    Returns
-    -------
-    csr_array of shape (n * num_blocks, m * num_blocks)
+    :returns:
+        csr_array of shape (n * num_blocks, m * num_blocks)
     """
     nnz = n * m * num_blocks
 

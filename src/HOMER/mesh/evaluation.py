@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 
 @wide_eval
-def evaluate_embeddings(self, *a, **kw): #placeholder for later func definition
+def evaluate_embeddings(self, element_ids=None, xis=None, fit_params=None, *a, **kw): #placeholder for later func definition
     """Evaluate the field at parametric coordinates within one or more elements.
 
     This is a placeholder that is replaced by a compiled JAX function when
@@ -38,23 +38,20 @@ def evaluate_embeddings(self, *a, **kw): #placeholder for later func definition
 
         evaluate_embeddings(element_ids, xis, fit_params=None) -> jnp.ndarray
 
-    Parameters
-    ----------
-    element_ids:
+    :param element_ids:
         1-D array of integer element indices, shape ``(n_pts,)``.
-    xis:
+    :param xis:
         Parametric coordinates, shape ``(n_pts, ndim)``.
-    fit_params:
+    :param fit_params:
         Override of the current :attr:`optimisable_param_array`.
         When ``None`` the stored parameter values are used.
 
-    Returns
-    -------
-    jnp.ndarray
-        Field values at the requested locations, shape ``(n_pts, fdim)``.
+    :returns:
+        jnp.ndarray
+            Field values at the requested locations, shape ``(n_pts, fdim)``.
 
-    Notes
-    -----
+    **Notes**
+
     The ``@expand_wide_evals`` class decorator automatically creates two
     additional variants:
 
@@ -70,7 +67,7 @@ def evaluate_embeddings(self, *a, **kw): #placeholder for later func definition
 
 
 @wide_eval
-def evaluate_deriv_embeddings(self, *a, **kw): #placeholder for later func definition
+def evaluate_deriv_embeddings(self, element_ids=None, xis=None, derivs=None, fit_params=None, *a, **kw): #placeholder for later func definition
     """Evaluate a specified partial derivative of the field.
 
     This is a placeholder replaced at :meth:`generate_mesh` time.  The
@@ -79,22 +76,19 @@ def evaluate_deriv_embeddings(self, *a, **kw): #placeholder for later func defin
         evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params=None)
             -> jnp.ndarray
 
-    Parameters
-    ----------
-    element_ids:
+    :param element_ids:
         1-D integer array, shape ``(n_pts,)``.
-    xis:
+    :param xis:
         Parametric coordinates, shape ``(n_pts, ndim)``.
-    derivs:
+    :param derivs:
         Derivative order per parametric direction, e.g. ``[1, 0]`` for
         ∂/∂u in a 2-D element or ``[0, 0, 1]`` for ∂/∂w in a 3-D one.
-    fit_params:
+    :param fit_params:
         Optional override of :attr:`optimisable_param_array`.
 
-    Returns
-    -------
-    jnp.ndarray
-        Derivative field values, shape ``(n_pts, fdim)``.
+    :returns:
+        jnp.ndarray
+            Derivative field values, shape ``(n_pts, fdim)``.
     """
     if not typing:
         raise RuntimeError('Called evaluate_deriv_embeddings before initialisation')
@@ -104,19 +98,16 @@ def evaluate_deriv_embeddings(self, *a, **kw): #placeholder for later func defin
 def evaluate_element_embeddings(self, element_id, xis, fit_params=None):
     """Evaluate the embedding for a single element identified by its ID.
 
-    Parameters
-    ----------
-    element_id:
+    :param element_id:
         The user-assigned element ID (not the list index).
-    xis:
+    :param xis:
         Parametric coordinates, shape ``(n_pts, ndim)``.
-    fit_params:
+    :param fit_params:
         Optional parameter override.
 
-    Returns
-    -------
-    jnp.ndarray
-        Field values, shape ``(n_pts, fdim)``.
+    :returns:
+        jnp.ndarray
+            Field values, shape ``(n_pts, fdim)``.
     """
     if fit_params is None:
         fit_params = self.optimisable_param_array
@@ -130,24 +121,18 @@ def evaluate_normals(self, element_ids: np.ndarray, xis: np.ndarray, fit_params=
     Only valid for 2-D manifold meshes (``ndim == 2``).  The normal is
     computed as the cross product of the two surface tangent vectors.
 
-    Parameters
-    ----------
-    element_ids:
+    :param element_ids:
         1-D integer array of element indices, shape ``(n_pts,)``.
-    xis:
+    :param xis:
         Parametric coordinates, shape ``(n_pts, 2)``.
-    fit_params:
+    :param fit_params:
         Optional override of :attr:`optimisable_param_array`.
 
-    Returns
-    -------
-    jnp.ndarray
-        Normal vectors (not normalised), shape ``(n_pts, 3)``.
+    :returns:
+        jnp.ndarray
+            Normal vectors (not normalised), shape ``(n_pts, 3)``.
 
-    Raises
-    ------
-    ValueError
-        If called on a 3-D volume mesh.
+    :raises ValueError: If called on a 3-D volume mesh.
     """
 
     if self.ndim == 3: 
@@ -196,19 +181,16 @@ def evaluate_jacobians(self, element_ids, xis, fit_params=None):
     physical-space tangent vectors.  Rows correspond to physical directions
     (x, y, z) and columns to parametric directions (u, v[, w]).
 
-    Parameters
-    ----------
-    element_ids:
+    :param element_ids:
         1-D integer array, shape ``(n_pts,)``.
-    xis:
+    :param xis:
         Parametric coordinates, shape ``(n_pts, ndim)``.
-    fit_params:
+    :param fit_params:
         Optional override of :attr:`optimisable_param_array`.
 
-    Returns
-    -------
-    jnp.ndarray
-        Jacobian matrices, shape ``(n_pts, fdim, ndim)``.
+    :returns:
+        jnp.ndarray
+            Jacobian matrices, shape ``(n_pts, fdim, ndim)``.
     """
     if fit_params is None:
         fit_params = self.optimisable_param_array
@@ -234,31 +216,28 @@ def xi_grid(self, res: int, dim=None, surface=False, boundary_points=True, latti
     :meth:`evaluate_embeddings_in_every_element` or for passing to
     :meth:`get_xi_weight_mat`.
 
-    Parameters
-    ----------
-    res:
+    :param res:
         Number of grid points along each parametric direction.  The
         total number of points is ``res ** ndim`` (or ``res ** 2`` when
         returning surface faces of a volume mesh).
-    dim:
+    :param dim:
         Dimensionality of the grid (2 or 3).  Defaults to
         :attr:`ndim`.
-    surface:
+    :param surface:
         For a 3-D mesh, return only points on the six element faces
         rather than the full interior grid.
-    boundary_points:
+    :param boundary_points:
         When ``False``, exclude xi = 0 and xi = 1 from the grid (useful
         to avoid double-counting shared element boundaries).
-    lattice:
+    :param lattice:
         Optional ``(xn, yn)`` tiling definition for hexagonal surface
         patterns.
 
-    Returns
-    -------
-    numpy.ndarray
-        Grid points, shape ``(res**ndim, ndim)`` (or, when *lattice* is
-        provided and *surface* is ``True``, a ``(pts, connectivity)``
-        tuple).
+    :returns:
+        numpy.ndarray
+            Grid points, shape ``(res**ndim, ndim)`` (or, when *lattice* is
+            provided and *surface* is ``True``, a ``(pts, connectivity)``
+            tuple).
     """
     dim = self.ndim if dim is None else dim
 
@@ -308,25 +287,19 @@ def xi_grid(self, res: int, dim=None, surface=False, boundary_points=True, latti
 def gauss_grid(self, ng):
     """Return a tensor-product Gauss quadrature grid.
 
-    Parameters
-    ----------
-    ng:
+    :param ng:
         * **int** – return 1-D Gauss points for a single direction.
         * **list[int]** – tensor-product grid; e.g. ``[3, 3]`` for a
           2-D surface integration or ``[3, 3, 3]`` for a 3-D volume.
 
-    Returns
-    -------
-    Xi : numpy.ndarray
-        Gauss point locations, shape ``(n_gauss, ndim)`` or ``(n_gauss,)``
-        for the 1-D case.
-    W : numpy.ndarray
-        Corresponding quadrature weights, shape ``(n_gauss,)``.
+    :returns:
+        Xi : numpy.ndarray
+            Gauss point locations, shape ``(n_gauss, ndim)`` or ``(n_gauss,)``
+            for the 1-D case.
+        W : numpy.ndarray
+            Corresponding quadrature weights, shape ``(n_gauss,)``.
 
-    Raises
-    ------
-    ValueError
-        If ``ng`` has more than 3 entries or is of an unsupported type.
+    :raises ValueError: If ``ng`` has more than 3 entries or is of an unsupported type.
     """
 
     if isinstance(ng, int):
@@ -396,29 +369,38 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
     built once in :meth:`generate_mesh` (see :mod:`HOMER.embedding`),
     which eliminates redundant XLA retracing across calls.
 
-    Parameters
-    ----------
-    points:
+    :param points:
         Physical-space query points, shape ``(n_pts, fdim)``.
-    verbose:
+    :param verbose:
         Verbosity level.  ``0`` → silent; ``2`` → print mean/max
         residual; ``3`` → also render an error visualisation with
         PyVista.
-    init_elexi:
+    :param init_elexi:
         Pre-computed initial ``(elem_num, xis)`` tuple.  When supplied,
         the coarse nearest-neighbour search is skipped.
-    fit_params:
+    :param fit_params:
         Optional parameter override for the mesh geometry.
-    return_residual:
+    :param return_residual:
         When ``True``, returns a ``((elem_num, embedded), residual)``
         tuple instead of just ``(elem_num, embedded)``.
-    surface_embed:
+    :param surface_embed:
         Restrict the coarse search to the surface faces of a 3-D mesh.
-    iterations:
+    :param iterations:
         Number of refinement iterations.
-    scene:
+    :param max_c:
+        Upper limit of the colour scale in the ``verbose=3``
+        visualisation.  ``None`` uses 1.1 times the 99th percentile of
+        the error.
+    :param grid_res:
+        xi samples per direction in the coarse search that seeds the
+        refinement.  Raise it when elements are large or strongly
+        curved, so the seed starts in the right element.
+    :param vis_max_norm:
+        In the ``verbose=3`` visualisation, drop points whose error
+        exceeds this before drawing.  ``None`` draws all of them.
+    :param scene:
         pyvista plotter.
-    dim_mask:
+    :param dim_mask:
         a vector used to project against the distance in a subset of dimensions.
         Either ``(fdim,)`` — applied to every point — or ``(n_pts, fdim)``
         for a per-point mask; ``None`` keeps every dimension.  It is a
@@ -441,22 +423,27 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
         different local minimum of the cross-state compromise, not merely
         a less precise seed, so the exact search is used whenever the
         mask makes one necessary.
-    approx_jac:
+    :param robust_init_est:
+        Take the first Newton step from a numeric Jacobian instead of
+        the analytic one, which helps a seed that lands somewhere the
+        analytic Jacobian is near-singular.  The Jacobian carried by the
+        loop and handed to the JVP is the analytic one either way.
+    :param approx_jac:
         drops the calculation of the sliding term from the residual gradient estimation for embedding.
         Is less accurate, but recovers seperable derivatives by dimension, allowing further compression of the Jacobian.
         The jac estimate will^* have the right sign.
-    chunk_size:
+    :param chunk_size:
         When set, query points are processed in batches of at most
         this size.  Bounds peak memory to ``O(chunk_size)`` instead
         of ``O(n_pts)``, preventing swap on large inputs.
-    window_size:
+    :param window_size:
         Window width for the Morton-code nearest-neighbour coarse
         search (default 16).  Larger values improve coarse-search
         accuracy at the cost of memory and time; the Newton–Raphson
         refinement corrects for coarse-search misses.  Ignored when
         *dim_mask* masks anything off, since that case uses an exact
         search instead (see below).
-    tol:
+    :param tol:
         Residual norm at which the refinement stops, making
         *iterations* an upper bound rather than a fixed count.
         ``None`` (the default) uses
@@ -473,15 +460,14 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
         does not perturb the others — a converged point's state is frozen,
         so every result is identical to the one it would get on its own.
 
-    Returns
-    -------
-    elem_num : jnp.ndarray
-        Element index for each query point, shape ``(n_pts,)``.
-    embedded : jnp.ndarray
-        Parametric coordinates, shape ``(n_pts, ndim)``.
-    residual : jnp.ndarray
-        (Only when *return_residual* is ``True``) Embedding error
-        vectors, shape ``(n_pts, fdim)``.
+    :returns:
+        elem_num : jnp.ndarray
+            Element index for each query point, shape ``(n_pts,)``.
+        embedded : jnp.ndarray
+            Parametric coordinates, shape ``(n_pts, ndim)``.
+        residual : jnp.ndarray
+            (Only when *return_residual* is ``True``) Embedding error
+            vectors, shape ``(n_pts, fdim)``.
     """
     if fit_params is None:
         fit_params = self.optimisable_param_array
@@ -583,7 +569,7 @@ def evaluate_sobolev(self, weights=None, fit_params=None,flatten=True):
     for d, sw in zip(deriv_combos, weights):
         data = self.evaluate_deriv_embeddings_in_every_element(gp, d, fit_params=fit_params)
 
-        weighted = (data.reshape(n_eles, -1, 3) * w[None, :, None])
+        weighted = (data.reshape(n_eles, -1, self.fdim) * w[None, :, None])
         if not flatten:
             fshape = weighted.shape
         weighted = weighted.ravel() * sw
@@ -626,36 +612,30 @@ def evaluate_strain(self, element_ids, xis, othr: "Mesh", coord_function: Option
     Jacobian of *othr* (deformed configuration), then returns the strain
     tensor **E** = (Fᵀ F − I) / 2.
 
-    Parameters
-    ----------
-    element_ids:
+    :param element_ids:
         1-D integer array, shape ``(n_pts,)``.
-    xis:
+    :param xis:
         Parametric coordinates, shape ``(n_pts, ndim)``.
-    othr:
+    :param othr:
         A :class:`MeshField` representing the *deformed* configuration of
         the same topology.
-    coord_function:
+    :param coord_function:
         Optional callable ``(mesh, eles, xis, Jmats) → Jmats`` that
         re-maps the Jacobian into a local coordinate frame (required for
         2-D manifold meshes).
-    return_F:
+    :param return_F:
         When ``True``, return the deformation gradient **F** instead of
         the strain tensor **E**.
-    fit_params:
+    :param fit_params:
         Optional parameter override for *self*.
 
-    Returns
-    -------
-    jnp.ndarray
-        Green-Lagrange strain tensor ``E``, shape
-        ``(n_pts, ndim, ndim)``, or the deformation gradient **F** if
-        *return_F* is ``True``.
+    :returns:
+        jnp.ndarray
+            Green-Lagrange strain tensor ``E``, shape
+            ``(n_pts, ndim, ndim)``, or the deformation gradient **F** if
+            *return_F* is ``True``.
 
-    Raises
-    ------
-    ValueError
-        If called on a 2-D manifold mesh without supplying *coord_function*.
+    :raises ValueError: If called on a 2-D manifold mesh without supplying *coord_function*.
     """
 
     if self.ndim == 2 and coord_function is None:

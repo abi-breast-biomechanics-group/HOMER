@@ -121,18 +121,15 @@ def element_lattice_coords(topo_lookup) -> tuple[np.ndarray, np.ndarray]:
     which - true of anything HOMER builds by refining or rebasing.  Where it is
     not true the coordinates are still deterministic, just no longer a lattice.
 
-    Parameters
-    ----------
-    topo_lookup:
+    :param topo_lookup:
         ``(n_elements, ndim, 2)`` neighbour array, as built by
         :meth:`~HOMER.mesh.topology._explore_topology`; ``-1`` means no
         neighbour on that face.
 
-    Returns
-    -------
-    tuple[numpy.ndarray, numpy.ndarray]
-        ``(component, coords)`` - the connected component index of each
-        element, and its ``(n_elements, ndim)`` integer coordinate.
+    :returns:
+        tuple[numpy.ndarray, numpy.ndarray]
+            ``(component, coords)`` - the connected component index of each
+            element, and its ``(n_elements, ndim)`` integer coordinate.
     """
     lookup = np.asarray(topo_lookup)
     n_ele, ndim = lookup.shape[0], lookup.shape[1]
@@ -223,20 +220,17 @@ def preserving_permutation(parent_of_new, n_old: int) -> Optional[np.ndarray]:
     successor.  Anything else returns ``None``, because there is then no old
     ordering to reproduce.
 
-    Parameters
-    ----------
-    parent_of_new:
+    :param parent_of_new:
         For each new node, the index of the old node it coincides with, or
         ``-1`` for none - as built by
         :func:`~HOMER.mesh.refinement._parent_node_map`.
-    n_old:
+    :param n_old:
         How many nodes the mesh had before the operation.
 
-    Returns
-    -------
-    numpy.ndarray or None
-        A permutation of the new nodes, or ``None`` if the correspondence is
-        not one-to-one.
+    :returns:
+        numpy.ndarray or None
+            A permutation of the new nodes, or ``None`` if the correspondence is
+            not one-to-one.
     """
     parent = np.asarray(parent_of_new, dtype=int)
     if parent.shape[0] != n_old or (parent < 0).any():
@@ -255,14 +249,12 @@ def node_permutation(field: 'MeshField', strategy=True, topo_lookup=None,
     array *perm* such that ``field.nodes[perm[i]]`` is the node that should end
     up at position *i*.  Ties keep their current relative order.
 
-    Parameters
-    ----------
-    field:
+    :param field:
         The field to order.  Only its nodes and elements are read.
-    strategy:
+    :param strategy:
         One of :data:`STRATEGIES`, ``True`` for :data:`DEFAULT_NODE_ORDERING`,
         or ``False``/``None`` to do nothing.
-    topo_lookup:
+    :param topo_lookup:
         Neighbour array to use for the ``'lattice'`` ordering.  Defaults to the
         field's own ``_topo_lookup``; pass it explicitly when the field's copy
         is stale, as it is midway through a refinement.
@@ -332,41 +324,38 @@ def reorder_nodes(field: 'MeshField', strategy=True, topo_lookup=None,
 
     A convenience wrapper over :func:`node_permutation` and
     :func:`apply_node_permutation`.  Call it after any manipulation that
-    rebuilds the node list; :meth:`~HOMER.mesh.field.MeshField.refine` and
-    :meth:`~HOMER.mesh.field.MeshField.rebase` already do.
+    rebuilds the node list; :meth:`~HOMER.mesh.refinement.refine` and
+    :meth:`~HOMER.mesh.refinement.rebase` already do.
 
-    Parameters
-    ----------
-    field:
+    :param field:
         The :class:`~HOMER.mesh.field.MeshField` (or :class:`~HOMER.mesh.mesh.Mesh`)
         to renumber.  A ``Mesh``'s secondary fields are *not* touched - each
         field owns its own node list, and reordering one has no bearing on the
         others.
-    strategy:
+    :param strategy:
         One of :data:`STRATEGIES`, ``True`` for :data:`DEFAULT_NODE_ORDERING`,
         or ``False``/``None`` to do nothing.
-    topo_lookup:
+    :param topo_lookup:
         Neighbour array for the ``'lattice'`` ordering; defaults to the field's
         own.
-    generate:
+    :param generate:
         Rebuild the mesh afterwards.  Pass ``False`` when the caller is about
         to call :meth:`~HOMER.mesh.field.MeshField.generate_mesh` anyway.
     parent_of_new, n_old:
         Where the new nodes came from, if the caller knows - see
         :func:`node_permutation`.  Passed by
-        :meth:`~HOMER.mesh.field.MeshField.refine` and
-        :meth:`~HOMER.mesh.field.MeshField.rebase` so that an operation which
+        :meth:`~HOMER.mesh.refinement.refine` and
+        :meth:`~HOMER.mesh.refinement.rebase` so that an operation which
         leaves the node set alone leaves the numbering alone too.
 
-    Returns
-    -------
-    numpy.ndarray or None
-        The permutation applied, so a caller can carry an index list of its own
-        across the renumbering (``inverse[old_index]`` gives the new index,
-        where ``inverse[perm] = arange(n)``); ``None`` if nothing was done.
+    :returns:
+        numpy.ndarray or None
+            The permutation applied, so a caller can carry an index list of its own
+            across the renumbering (``inverse[old_index]`` gives the new index,
+            where ``inverse[perm] = arange(n)``); ``None`` if nothing was done.
 
-    Examples
-    --------
+    **Examples**
+
     Put an arbitrarily numbered mesh back into lattice order::
 
         from HOMER.mesh.reordering import reorder_nodes

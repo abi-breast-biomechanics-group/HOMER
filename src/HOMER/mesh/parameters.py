@@ -27,7 +27,10 @@ def update_from_params(self, inp_params, generate=True):
     """
 
     if len(inp_params) == len(self.optimisable_param_array):
-        params = self.true_param_array.copy()
+        #promote before scattering: storing float parameters into an integer
+        #array truncates them silently
+        params = np.asarray(self.true_param_array).astype(
+            np.result_type(self.true_param_array, np.asarray(inp_params)))
         params[self.optimisable_param_bool] = inp_params 
     elif len(inp_params) == len(self.true_param_array):
         params = inp_params
@@ -66,17 +69,14 @@ def get_xi_weight_mat(self, eles, xis):
 
         W * node_params = target_values   (solved in a least-squares sense)
 
-    Parameters
-    ----------
-    eles:
+    :param eles:
         1-D integer array of element indices, shape ``(n_pts,)``.
-    xis:
+    :param xis:
         Parametric coordinates, shape ``(n_pts, ndim)``.
 
-    Returns
-    -------
-    numpy.ndarray
-        Weight matrix, shape ``(n_pts, n_nodes)``.
+    :returns:
+        numpy.ndarray
+            Weight matrix, shape ``(n_pts, n_nodes)``.
     """
     # out_weight = np.zeros((len(eles), len(self.true_param_array)//self.fdim)) #
     # unique_elem, inv = jnp.unique_inverse(eles)
@@ -116,20 +116,18 @@ def linear_fit(self, targets, weight_mat, target_empty=-1, return_params=False, 
     arithmetic but recovers several digits in float32 for the bases whose
     weight matrices are badly scaled -- Hermite and B-spline especially.
 
-    Parameters
-    ----------
-    targets:
+    :param targets:
         Target field values, shape ``(n_pts,)`` or ``(n_pts, fdim)``.
         Rows equal to *target_empty* (default ``-1``) are excluded from
         the fit.
-    weight_mat:
+    :param weight_mat:
         Weight matrix from :meth:`get_xi_weight_mat`,
         shape ``(n_pts, n_nodes)``.
-    target_empty:
+    :param target_empty:
         Sentinel value used to mask out unused target rows.
 
-    Notes
-    -----
+    **Notes**
+
     Fixed parameters (set via :meth:`MeshNode.fix_parameter`) are
     currently **not** respected by this method.  Use the nonlinear
     optimisation pathway (``fitting.point_cloud_fit``) if constraints
@@ -185,24 +183,21 @@ def column_equilibrated_lstsq(A, b):
     dead column is then left unscaled rather than divided by ~0 (which would
     otherwise amplify its round-off by ``1 / tiny``).
 
-    Notes
-    -----
+    **Notes**
+
     ``rank`` and the singular values come back from the *scaled* system.  For a
     rank-deficient system the minimum-norm tie-break is also taken in scaled
     coordinates, so the returned parameters differ from a plain ``lstsq`` --
     the fit itself does not.
 
-    Parameters
-    ----------
-    A:
+    :param A:
         Design matrix, shape ``(n_pts, n_params)``.
-    b:
+    :param b:
         Targets, shape ``(n_pts,)`` or ``(n_pts, fdim)``.
 
-    Returns
-    -------
-    tuple
-        ``(params, residual, rank, singular_values)``, as ``jnp.linalg.lstsq``.
+    :returns:
+        tuple
+            ``(params, residual, rank, singular_values)``, as ``jnp.linalg.lstsq``.
     """
     A = jnp.asarray(A)
     b = jnp.asarray(b)

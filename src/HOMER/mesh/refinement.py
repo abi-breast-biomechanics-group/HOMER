@@ -55,14 +55,12 @@ def _basis_slot_correspondence(old_bases, new_bases, xi_breaks, refinement) -> l
     has no counterpart.  The comparison is exact rational arithmetic on the
     basis node locations - never on nodal coordinates.
 
-    Parameters
-    ----------
     old_bases, new_bases:
         1-D bases before and after the operation, one per direction.
-    xi_breaks:
+    :param xi_breaks:
         Per-direction list of :class:`~fractions.Fraction` sub-element
         boundaries within the parent element, length ``refinement[d] + 1``.
-    refinement:
+    :param refinement:
         Number of sub-elements per direction (all ones for a rebase).
     """
     maps = []
@@ -107,11 +105,10 @@ def _parent_node_map(old_field: 'MeshField', old_bases, new_bases, new_ele_nodes
     node locations, so nothing here depends on the mesh coordinates or their
     dtype.
 
-    Returns
-    -------
-    numpy.ndarray
-        Length ``n_new_nodes``, holding the old node index for each new node,
-        or ``-1`` where the new node has no counterpart.
+    :returns:
+        numpy.ndarray
+            Length ``n_new_nodes``, holding the old node index for each new node,
+            or ``-1`` where the new node has no counterpart.
     """
     old_shape = [len(b.node_locs) for b in old_bases]
     new_shape = [len(b.node_locs) for b in new_bases]
@@ -153,11 +150,10 @@ def _transfer_fixed_params(old_nodes, new_nodes, parent_of_new: np.ndarray, inte
     legitimately the parent's divided by the refinement factor).  For a
     control-net basis no value is restored at all - only the flag.
 
-    Returns
-    -------
-    tuple
-        ``(constraints transferred, constraints dropped, fixed old nodes with
-        no counterpart)``.
+    :returns:
+        tuple
+            ``(constraints transferred, constraints dropped, fixed old nodes with
+            no counterpart)``.
     """
     transferred = 0
     dropped = 0
@@ -219,27 +215,25 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
     Exactly one of *refinement_factor* or *by_xi_refinement* must be
     provided.
 
-    Parameters
-    ----------
-    refinement_factor:
+    :param refinement_factor:
         Integer ≥ 2 that subdivides each parametric direction uniformly.
         For example, ``refinement_factor=2`` splits a single element into
         8 sub-elements in 3-D (2 × 2 × 2).
-    by_xi_refinement:
+    :param by_xi_refinement:
         Tuple of 1-D arrays, one per parametric direction, specifying the
         xi values at which to place the new element boundaries.  Each
         array must start with 0 and end with 1.
-    clean_nodes:
+    :param clean_nodes:
         When ``True`` (default), remove unreferenced nodes after
         refinement.
-    preserve_fixed_params:
+    :param preserve_fixed_params:
         When ``True`` (default), any node of the refined mesh that sits
         exactly on an existing node inherits that node's
         :attr:`MeshNode.fixed_params`.  Fixed ``loc`` values are restored
         verbatim for interpolatory bases so pinned landmarks do not drift
         with the fit; constraints with no counterpart in the refined mesh
         are dropped and reported.
-    reorder_nodes:
+    :param reorder_nodes:
         Refinement rebuilds the node list, and the order it falls out in is
         an artefact of the sub-element sweep.  When ``True`` (default) the
         refined nodes are renumbered by
@@ -251,10 +245,7 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
         it; a refinement that does add nodes renumbers, and indices into the
         coarse mesh do not carry over.
 
-    Raises
-    ------
-    AssertionError
-        If both *refinement_factor* and *by_xi_refinement* are given, or
+    :raises AssertionError: If both *refinement_factor* and *by_xi_refinement* are given, or
         if *refinement_factor* < 2.
     """
     assert not(refinement_factor is not None and by_xi_refinement is not None), "Refinement factor and refining by defined xi are mutually exclusive."
@@ -366,24 +357,23 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
 
     This code explicitely nops if the rebasing is of the same type as the initial mesh.
 
-    Parameters
-    ----------
-    new_basis:
+    :param new_basis:
         The new 1-D bases, one per parametric direction; a
         :class:`~HOMER.basis_definitions.BasisGroup` such as ``H3Basis * 3``,
         or any list or tuple of bases.
-    in_place:
-        Currently unused (future: modify *self* rather than returning a
-        new object).
-    res:
+    :param in_place:
+        When ``True``, replace this field's nodes and elements with the
+        rebased ones, regenerate it, and return *self*.  The default builds
+        and returns a new field, leaving this one untouched.
+    :param res:
         Number of xi grid points per direction used for the linear fit.
-    preserve_fixed_params:
+    :param preserve_fixed_params:
         When ``True`` (default), a node of the rebased mesh that sits
         exactly on an existing node inherits that node's
         :attr:`MeshNode.fixed_params`.  Only parameters that exist in both
         bases carry across - rebasing H3 to L1 necessarily drops the
         derivative constraints - and the dropped ones are reported.
-    reorder_nodes:
+    :param reorder_nodes:
         A rebase rebuilds the node list from the new basis, so the order it
         comes back in is an artefact of that, not the order the mesh had.
         When ``True`` (default) the rebased nodes are renumbered by
@@ -395,10 +385,9 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
         rebase to the basis the mesh already has returns a copy untouched,
         and so is unaffected either way.
 
-    Returns
-    -------
-    MeshField
-        New mesh with the requested basis functions.
+    :returns:
+        MeshField
+            New mesh with the requested basis functions.
     """
     new_basis = BasisGroup(new_basis)
     new_mesh = deepcopy(self)

@@ -73,7 +73,7 @@ def get_hex_surface(self, element_ids, tiling = (10, 6), fit_params=None) -> tup
     """
     Returns lines evaluating a hexagon tiling of the element surface
 
-    :params tiling: the repetitions of the underlying unit surface (5/3 ratio "looks good")
+    :param tiling: the repetitions of the underlying unit surface (5/3 ratio "looks good")
     """
     surface_points, single_face_connectivity = self.get_surface(element_ids, just_faces=True, tiling=tiling, fit_params=fit_params)
     return surface_points, single_face_connectivity.astype(int)
@@ -168,8 +168,9 @@ def plot(self, scene:Optional[pv.Plotter] = None,
     :param node_colour: The colour to draw the node values.
     :param node_size: The size of the node points.
     :param labels: Whether to label the node numbers.
-    :param res: The resolution of the surface mesh.
-    :param mesh_color: The mesh surface colour.
+    :param tiling: Repetitions of the hexagonal unit surface used to draw each
+        element; a 5/3 ratio looks good.
+    :param mesh_colour: The mesh surface colour.
     :param mesh_opacity: The mesh surface opacity.
     :param elem_labels: Whether to label the mesh elements.
 
@@ -306,56 +307,54 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
          default_field_point_size=25, default_xi_res=4, fit_params=None):
     """Draw the mesh and optionally overlay a secondary field.
 
-    Parameters
-    ----------
-    scene:
+    :param scene:
         Existing :class:`pyvista.Plotter`.  When ``None``, a new plotter
         is created and shown.
-    node_colour:
+    :param node_colour:
         Colour for node spheres.
-    node_size:
+    :param node_size:
         Node sphere size.
-    labels:
+    :param labels:
         When ``True``, add node index labels (forces *node_size* = 0).
-    tiling:
+    :param tiling:
         ``(xn, yn)`` tiling for the hexagonal surface overlay.
-    mesh_colour:
+    :param mesh_colour:
         Surface mesh colour.  Pass a :class:`numpy.ndarray` to colour-map
         by scalar values.
-    mesh_opacity:
+    :param mesh_opacity:
         Surface opacity (0–1).
-    mesh_width:
+    :param mesh_width:
         Line width for the hex wireframe.
-    mesh_col_scalar_name:
+    :param mesh_col_scalar_name:
         Scalar array name used when *mesh_colour* is an array.
-    line_colour:
+    :param line_colour:
         Colour for the structural edge lines.
-    line_opacity:
+    :param line_opacity:
         Edge line opacity.
-    line_width:
+    :param line_width:
         Edge line width.
-    line_col_scalar_name:
+    :param line_col_scalar_name:
         Scalar name for colour-mapped edges.
-    elem_labels:
+    :param elem_labels:
         When ``True``, label element centres.
-    render_name:
+    :param render_name:
         Prefix for named actors (allows individual actor replacement in
         an interactive scene).
-    field_to_draw:
+    :param field_to_draw:
         Name of a secondary field to visualise.  When ``None`` only the
         geometry is drawn.
-    field_xi:
+    :param field_xi:
         Custom xi grid at which to evaluate the secondary field.
         Defaults to a uniform grid at *default_xi_res*.
-    draw_xyz_field:
+    :param draw_xyz_field:
         When ``False``, suppress drawing of the primary geometry.
-    field_artist:
+    :param field_artist:
         Custom callable ``(plotter, locs, values) → None`` for rendering
         the secondary field.  Defaults to line segments for 3-D fields
         and coloured spheres for 1-D scalar fields.
-    default_field_point_size:
+    :param default_field_point_size:
         Point size used by the default scalar field artist.
-    default_xi_res:
+    :param default_xi_res:
         Xi grid resolution for the secondary field visualisation.
     """
     s_flag = False
@@ -390,8 +389,13 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
                 #rather than arrows, create a line object.
                 ldata = np.concatenate((locs[:, None], (locs + values)[:, None]), axis=1).reshape(-1, 3)
                 lines = pv.line_segments_from_points(ldata)
-                lines[field_to_draw] = np.linalg.norm(values, axis=-1)
-                lscene.add_mesh(lines, render_lines_as_tubes=True, line_width=5)
+                #one value per endpoint, not per segment: VTK's line mapper reads two
+                #cell-data entries per segment and silently drops the second half of
+                #the lines, so the scalars have to go on the points.
+                lines[field_to_draw] = np.repeat(np.linalg.norm(values, axis=-1), 2)
+                lscene.add_mesh(lines, render_lines_as_tubes=False, line_width=5)
+                # lscene.add_mesh(np.array(locs), render_points_as_spheres=True, color='b')
+                # lscene.add_mesh(np.array(locs + values), render_points_as_spheres=True, color='r')
             elif self[field_to_draw].fdim == 1:
                 f = pv.PolyData(np.asarray(locs))
                 f[field_to_draw] = np.asarray(values)

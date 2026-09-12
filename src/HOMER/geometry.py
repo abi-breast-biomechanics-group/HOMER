@@ -17,23 +17,20 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     """Create a single-element cube mesh.
 
     Constructs a mesh with 8 corner nodes and a single trilinear element
-    (``L1Basis * 3``), then :meth:`~HOMER.mesh.field.MeshField.rebase`-s
+    (``L1Basis * 3``), then :meth:`~HOMER.mesh.refinement.rebase`-s
     it to the requested *basis* (defaulting to cubic Hermite in all directions).
 
-    Parameters
-    ----------
-    scale:
+    :param scale:
         Side length of the cube.  The default is a unit cube.
-    centre:
+    :param centre:
         Centre of the cube, shape ``(3,)``.  Defaults to the origin.
-    basis:
+    :param basis:
         The three 1-D bases for the resulting mesh, e.g. ``H3Basis * 3``.
         Defaults to ``H3Basis * 3``.
 
-    Returns
-    -------
-    Mesh
-        A :class:`~HOMER.mesh.mesh.Mesh` with the requested basis.
+    :returns:
+        Mesh
+            A :class:`~HOMER.mesh.mesh.Mesh` with the requested basis.
     """
     if centre is None:
         centre = np.zeros(3)
