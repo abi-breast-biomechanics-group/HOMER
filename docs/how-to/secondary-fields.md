@@ -147,13 +147,6 @@ s.show()
 mesh.plot(field_to_draw='vec_mag', default_xi_res=6)
 ```
 
-!!! note "A field drawn over a volume is hard to read"
-    Every one of these pictures puts a 3-D field inside a solid, so the markers
-    behind the front face are drawn through it and the ones in front hide what
-    is behind them.  A slice — `field_xi` restricted to one parametric plane —
-    or a low `default_xi_res` usually says more than a dense cloud does.  Read
-    the render as a sanity check on direction and magnitude, and go to
-    `evaluate_embeddings` for anything you need to be sure of.
 
 ---
 
@@ -214,6 +207,8 @@ The last of those is a different picture from the other two: a `MeshField`
 drawn on its own plots its *values* as if they were coordinates, so a field of
 unit normals comes out as the unit sphere rather than as anything laid over the
 cube.
+Generally, this should be avoided as it is hard to interpret.
+However, it highlights that xyz fields are, in fact, just another field of the mesh.
 
 ---
 
@@ -221,6 +216,7 @@ cube.
 
 - Use **`H3`** for smooth vector fields (fibre directions, velocities)
   that must interpolate continuously across element boundaries.
+  **`B3`** is also good for this case, but is often harder to define.
 - Use **`L1`** or **`L2`** for simpler scalar fields (pressure,
   temperature) where smoothness is less critical.
 - Ensure you have **more sample points than free nodal degrees of freedom**.
