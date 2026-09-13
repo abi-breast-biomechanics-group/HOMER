@@ -1,10 +1,12 @@
 """Interactive scenes for the documentation examples.
 
 Every example in the docs is executed while the site is built, and whatever it
-draws is captured as a vtk.js scene shown underneath the code.  The capture is
-PyVista's own gallery mechanism: with ``PYVISTA_BUILDING_GALLERY`` set, a
-plotter survives ``show()`` with the serialised scene on ``last_vtksz``, so an
-example keeps the plain ``mesh.plot()`` spelling a reader would actually type.
+draws is captured and shown underneath the code -- a mesh as a turnable vtk.js
+scene, a matplotlib figure as an SVG.  Either way the example keeps the plain
+``mesh.plot()`` or ``plt.show()`` spelling a reader would actually type: a mesh
+is caught through PyVista's own gallery mechanism, where
+``PYVISTA_BUILDING_GALLERY`` leaves the serialised scene on ``last_vtksz``
+after ``show()``, and a figure is simply one still open when the block ends.
 
 The scenes and the one viewer they share are written straight into the built
 site, so nothing generated lands in ``docs/``.  A scene carrying node or
@@ -22,7 +24,13 @@ import shutil
 from io import BytesIO
 from pathlib import Path
 
+import matplotlib
+
+#No display while the site builds, and the examples draw before they are shown.
+matplotlib.use("Agg")
+
 import markdown_exec
+import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
 from PIL import Image
@@ -192,6 +200,25 @@ def capture(page):
     return "".join(frames)
 
 
+def figures(page):
+    """Draw out every matplotlib figure the block that just ran has left open.
+
+    Vector, because these are line plots read at whatever width the page is,
+    and they carry their own white ground so a transparent SVG cannot pick up
+    the theme's.
+    """
+    frames = []
+    for number in plt.get_fignums():
+        figure = plt.figure(number)
+        buffer = BytesIO()
+        figure.savefig(buffer, format="svg", bbox_inches="tight")
+        name = f"{page}-{len(scenes):02d}.svg"
+        scenes[name] = buffer.getvalue()
+        frames.append(IMAGE.format(root=ROOT, name=name))
+        plt.close(figure)
+    return "".join(frames)
+
+
 def formatter(source, language, css_class, options, md, **kwargs):
     """markdown-exec's python formatter, plus whatever the code drew."""
     #Captured stdout is rendered as markdown by default, so a printed array
@@ -201,7 +228,8 @@ def formatter(source, language, css_class, options, md, **kwargs):
 
     html = markdown_exec.formatter(source, language, css_class, options, md, **kwargs)
     #Markup escapes whatever is concatenated onto it, and the frames are html.
-    return Markup(str(html) + capture(options.get("session") or "scene"))
+    page = options.get("session") or "scene"
+    return Markup(str(html) + capture(page) + figures(page))
 
 
 def on_config(config):
