@@ -9,14 +9,15 @@ nothing else -- not the geometry, not the fields, not the constraints.
 import numpy as np
 import pytest
 
-from HOMER.basis_definitions import B3Basis, H3Basis, L1Basis, L2Basis
+from HOMER.basis_definitions import B3, H3, L1, L2
 from HOMER.geometry import basic_surfaceMN, cube, cubeMNO
 from HOMER.mesh import reordering
 from HOMER.mesh.reordering import (apply_node_permutation, element_lattice_coords,
                                    node_permutation, preserving_permutation,
                                    reorder_nodes, resolve_strategy)
 
-from _helpers import CLOSE, EXACT, arr, node_locs, unit_hex
+from _helpers import CLOSE, EXACT, arr, node_locs
+from HOMER.examples import unit_hex
 
 
 def is_lexicographic(locs, decimals=4):
@@ -37,7 +38,7 @@ def sample(mesh, res=5):
 @pytest.mark.parametrize("res", [[2, 2, 2], [3, 1, 2], [2, 3, 4]])
 def test_refining_a_cube_numbers_the_nodes_along_the_lattice(res):
     """The whole point: a refined axis-aligned cube comes out in (z, y, x) order."""
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.refine(by_xi_refinement=[np.linspace(0, 1, r + 1) for r in res])
 
     assert is_lexicographic(node_locs(mesh))
@@ -45,15 +46,15 @@ def test_refining_a_cube_numbers_the_nodes_along_the_lattice(res):
 
 def test_the_lattice_ordering_reproduces_what_cubeMNO_sorts_by_hand():
     """`cubeMNO` sorts on coordinates; `refine` now gets there from the topology."""
-    by_hand = node_locs(cubeMNO([3, 3, 3], basis=[L1Basis] * 3))
+    by_hand = node_locs(cubeMNO([3, 3, 3], basis=[L1] * 3))
 
-    from_refine = cube(basis=[L1Basis] * 3)
+    from_refine = cube(basis=[L1] * 3)
     from_refine.refine(3)
 
     np.testing.assert_allclose(node_locs(from_refine), by_hand, atol=EXACT)
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, H3Basis, B3Basis],
+@pytest.mark.parametrize("basis", [L1, L2, H3, B3],
                          ids=lambda b: b.__name__)
 def test_every_basis_refines_into_lattice_order(basis):
     """Including B3, whose control points sit outside the element that owns them.
@@ -74,7 +75,7 @@ def test_every_basis_refines_into_lattice_order(basis):
 
 
 def test_rebasing_to_a_denser_basis_numbers_the_new_nodes_along_the_lattice():
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3).rebase([L2Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3).rebase([L2] * 3)
 
     assert len(mesh.nodes) == 5 ** 3
     assert is_lexicographic(node_locs(mesh))
@@ -89,12 +90,12 @@ def test_rebasing_at_the_same_node_count_keeps_the_numbering_it_had():
     a deliberately awkward one, which is the case that shows it is preservation
     and not the lattice ordering agreeing by luck.
     """
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
     reorder_nodes(mesh, 'bandwidth')            #an order no strategy would pick
     before = node_locs(mesh)
     assert not is_lexicographic(before)
 
-    rebased = mesh.rebase([H3Basis] * 3)
+    rebased = mesh.rebase([H3] * 3)
 
     assert len(rebased.nodes) == 3 ** 3
     np.testing.assert_allclose(node_locs(rebased), before, atol=EXACT)
@@ -102,10 +103,10 @@ def test_rebasing_at_the_same_node_count_keeps_the_numbering_it_had():
 
 def test_the_same_mesh_built_two_ways_gets_the_same_numbering():
     """One factor-4 refinement, or two factor-2 ones, must number alike."""
-    one_step = cube(basis=[L1Basis] * 3)
+    one_step = cube(basis=[L1] * 3)
     one_step.refine(4)
 
-    two_steps = cube(basis=[L1Basis] * 3)
+    two_steps = cube(basis=[L1] * 3)
     two_steps.refine(2)
     two_steps.refine(2)
 
@@ -114,31 +115,31 @@ def test_the_same_mesh_built_two_ways_gets_the_same_numbering():
 
 def test_a_surface_mesh_is_ordered_by_its_parametric_directions():
     """xi_0 fastest: the 2-D lattice is walked a xi_1 row at a time."""
-    mesh = basic_surfaceMN([3, 2], basis=[L1Basis] * 2)
+    mesh = basic_surfaceMN([3, 2], basis=[L1] * 2)
     #the default patch lies on x = 0, with xi_0 along z and xi_1 along y
     locs = node_locs(mesh)
 
     assert is_lexicographic(locs)               #basic_surfaceMN asks for 'spatial'
 
-    from_refine = basic_surfaceMN([3, 2], basis=[L1Basis] * 2)
+    from_refine = basic_surfaceMN([3, 2], basis=[L1] * 2)
     reorder_nodes(from_refine, 'lattice')
     yz = node_locs(from_refine)[:, [2, 1]]      #(xi_0, xi_1) as coordinates
     assert np.array_equal(np.lexsort(np.round(yz, 4).T), np.arange(len(yz)))
 
 
 def test_rebasing_back_and_forth_returns_the_numbering_it_started_with():
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
     reorder_nodes(mesh, 'bandwidth')
     before = node_locs(mesh)
 
-    round_trip = mesh.rebase([H3Basis] * 3).rebase([L1Basis] * 3)
+    round_trip = mesh.rebase([H3] * 3).rebase([L1] * 3)
 
     np.testing.assert_allclose(node_locs(round_trip), before, atol=EXACT)
 
 
 def test_a_refinement_that_adds_no_nodes_keeps_the_numbering():
     """A factor of one in every direction: the same mesh, so the same indices."""
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
     reorder_nodes(mesh, 'bandwidth')
     before = node_locs(mesh)
 
@@ -153,7 +154,7 @@ def test_a_refinement_that_does_add_nodes_renumbers():
     Preserving their indices would strand every added node in the arbitrary
     order the sweep produced, which is the thing being fixed.
     """
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
     reorder_nodes(mesh, 'bandwidth')
 
     mesh.refine(2)
@@ -163,12 +164,12 @@ def test_a_refinement_that_does_add_nodes_renumbers():
 
 
 def test_an_iso_rebase_of_a_field_keeps_the_fields_numbering_too():
-    mesh = unit_hex(basis=[L1Basis] * 3)
-    field = mesh.rebase([L1Basis] * 3, reorder_nodes=False)   #a plain copy to work from
+    mesh = unit_hex(basis=[L1] * 3)
+    field = mesh.rebase([L1] * 3, reorder_nodes=False)   #a plain copy to work from
     reorder_nodes(field, 'bandwidth')
     before = node_locs(field)
 
-    np.testing.assert_allclose(node_locs(field.rebase([H3Basis] * 3)), before, atol=EXACT)
+    np.testing.assert_allclose(node_locs(field.rebase([H3] * 3)), before, atol=EXACT)
 
 
 def test_preservation_is_declined_when_the_correspondence_is_not_one_to_one():
@@ -187,7 +188,7 @@ def test_preservation_is_declined_when_the_correspondence_is_not_one_to_one():
 
 @pytest.mark.parametrize("strategy", ['lattice', 'spatial', 'bandwidth'])
 def test_a_reorder_is_a_permutation_and_nothing_more(strategy):
-    mesh = cubeMNO([2, 2, 2], basis=[H3Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[H3] * 3)
     before_locs = node_locs(mesh)
     before_shape = sample(mesh)
 
@@ -202,7 +203,7 @@ def test_a_reorder_is_a_permutation_and_nothing_more(strategy):
 @pytest.mark.parametrize("strategy", ['lattice', 'spatial', 'bandwidth'])
 def test_the_elements_still_point_at_the_nodes_they_did(strategy):
     """The renumbering has to be pushed through every element's node list."""
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
     before = [[tuple(np.round(mesh.nodes[n].loc, 6)) for n in e.nodes] for e in mesh.elements]
 
     reorder_nodes(mesh, strategy)
@@ -212,7 +213,7 @@ def test_the_elements_still_point_at_the_nodes_they_did(strategy):
 
 
 def test_reordering_carries_the_fixed_parameters_with_the_node():
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
     pinned = min(range(len(mesh.nodes)), key=lambda i: tuple(mesh.nodes[i].loc))
     pinned_loc = np.array(mesh.nodes[pinned].loc)
     mesh.nodes[pinned].fix_parameter('loc', inds=[0, 2])
@@ -230,9 +231,9 @@ def test_reordering_carries_the_fixed_parameters_with_the_node():
 
 def test_a_refined_mesh_keeps_its_fields_lined_up_with_the_geometry():
     """Every field is renumbered from its own topology, so co-location holds."""
-    mesh = unit_hex(basis=[L1Basis] * 3)
+    mesh = unit_hex(basis=[L1] * 3)
     pts = np.array(np.meshgrid(*[np.linspace(0.05, 0.95, 4)] * 3)).reshape(3, -1).T
-    mesh.new_field('height', field_dimension=1, new_basis=[L1Basis] * 3,
+    mesh.new_field('height', field_dimension=1, new_basis=[L1] * 3,
                    field_locs=pts, field_values=pts[:, 2])
 
     mesh.refine(2)
@@ -246,9 +247,9 @@ def test_a_refined_mesh_keeps_its_fields_lined_up_with_the_geometry():
 ####################################### the off switch
 
 def test_refine_leaves_the_raw_ordering_alone_when_asked():
-    ordered = cube(basis=[L1Basis] * 3)
+    ordered = cube(basis=[L1] * 3)
     ordered.refine(2)
-    raw = cube(basis=[L1Basis] * 3)
+    raw = cube(basis=[L1] * 3)
     raw.refine(2, reorder_nodes=False)
 
     assert not is_lexicographic(node_locs(raw))
@@ -258,15 +259,15 @@ def test_refine_leaves_the_raw_ordering_alone_when_asked():
 
 
 def test_rebase_leaves_the_raw_ordering_alone_when_asked():
-    base = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    base = cubeMNO([2, 2, 2], basis=[L1] * 3)
 
-    assert is_lexicographic(node_locs(base.rebase([L2Basis] * 3)))
-    assert not is_lexicographic(node_locs(base.rebase([L2Basis] * 3, reorder_nodes=False)))
+    assert is_lexicographic(node_locs(base.rebase([L2] * 3)))
+    assert not is_lexicographic(node_locs(base.rebase([L2] * 3, reorder_nodes=False)))
 
 
 def test_a_mesh_refine_passes_the_switch_down_to_its_fields():
-    mesh = unit_hex(basis=[L1Basis] * 3)
-    mesh.new_field('flat', field_dimension=1, new_basis=[L1Basis] * 3)
+    mesh = unit_hex(basis=[L1] * 3)
+    mesh.new_field('flat', field_dimension=1, new_basis=[L1] * 3)
     before = [list(e.nodes) for e in mesh['flat'].elements]
 
     mesh.refine(2, reorder_nodes=False)
@@ -278,14 +279,14 @@ def test_a_mesh_refine_passes_the_switch_down_to_its_fields():
 
 def test_the_default_ordering_can_be_turned_off_for_the_session(monkeypatch):
     monkeypatch.setattr(reordering, 'DEFAULT_NODE_ORDERING', False)
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.refine(2)
 
     assert not is_lexicographic(node_locs(mesh))
 
 
 def test_an_unknown_ordering_is_rejected():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     with pytest.raises(ValueError, match="unknown node ordering"):
         reorder_nodes(mesh, 'nearest-neighbour')
 
@@ -293,7 +294,7 @@ def test_an_unknown_ordering_is_rejected():
 ####################################### the pieces
 
 def test_element_lattice_coords_lay_a_refined_cube_out_on_a_grid():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.refine(by_xi_refinement=[np.linspace(0, 1, r + 1) for r in (2, 3, 4)])
 
     component, coords = element_lattice_coords(mesh._topo_lookup)
@@ -305,8 +306,8 @@ def test_element_lattice_coords_lay_a_refined_cube_out_on_a_grid():
 
 
 def test_two_separate_blocks_are_ordered_a_block_at_a_time():
-    left = cube(basis=[L1Basis] * 3)
-    right = cube(basis=[L1Basis] * 3)
+    left = cube(basis=[L1] * 3)
+    right = cube(basis=[L1] * 3)
     right.transform(np.array([[1, 0, 0, 5], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], float))
     pair = left + right
     pair.refine(2)
@@ -323,7 +324,7 @@ def test_two_separate_blocks_are_ordered_a_block_at_a_time():
 
 
 def test_the_permutation_is_returned_so_an_index_list_can_follow_it():
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
     watched = [4, 11, 26]
     watched_locs = node_locs(mesh)[watched]
 
@@ -336,7 +337,7 @@ def test_the_permutation_is_returned_so_an_index_list_can_follow_it():
 
 
 def test_a_disabled_reorder_reports_that_it_did_nothing():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     assert reorder_nodes(mesh, False) is None
     assert node_permutation(mesh, None) is None
 

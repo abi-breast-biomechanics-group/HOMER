@@ -12,15 +12,16 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis, L3Basis
+from HOMER.basis_definitions import H3, L1, L2, L3
 from HOMER.geometry import basic_surface, cube
 
-from _helpers import EXACT, arr, bulged_patch, hermite_cube, unit_hex
+from _helpers import EXACT, arr
+from HOMER.examples import bulged_patch, hermite_cube, unit_hex
 
 
 @pytest.fixture(scope="module")
 def refined_cube():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.refine(2)
     return mesh
 
@@ -77,7 +78,7 @@ def test_evaluate_element_embeddings_looks_the_element_up_by_id():
     locs = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]]
     nodes = [MeshNode(loc=np.array(l, dtype=float)) for l in locs]
     element = MeshElement(node_indexes=[0, 1, 2, 3],
-                          basis_functions=(L1Basis, L1Basis), id='patch')
+                          basis_functions=(L1, L1), id='patch')
     mesh = Mesh(nodes=nodes, elements=element)
     xi = mesh.xi_grid(3)
 
@@ -129,7 +130,7 @@ def test_first_deriv_embeddings_are_the_matching_jacobian_column(direction):
 def test_numeric_jacobian_agrees_with_the_analytic_one_on_affine_elements():
     """``eval_numeric_jac`` seeds the robust embedding solve; on an affine
     element the finite difference is exact, so the two must coincide."""
-    for mesh in (unit_hex(), basic_surface(basis=[L1Basis] * 2)):
+    for mesh in (unit_hex(), basic_surface(basis=[L1] * 2)):
         xi = mesh.xi_grid(3)
         analytic = arr(mesh.evaluate_jacobians(0, xi))
         numeric = arr(mesh.eval_numeric_jac(0, xi))
@@ -151,7 +152,7 @@ def test_numeric_jacobian_is_a_reasonable_estimate_on_a_curved_element():
 ############################################### normals
 
 def test_surface_normals_are_orthogonal_to_both_tangents():
-    mesh = basic_surface(basis=[L2Basis] * 2)
+    mesh = basic_surface(basis=[L2] * 2)
     mesh.refine(2)
     xi = mesh.xi_grid(4)
     eles = np.zeros(len(xi), dtype=int)
@@ -164,7 +165,7 @@ def test_surface_normals_are_orthogonal_to_both_tangents():
 
 
 def test_flat_patch_has_a_constant_normal():
-    mesh = basic_surface(basis=[L1Basis] * 2)
+    mesh = basic_surface(basis=[L1] * 2)
     xi = mesh.xi_grid(4)
 
     normals = arr(mesh.evaluate_normals_ele_xi_pair(np.zeros(len(xi), int), xi))
@@ -184,7 +185,7 @@ def test_normals_are_undefined_on_a_volume_mesh():
 ############################################### sobolev terms
 
 def test_sobolev_has_one_block_per_derivative_combination():
-    mesh = unit_hex(basis=[L3Basis] * 3)
+    mesh = unit_hex(basis=[L3] * 3)
 
     blocked = arr(mesh.evaluate_sobolev(flatten=False))
     flat = arr(mesh.evaluate_sobolev())
@@ -196,7 +197,7 @@ def test_sobolev_has_one_block_per_derivative_combination():
 
 def test_sobolev_is_translation_invariant():
     """It is built from derivatives, so moving the mesh must not change it."""
-    mesh = unit_hex(basis=[L2Basis] * 3)
+    mesh = unit_hex(basis=[L2] * 3)
     before = arr(mesh.evaluate_sobolev())
 
     tform = np.eye(4)
@@ -207,7 +208,7 @@ def test_sobolev_is_translation_invariant():
 
 
 def test_sobolev_weights_scale_each_block():
-    mesh = unit_hex(basis=[L2Basis] * 3)
+    mesh = unit_hex(basis=[L2] * 3)
     blocks = arr(mesh.evaluate_sobolev(flatten=False))
 
     zeroed = arr(mesh.evaluate_sobolev(weights=np.zeros(len(blocks)), flatten=False))
@@ -216,7 +217,7 @@ def test_sobolev_weights_scale_each_block():
 
 
 def test_sobolev_rejects_a_mismatched_weight_vector():
-    mesh = unit_hex(basis=[L2Basis] * 3)
+    mesh = unit_hex(basis=[L2] * 3)
 
     with pytest.raises(ValueError, match="did not match the number of sobolev terms"):
         mesh.evaluate_sobolev(weights=np.ones(2))

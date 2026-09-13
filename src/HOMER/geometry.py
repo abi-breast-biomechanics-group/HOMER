@@ -9,7 +9,7 @@ Currently provides:
 from typing import Optional
 from HOMER.mesh import MeshNode, MeshElement, Mesh
 from HOMER.mesh.reordering import reorder_nodes
-from HOMER.basis_definitions import H3Basis, L1Basis
+from HOMER.basis_definitions import H3, L1
 
 import numpy as np
 
@@ -17,7 +17,7 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     """Create a single-element cube mesh.
 
     Constructs a mesh with 8 corner nodes and a single trilinear element
-    (``L1Basis * 3``), then :meth:`~HOMER.mesh.refinement.rebase`-s
+    (``L1 * 3``), then :meth:`~HOMER.mesh.refinement.rebase`-s
     it to the requested *basis* (defaulting to cubic Hermite in all directions).
 
     :param scale:
@@ -25,8 +25,8 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     :param centre:
         Centre of the cube, shape ``(3,)``.  Defaults to the origin.
     :param basis:
-        The three 1-D bases for the resulting mesh, e.g. ``H3Basis * 3``.
-        Defaults to ``H3Basis * 3``.
+        The three 1-D bases for the resulting mesh, e.g. ``H3 * 3``.
+        Defaults to ``H3 * 3``.
 
     :returns:
         Mesh
@@ -37,7 +37,7 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     if scale is None:
         scale = 1
     if basis is None:
-        basis = H3Basis * 3
+        basis = H3 * 3
     bottom_corner = centre - scale/2
     point0 = MeshNode(loc= bottom_corner + scale *np.array([0,0,0]))
     point1 = MeshNode(loc= bottom_corner + scale *np.array([1,0,0]))
@@ -47,7 +47,7 @@ def cube(scale: float = 1, centre: Optional[np.ndarray]=None, basis=None) -> Mes
     point5 = MeshNode(loc= bottom_corner + scale *np.array([1,0,1]))
     point6 = MeshNode(loc= bottom_corner + scale *np.array([0,1,1]))
     point7 = MeshNode(loc= bottom_corner + scale *np.array([1,1,1]))
-    element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=L1Basis * 3)
+    element1 = MeshElement(node_indexes=[0,1,2,3,4,5,6,7], basis_functions=L1 * 3)
     mesh = Mesh(nodes = [point0, point1, point2, point3, point4, point5, point6, point7], elements = element1).rebase(basis)
     return mesh
 
@@ -65,7 +65,7 @@ def cubeMNO(res, basis=None, loc=None, scale=None):
         Number of elements per parametric direction, one entry per direction,
         e.g. ``[2, 2, 1]`` for four elements in a single layer.
     :param basis:
-        The three 1-D bases of the result, e.g. ``H3Basis * 3``.  ``None``
+        The three 1-D bases of the result, e.g. ``H3 * 3``.  ``None``
         leaves :func:`cube`'s default of cubic Hermite.
     :param loc:
         Centre of the cube, shape ``(3,)``.  ``None`` puts it at the origin.
@@ -94,7 +94,7 @@ def basic_surface(corner_locs=None, basis=None):
         varying fastest.  ``None`` gives the unit square in the ``x = 0``
         plane.
     :param basis:
-        The two 1-D bases of the result, e.g. ``H3Basis * 2``.  ``None``
+        The two 1-D bases of the result, e.g. ``H3 * 2``.  ``None``
         keeps the bilinear element it is built from.
 
     :returns:
@@ -104,14 +104,14 @@ def basic_surface(corner_locs=None, basis=None):
         corner_locs = np.array([[0,0,0], [0,0,1], [0,1,0], [0,1,1]])
 
     if basis is None:
-        basis = L1Basis * 2
+        basis = L1 * 2
 
     point0 = MeshNode(loc=corner_locs[0])
     point1 = MeshNode(loc=corner_locs[1])
     point2 = MeshNode(loc=corner_locs[2])
     point3 = MeshNode(loc=corner_locs[3])
 
-    element1 = MeshElement(node_indexes=[0,1,2,3], basis_functions=L1Basis * 2)
+    element1 = MeshElement(node_indexes=[0,1,2,3], basis_functions=L1 * 2)
     mesh = Mesh(nodes = [point0, point1, point2, point3], elements = element1).rebase(basis)
 
     return mesh

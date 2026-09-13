@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from HOMER import Mesh, MeshElement, MeshNode
-from HOMER.basis_definitions import H3Basis, L1Basis
+from HOMER.basis_definitions import H3, L1
 
 from _helpers import arr
 
@@ -31,10 +31,10 @@ def unit_cube_mesh():
     locs = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0],
             [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]]
     element = MeshElement(node_indexes=list(range(8)),
-                          basis_functions=(L1Basis, L1Basis, L1Basis))
+                          basis_functions=(L1, L1, L1))
     mesh = Mesh(nodes=[MeshNode(loc=np.array(l, dtype=float)) for l in locs],
                 elements=element)
-    return mesh.rebase([H3Basis] * 3)
+    return mesh.rebase([H3] * 3)
 
 
 def axial(axis):

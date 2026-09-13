@@ -7,25 +7,26 @@ elements.  Every mesh element in HOMER is defined by a *tensor product* of
 
 Available 1-D bases (all :class:`Basis` instances):
 
-* :data:`H3Basis` – cubic Hermite (C¹ continuity, 2 nodes per direction)
-* :data:`L1Basis` – linear Lagrange (2 nodes per direction)
-* :data:`L2Basis` – quadratic Lagrange (3 nodes per direction)
-* :data:`L3Basis` – cubic Lagrange (4 nodes per direction)
-* :data:`L4Basis` – quartic Lagrange (5 nodes per direction)
-* :data:`B3Basis` – cubic B-spline (C² continuity, shared control points)
+* :data:`H3` – cubic Hermite (C¹ continuity, 2 nodes per direction)
+* :data:`L1` – linear Lagrange (2 nodes per direction)
+* :data:`L2` – quadratic Lagrange (3 nodes per direction)
+* :data:`L3` – cubic Lagrange (4 nodes per direction)
+* :data:`L4` – quartic Lagrange (5 nodes per direction)
+* :data:`B3` – cubic B-spline (C² continuity, shared control points)
 
 A basis is a *value*, not a type: each of the names above is a frozen
 :class:`Basis` instance, and the directions of an element are combined with
-arithmetic – ``*`` repeats a basis across directions, ``+`` concatenates
-directions, and the result is a :class:`BasisGroup` (a ``tuple`` subclass, so
+arithmetic – ``*`` joins directions the way the element takes their outer
+product, ``**`` is the tensor power, and against an ``int`` ``*`` repeats a
+direction.  The result is a :class:`BasisGroup` (a ``tuple`` subclass, so
 plain lists and tuples of bases remain valid everywhere)::
 
-    from HOMER.basis_definitions import H3Basis, L1Basis, B3Basis
+    from HOMER.basis_definitions import H3, L1, B3
 
-    H3Basis * 3               # tricubic-Hermite volume
-    H3Basis * 2 + L1Basis     # Hermite surface extruded linearly
-    2 * H3Basis + B3Basis     # the same shape, written the other way round
-    H3Basis ** 3              # tensor power, a spelling of H3Basis * 3
+    H3 ** 3              # tricubic-Hermite volume
+    H3**2 * L1           # Hermite surface extruded linearly
+    H3 * H3 * L1         # the same shape, written out
+    H3 * 3               # a spelling of H3 ** 3
 
 Each basis carries:
 
@@ -45,14 +46,14 @@ through JSON – including any basis a user defines.
 
 Typical usage::
 
-    from HOMER.basis_definitions import H3Basis, L1Basis
+    from HOMER.basis_definitions import H3, L1
     from HOMER.mesh import MeshElement
 
     # 2-D cubic-Hermite surface element
-    elem = MeshElement(node_indexes=[0,1,2,3], basis_functions=H3Basis * 2)
+    elem = MeshElement(node_indexes=[0,1,2,3], basis_functions=H3 * 2)
 
     # 3-D trilinear volume element
-    elem3d = MeshElement(node_indexes=list(range(8)), basis_functions=L1Basis * 3)
+    elem3d = MeshElement(node_indexes=list(range(8)), basis_functions=L1 * 3)
 """
 
 from typing import Callable, Optional
@@ -112,7 +113,7 @@ class AbstractField:
 class DerivativeField(AbstractField):
     """Descriptor for Hermite-style derivative fields on a node.
 
-    When a mesh element uses :class:`H3Basis` in *n* parametric directions,
+    When a mesh element uses :class:`H3` in *n* parametric directions,
     each node needs an increasing set of mixed-derivative vectors:
 
     * 1 Hermite direction → ``('du',)``
@@ -128,6 +129,13 @@ class DerivativeField(AbstractField):
 #: loadable the moment it is defined.
 BASIS_REGISTRY: dict[str, "Basis"] = {}
 
+#: The pre-1.0 serialisation keys.  Mesh JSON written before the bases were
+#: renamed carries ``'H3Basis'`` where it now carries ``'H3'``, so those files
+#: keep loading.  Deliberately not in :data:`BASIS_REGISTRY`: these are not
+#: names a basis may be registered under, only names a file may be read by.
+_LEGACY_NAMES = {f'{short}Basis': short
+                 for short in ('H3', 'L1', 'L2', 'L3', 'L4', 'B3')}
+
 
 def basis_by_name(name: str) -> "Basis":
     """Return the registered basis called ``name``.
@@ -136,8 +144,11 @@ def basis_by_name(name: str) -> "Basis":
     into the mesh JSON and reads it back through here, so any basis a user
     defines round-trips as soon as it has been constructed.
 
+    The pre-1.0 spellings (``'H3Basis'`` for ``'H3'``, and so on) still
+    resolve, so mesh files written before the rename keep loading.
+
     :param name:
-        The registered name, e.g. ``'H3Basis'``.
+        The registered name, e.g. ``'H3'``.
 
     :returns:
         The basis instance.
@@ -148,6 +159,10 @@ def basis_by_name(name: str) -> "Basis":
     """
     try:
         return BASIS_REGISTRY[name]
+    except KeyError:
+        pass
+    try:
+        return BASIS_REGISTRY[_LEGACY_NAMES[name]]
     except KeyError:
         raise KeyError(f"Unknown basis {name!r}; registered bases are "
                        f"{sorted(BASIS_REGISTRY)}") from None
@@ -173,24 +188,26 @@ def _register(basis: "Basis") -> None:
 class Basis:
     """A single 1-D basis function definition.
 
-    A basis is a *value*, not a type: the module-level :data:`H3Basis`,
-    :data:`L1Basis`, ... are frozen instances of this class, and a mesh element
+    A basis is a *value*, not a type: the module-level :data:`H3`,
+    :data:`L1`, ... are frozen instances of this class, and a mesh element
     is a tensor product of them - one per parametric direction.  Directions are
-    combined with the arithmetic operators::
+    combined with ``*``, the operator nearest the outer product that the
+    element actually takes::
 
-        H3Basis * 2 + B3Basis   # -> BasisGroup(H3Basis, H3Basis, B3Basis)
-        2 * H3Basis + L1Basis   # the same
-        (H3Basis + L1Basis) * 2 # -> H3, L1, H3, L1
-        L3Basis ** 3            # tensor power, a spelling of L3Basis * 3
+        H3**2 * B3    # -> BasisGroup(H3, H3, B3)
+        H3 * 2 * B3   # the same; an int repeats a direction
+        (H3 * L1)**2  # -> H3, L1, H3, L1
+        L3 ** 3            # tensor power, a spelling of L3 * 3
 
-    ``*`` repeats a basis across directions and ``+`` concatenates directions;
-    neither is a pointwise operation on the basis functions themselves.
+    ``*`` joins directions, and against an ``int`` it repeats them; ``**`` is
+    the tensor power.  Neither is a pointwise operation on the basis functions
+    themselves.
 
     Equality and hashing are by :attr:`name`, so a basis compares equal to
     itself across a deepcopy, a pickle, and a JSON round-trip.
 
     :ivar name: str
-        Serialisation key and repr, e.g. ``'H3Basis'``.
+        Serialisation key and repr, e.g. ``'H3'``.
     :ivar fn: Callable
         Basis evaluation function ``fn(x) -> ndarray (n_pts, n_basis)``.
     :ivar weights: tuple[str, ...]
@@ -208,7 +225,7 @@ class Basis:
     :ivar interpolatory: bool
         ``True`` when the nodal parameters *are* the field values at
         ``node_locs`` (Lagrange and Hermite bases).  ``False`` for control-net
-        bases such as :data:`B3Basis`, whose parameters are control points that
+        bases such as :data:`B3`, whose parameters are control points that
         do not equal the geometry at the node location.  Used when refining or
         rebasing to decide whether a fixed nodal value may be carried across
         verbatim.
@@ -282,30 +299,41 @@ class Basis:
         return (basis_by_name, (self.name,))
 
     # --- direction algebra ----------------------------------------------
-    def __mul__(self, n: int) -> "BasisGroup":
-        """``H3Basis * 3`` - the same basis in ``n`` parametric directions."""
-        if not isinstance(n, (int, np.integer)) or isinstance(n, bool):
-            return NotImplemented
-        return BasisGroup((self,) * int(n))
+    def __mul__(self, other) -> "BasisGroup":
+        """``H3 * L1`` - one direction of each, in order.
 
-    __rmul__ = __mul__
-
-    def __pow__(self, n: int) -> "BasisGroup":
-        """``H3Basis ** 3`` - tensor power, a spelling of ``H3Basis * 3``."""
-        return self.__mul__(n)
-
-    def __add__(self, other) -> "BasisGroup":
-        """``H3Basis + L1Basis`` - one direction of each, in order."""
+        Against an ``int``, ``H3 * 3`` repeats the basis across three
+        directions instead.
+        """
+        if _is_count(other):
+            return BasisGroup((self,) * int(other))
         other = _as_group(other)
         if other is None:
             return NotImplemented
         return BasisGroup((self,) + tuple(other))
 
-    def __radd__(self, other) -> "BasisGroup":
+    def __rmul__(self, other) -> "BasisGroup":
+        """``3 * H3``, and the reflected case where a plain list or tuple
+        sits on the left - which prepends, so the order is not the mirror of
+        :meth:`__mul__`."""
+        if _is_count(other):
+            return BasisGroup((self,) * int(other))
         other = _as_group(other)
         if other is None:
             return NotImplemented
         return BasisGroup(tuple(other) + (self,))
+
+    def __pow__(self, n: int) -> "BasisGroup":
+        """``H3 ** 3`` - tensor power, a spelling of ``H3 * 3``."""
+        if not _is_count(n):
+            return NotImplemented
+        return BasisGroup((self,) * int(n))
+
+
+def _is_count(obj) -> bool:
+    """``True`` for a plain integer repeat count.  ``bool`` is not one: it is
+    an ``int`` subclass, and ``H3 * True`` is a mistake, not a repeat."""
+    return isinstance(obj, (int, np.integer)) and not isinstance(obj, bool)
 
 
 def _as_group(obj) -> Optional["BasisGroup"]:
@@ -328,8 +356,8 @@ class BasisGroup(tuple):
     ``len`` of, or compares a list of bases keeps working unchanged.  What it
     adds is the algebra::
 
-        H3Basis * 2 + B3Basis     # BasisGroup(H3Basis, H3Basis, B3Basis)
-        (H3Basis + L1Basis) * 2   # BasisGroup(H3Basis, L1Basis, H3Basis, L1Basis)
+        H3**2 * B3      # BasisGroup(H3, H3, B3)
+        (H3 * L1)**2    # BasisGroup(H3, L1, H3, L1)
 
     Constructing one from a list, a tuple, or a bare :class:`Basis` normalises
     all three, which is how the mesh entry points accept every spelling.  The
@@ -346,28 +374,42 @@ class BasisGroup(tuple):
         if bad:
             raise TypeError(
                 f"A BasisGroup holds Basis values; got {bad[0]!r}. "
-                "Bases are now instances - pass H3Basis, not H3Basis().")
+                "Bases are now instances - pass H3, not H3().")
         return super().__new__(cls, items)
 
-    def __add__(self, other) -> "BasisGroup":
+    def __mul__(self, other) -> "BasisGroup":
+        """``H3**2 * B3`` appends directions; against an ``int``,
+        ``(H3 * L1) * 2`` repeats the whole pattern."""
+        if _is_count(other):
+            return BasisGroup(tuple(self) * int(other))
         other = _as_group(other)
         if other is None:
             return NotImplemented
         return BasisGroup(tuple(self) + tuple(other))
 
-    def __radd__(self, other) -> "BasisGroup":
+    def __rmul__(self, other) -> "BasisGroup":
+        if _is_count(other):
+            return BasisGroup(tuple(self) * int(other))
         other = _as_group(other)
         if other is None:
             return NotImplemented
         return BasisGroup(tuple(other) + tuple(self))
 
-    def __mul__(self, n: int) -> "BasisGroup":
-        """``(H3Basis + L1Basis) * 2`` repeats the whole pattern."""
-        if not isinstance(n, (int, np.integer)) or isinstance(n, bool):
+    def __pow__(self, n: int) -> "BasisGroup":
+        """``(H3 * L1) ** 2`` - the whole pattern repeated, a
+        spelling of ``(H3 * L1) * 2``."""
+        if not _is_count(n):
             return NotImplemented
         return BasisGroup(tuple(self) * int(n))
 
-    __rmul__ = __mul__
+    #inherited tuple.__add__ would silently return a plain tuple and drop the
+    #group type, so the removed operator has to be blocked rather than deleted
+    def __add__(self, other):
+        raise TypeError(
+            "'+' no longer combines bases; '*' joins directions. "
+            "Write H3**2 * B3, not H3 * 2 + B3.")
+
+    __radd__ = __add__
 
     @property
     def ndim(self) -> int:
@@ -387,9 +429,9 @@ class BasisGroup(tuple):
             if cur is not None and cur == prev:
                 run += 1
                 continue
-            parts.append(f"{prev.name}*{run}" if run > 1 else prev.name)
+            parts.append(f"{prev.name}**{run}" if run > 1 else prev.name)
             run = 1
-        return " + ".join(parts)
+        return " * ".join(parts)
 
 
 #: Retained so ``type[AbstractBasis]`` annotations and imports keep resolving.
@@ -461,7 +503,7 @@ def N3_weights(w0, w1, w2, bp_inds):
 
 ######################################## BASIS FUNCS
 
-def B3(x) -> jnp.ndarray:
+def _B3(x) -> jnp.ndarray:
     """
     Cubic bezier basis function.
 
@@ -475,7 +517,7 @@ def B3(x) -> jnp.ndarray:
         (-3*(x**3) + 3*x**2 + 3 * x + 1)/6,
         (x**3)/6,
     ))
-def B3d1(x) -> jnp.ndarray:
+def _B3d1(x) -> jnp.ndarray:
     """First derivative of the cubic B-spline basis.
 
     :param x: points to interpolate
@@ -487,7 +529,7 @@ def B3d1(x) -> jnp.ndarray:
         (-3*x**2 + 2*x + 1) / 2,
         (x**2) / 2,
     ))
-def B3d1d1(x) -> jnp.ndarray:
+def _B3d1d1(x) -> jnp.ndarray:
     """Second derivative of the cubic B-spline basis.
 
     :param x: points to interpolate
@@ -501,7 +543,7 @@ def B3d1d1(x) -> jnp.ndarray:
     ))
 
 
-def L1(x) -> jnp.ndarray:
+def _L1(x) -> jnp.ndarray:
     """
     Linear lagrange basis function.
     
@@ -510,7 +552,7 @@ def L1(x) -> jnp.ndarray:
     """
     return jnp.array([1. - x, x]).T
 
-def L1d1(x) -> jnp.ndarray:
+def _L1d1(x) -> jnp.ndarray:
     """
     First derivative for the linear lagrange basis function.
     
@@ -521,7 +563,7 @@ def L1d1(x) -> jnp.ndarray:
     W = W.at[:,0].add(-2)
     return jnp.array(W)
 
-def L1d1d1(x) -> jnp.ndarray:
+def _L1d1d1(x) -> jnp.ndarray:
     """
     Second derivative for the linear lagrange basis function.
     
@@ -530,7 +572,7 @@ def L1d1d1(x) -> jnp.ndarray:
     """
     return jnp.zeros((x.shape[0], 2))
 
-def H3(x:jnp.ndarray) -> jnp.ndarray:
+def _H3(x:jnp.ndarray) -> jnp.ndarray:
     """
     The cubic-Hermite basis function.
     
@@ -546,7 +588,7 @@ def H3(x:jnp.ndarray) -> jnp.ndarray:
     ])
     return Phi
 
-def H3d1(x: jnp.ndarray) -> jnp.ndarray:
+def _H3d1(x: jnp.ndarray) -> jnp.ndarray:
     """
     First derivative of the cubic-Hermite basis function.
     
@@ -561,7 +603,7 @@ def H3d1(x: jnp.ndarray) -> jnp.ndarray:
         x*(3*x-2)])
     return Phi
 
-def H3d1d1(x) -> jnp.ndarray:
+def _H3d1d1(x) -> jnp.ndarray:
     """
     Second derivative of the cubic-Hermite basis function.
     
@@ -575,7 +617,7 @@ def H3d1d1(x) -> jnp.ndarray:
         6*x-2]) 
     return Phi
 
-def L2(x):
+def _L2(x):
     """
     Quadratic lagrange basis function.
     
@@ -591,7 +633,7 @@ def L2(x):
         L2 * (2.0 * L2 - 1)])
     return Phi.T
 
-def L2d1(x):
+def _L2d1(x):
     """
     First derivative of the quadratic lagrange basis function.
     
@@ -608,7 +650,7 @@ def L2d1(x):
 
 # .. todo: L2dxdx
 
-def L3(x):
+def _L3(x):
     """
     Cubic lagrange basis function.
     
@@ -625,7 +667,7 @@ def L3(x):
         sc*L1*L2*(3*L2-1),
         0.5*L2*(3*L2-1)*(3*L2-2)]).T
 
-def L3d1(x):
+def _L3d1(x):
     """
     First derivative of the cubic lagrange basis function.
     
@@ -643,7 +685,7 @@ def L3d1(x):
 
 # .. todo: L3dxdx
 
-def L4(x):
+def _L4(x):
     """
     Quartic lagrange basis function.
     
@@ -663,7 +705,7 @@ def L4(x):
         sc*(-128*x4+224*x3-112*x2+16*x),
         sc*(32*x4-48*x3+22*x2-3*x)]).T
 
-def L4d1(x):
+def _L4d1(x):
     """
     First derivative of the quartic lagrange basis function.
     
@@ -682,11 +724,11 @@ def L4d1(x):
         sc*(-512*x3+672*x2-224*x+16), \
         sc*(128*x3-144*x2+44*x-3)]).T
 
-H3Basis = Basis(
-    name='H3Basis',
-    fn=H3,
+H3 = Basis(
+    name='H3',
+    fn=_H3,
     weights=('x0', 'dx0', 'x1', 'dx1'), #then this records the derivatives
-    deriv=(H3, H3d1, H3d1d1),
+    deriv=(_H3, _H3d1, _H3d1d1),
     order=3,
     node_locs=(0, 1),
     node_fields=DerivativeField(),
@@ -702,11 +744,11 @@ Best choice for smooth geometry where derivative continuity across element
 boundaries is important.
 """
 
-L1Basis = Basis(
-    name='L1Basis',
-    fn=L1,
+L1 = Basis(
+    name='L1',
+    fn=_L1,
     weights=('x0', 'x1'),
-    deriv=(L1, L1d1, L1d1d1),
+    deriv=(_L1, _L1d1, _L1d1d1),
     order=1,
     node_locs=(0, 1),
 )
@@ -719,11 +761,11 @@ Useful for coarse linear meshes that are subsequently
 :meth:`~HOMER.mesh.refinement.rebase`-d to a higher-order basis.
 """
 
-L2Basis = Basis(
-    name='L2Basis',
-    fn=L2,
+L2 = Basis(
+    name='L2',
+    fn=_L2,
     weights=('x0', 'x1', 'x2'),
-    deriv=(L2, L2d1),
+    deriv=(_L2, _L2d1),
     order=2,
     node_locs=(0, 1/2, 2/2),
 )
@@ -733,11 +775,11 @@ Provides second-order accuracy with 3 nodes per direction and no derivative
 fields on nodes.
 """
 
-L3Basis = Basis(
-    name='L3Basis',
-    fn=L3,
+L3 = Basis(
+    name='L3',
+    fn=_L3,
     weights=('x0', 'x1', 'x2', 'x3'),
-    deriv=(L3, L3d1),
+    deriv=(_L3, _L3d1),
     order=3,
     node_locs=(0/3, 1/3, 2/3, 3/3),
 )
@@ -747,11 +789,11 @@ Third-order accuracy with uniformly-spaced node positions at 0, 1/3, 2/3, 1.
 No derivative fields required on nodes.
 """
 
-L4Basis = Basis(
-    name='L4Basis',
-    fn=L4,
+L4 = Basis(
+    name='L4',
+    fn=_L4,
     weights=('x0', 'x1', 'x2', 'x3', 'x4'),
-    deriv=(L4, L4d1),
+    deriv=(_L4, _L4d1),
     order=4,
     node_locs=(0/4, 1/4, 2/4, 3/4, 4/4),
 )
@@ -761,11 +803,11 @@ Fourth-order accuracy with uniformly-spaced node positions at
 0, 1/4, 2/4, 3/4, 1.  No derivative fields required on nodes.
 """
 
-B3Basis = Basis(
-    name='B3Basis',
-    fn=B3,
+B3 = Basis(
+    name='B3',
+    fn=_B3,
     weights=('x0', 'x1', 'x2', 'x3'),
-    deriv=(B3, B3d1, B3d1d1),
+    deriv=(_B3, _B3d1, _B3d1d1),
     order=3,
     node_locs=(-1, 0, 1, 2), #hat t do this # yeah buddy get down with this.
     interpolatory=False, #shared control points, not interpolated nodal values
@@ -774,13 +816,17 @@ B3Basis = Basis(
 direction, each shared across neighbouring elements).
 """
 
-LAGRANGE_BASES = {b.order: b for b in (L1Basis, L2Basis, L3Basis, L4Basis)}
+#: The pre-1.0 names.  ``H3Basis is H3``, so they compare, hash, serialise and
+#: combine identically - only the spelling is deprecated.
+H3Basis, L1Basis, L2Basis, L3Basis, L4Basis, B3Basis = H3, L1, L2, L3, L4, B3
+
+LAGRANGE_BASES = {b.order: b for b in (L1, L2, L3, L4)}
 
 
 def Lagrange(order: int) -> Basis:
     """The Lagrange basis of the requested order.
 
-    ``Lagrange(3) is L3Basis``.  Useful where the order is a variable::
+    ``Lagrange(3) is L3``.  Useful where the order is a variable::
 
         mesh.rebase(Lagrange(order) * 3)
 

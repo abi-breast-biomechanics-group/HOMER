@@ -25,12 +25,19 @@ docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
     "mkdocs-autorefs>=1.0",
+    #runs the examples in the docs at build time
+    "markdown-exec>=1.8",
+    #exports what those examples draw as an interactive vtk.js scene
+    "trame",
+    "trame-vtk",
+    "trame-vuetify",
+    "nest_asyncio",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 #`benchmarks/` holds timing scripts with no pass/fail condition; never collect them.
-norecursedirs = ["benchmarks", "applications", "bin", "build", "dev", "docs", "examples", "offline", "site"]
+norecursedirs = ["benchmarks", "bin", "build", "dev", "docs", "examples", "site"]
 addopts = "-ra"
 filterwarnings = [
     #jax leaves numpy's floating-point error state tripped, which surfaces as

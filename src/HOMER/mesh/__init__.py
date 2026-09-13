@@ -23,7 +23,7 @@ done *to* a mesh after a manipulation rather than something a mesh does.
 Typical import::
 
     from HOMER import Mesh, MeshNode, MeshElement
-    from HOMER.basis_definitions import H3Basis, L1Basis
+    from HOMER.basis_definitions import H3, L1
 """
 
 from HOMER.mesh.node import MeshNode

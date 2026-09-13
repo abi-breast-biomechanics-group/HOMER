@@ -15,7 +15,7 @@ import pytest
 from scipy.optimize import least_squares
 
 from HOMER import cube
-from HOMER.basis_definitions import L2Basis, L3Basis
+from HOMER.basis_definitions import L2, L3
 from HOMER.utils import rodrigues_exp
 
 from _helpers import arr
@@ -37,7 +37,7 @@ def central_difference(fn, x, step=1e-3):
 
 def test_xi_moves_with_the_mesh_it_is_embedded_in():
     """Sliding every node along z must slide the recovered xi the other way."""
-    mesh = cube(basis=[L3Basis] * 3)
+    mesh = cube(basis=[L3] * 3)
     base = jnp.array(np.asarray(mesh.true_param_array).reshape(-1, 3))
 
     def embedded_xi(shift):
@@ -55,7 +55,7 @@ def test_xi_moves_with_the_mesh_it_is_embedded_in():
 
 def test_the_jvp_is_finite_and_not_silently_zero():
     """A missing custom rule shows up as a zero (or NaN) derivative."""
-    mesh = cube(basis=[L2Basis] * 3)
+    mesh = cube(basis=[L2] * 3)
     base = jnp.array(np.asarray(mesh.true_param_array).reshape(-1, 3))
 
     def residual(shift):
@@ -74,7 +74,7 @@ def test_the_jvp_is_finite_and_not_silently_zero():
 
 @pytest.fixture(scope="module")
 def registration_problem():
-    mesh = cube(basis=[L2Basis] * 3)
+    mesh = cube(basis=[L2] * 3)
     surface = np.asarray(mesh.eval_surface(res=8))
     rotation = np.asarray(rodrigues_exp(jnp.array(TRUTH[:3])), dtype=float)
     target = jnp.asarray(surface @ rotation.T + TRUTH[3:])
@@ -144,7 +144,7 @@ def test_a_per_element_jvp_reproduces_the_full_jacobian(registration_problem):
         _, res = mesh.embed_points(target, fit_params=moved_params(params).ravel(), **embed_kwargs)
         return res.ravel()
 
-    phantom = cube(basis=[L2Basis] * 3)
+    phantom = cube(basis=[L2] * 3)
 
     @jax.jit
     def one_point_jvp(point, params, tangent):
@@ -199,7 +199,7 @@ def _interior_problem(basis):
     return mesh, base, target
 
 
-@pytest.mark.parametrize("basis", [L2Basis, L3Basis])
+@pytest.mark.parametrize("basis", [L2, L3])
 def test_the_parameter_derivative_matches_central_differences(basis):
     """Covers the linear-in-parameters identity for both w and its Jacobian.
 
@@ -224,7 +224,7 @@ def test_the_parameter_derivative_matches_central_differences(basis):
 
 def test_the_point_derivative_matches_central_differences():
     """dxi/dx and dr/dx go through the same H, but with the x_dot term."""
-    mesh, _, target = _interior_problem(L2Basis)
+    mesh, _, target = _interior_problem(L2)
     params = jnp.asarray(mesh.optimisable_param_array)
 
     def embedded(shift):
@@ -253,7 +253,7 @@ def test_a_masked_residual_still_differentiates(n_active):
     no derivative at all, and that the wholly degenerate case comes back a
     clean zero rather than the NaN a plain solve would give.
     """
-    mesh, base, target = _interior_problem(L2Basis)
+    mesh, base, target = _interior_problem(L2)
     dim_mask = np.array([True] * n_active + [False] * (3 - n_active))
 
     def embedded(shift):
@@ -280,7 +280,7 @@ def test_the_returned_jacobian_is_taken_at_the_converged_point():
     identity that only holds if W is dw/dxi at the *same* (elem, xi) the solve
     returned.  A Jacobian left over from a rejected proposal would break it.
     """
-    mesh, _, target = _interior_problem(L3Basis)
+    mesh, _, target = _interior_problem(L3)
     params = jnp.asarray(mesh.optimisable_param_array)
 
     def solve(pts):

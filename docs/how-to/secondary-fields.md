@@ -36,11 +36,11 @@ Secondary fields:
 3. **Solve the linear system** – call `linear_fit(targets, W)` to compute
    the optimal nodal parameters.
 
-!!! warning "Fixed parameters are not respected"
-    `linear_fit` solves for every parameter, including any fixed with
-    `MeshNode.fix_parameter()`, so constraints on a secondary field's nodes
-    are overwritten by the fit.  See
-    [Mesh fitting](fitting.md#linear-fitting).
+!!! note "Fixed parameters are respected"
+    Constraints set with `MeshNode.fix_parameter()` on a secondary field's
+    nodes are held through the fit: `linear_fit` solves for the free
+    parameters only.  See
+    [Fixed parameters in a linear fit](fitting.md#fixed-parameters-in-a-linear-fit).
 
 ---
 
@@ -52,7 +52,7 @@ Secondary fields:
 mesh.new_field(
     field_name='field_key',        # access key: mesh['field_key']
     field_dimension=3,             # 1=scalar, 3=vector
-    new_basis=[H3Basis]*3,         # one basis per parametric direction
+    new_basis=H3**3,               # one basis per parametric direction
     field_locs=sample_pts,         # shape (N, 3) – physical sample locations
     field_values=sample_values,    # shape (N,) or (N, 3)
 )
@@ -67,19 +67,18 @@ created but the nodal parameters are left at zero.
 
 The same workflow is exercised by `tests/test_fields.py`.
 
-```python
+```python exec="true" source="above" session="secondary-fields"
 import math
 import numpy as np
 import pyvista as pv
-from HOMER import Mesh, MeshNode, MeshElement, L1Basis, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, L1, H3
 
 # ── 1. Build a unit-cube mesh in H3×H3×H3 ──────────────────────────────────
 nodes = [MeshNode(loc=[x, y, z])
          for x in [0,1] for y in [0,1] for z in [0,1]]
-element = MeshElement(node_indexes=list(range(8)),
-                      basis_functions=(L1Basis, L1Basis, L1Basis))
+element = MeshElement(node_indexes=list(range(8)), basis_functions=L1**3)
 mesh = Mesh(nodes=nodes, elements=element)
-mesh.rebase([H3Basis]*3, in_place=True)
+mesh.rebase(H3**3, in_place=True)
 
 # ── 2. Generate sample data ─────────────────────────────────────────────────
 def fibonacci_sphere(n, radius=0.5, centre=(0., 0., 0.)):
@@ -114,7 +113,7 @@ mesh.new_field(
     field_dimension=3,
     field_locs=data,
     field_values=normal_field,
-    new_basis=[H3Basis]*3,
+    new_basis=H3**3,
 )
 
 # ── 5. Fit the scalar field ──────────────────────────────────────────────────
@@ -123,7 +122,7 @@ mesh.new_field(
     field_dimension=1,
     field_locs=data,
     field_values=z_field,
-    new_basis=[L1Basis]*3,
+    new_basis=L1**3,
 )
 
 # ── 6. Evaluate the fitted field ─────────────────────────────────────────────
@@ -133,20 +132,27 @@ norms  = mesh['vec_dir'].evaluate_embeddings_in_every_element(xis)   # (n, 3)
 heights = mesh['vec_mag'].evaluate_embeddings_in_every_element(xis)  # (n, 1)
 
 # ── 7. Visualise ─────────────────────────────────────────────────────────────
+# the values are unit normals, so drawn at their own length they are as long as
+# the cube is wide; an artist scales them to something the eye can read
+def arrows(scene, locs, values, field_xi):
+    scene.add_arrows(np.asarray(locs), np.asarray(values), mag=0.1)
+
 s = pv.Plotter()
-mesh.plot(s, field_to_draw='vec_dir', default_xi_res=6)
-s.add_arrows(data, normal_field, mag=0.1)  # raw samples for comparison
+mesh.plot(s, field_to_draw='vec_dir', default_xi_res=3, field_artist=arrows)
+# every eighth raw sample, in red, to compare the fit against its data
+s.add_arrows(data[::8], normal_field[::8], mag=0.1, color='r')
 s.show()
 
-# Plot the scalar field alone
-mesh['vec_mag'].plot()
+# A scalar field has no geometry of its own, so it is drawn on the mesh
+mesh.plot(field_to_draw='vec_mag', default_xi_res=6)
 ```
+
 
 ---
 
 ## Accessing and Evaluating a Fitted Field
 
-```python
+```python exec="true" source="above" session="secondary-fields"
 # Retrieve the secondary MeshField
 fibre_field = mesh['vec_dir']      # MeshField instance
 
@@ -168,29 +174,51 @@ all_values = fibre_field.evaluate_embeddings_in_every_element(
 
 ## Visualising Secondary Fields
 
-```python
-# Draw the mesh + vector field overlaid
-mesh.plot(field_to_draw='vec_dir', default_xi_res=6)
+`Mesh.plot` draws a field in two steps.  It picks the parametric locations —
+`field_xi`, defaulting to a uniform grid at `default_xi_res` — then evaluates
+both the geometry and the field there and hands the pair to an *artist*:
+
+```
+field_artist(plotter, locs, values, field_xi) -> None
+```
+
+`locs` is where the samples are in space, `values` is what the field says
+there, and `field_xi` is the grid they came from, in case the artist wants to
+reshape it.  The artist owns the whole drawing decision; nothing is added to
+the scene except what it adds.  The default one draws a 3-D field as line
+segments from each location, coloured by magnitude, and a 1-D field as
+coloured spheres — and raises for any other field dimension, which is the
+signal to write your own.
+
+Replacing it is how you control size, glyph and colour together:
+
+```python exec="true" source="above" session="secondary-fields"
+# Draw the mesh + vector field overlaid, at a readable scale
+mesh.plot(field_to_draw='vec_dir', default_xi_res=3, field_artist=arrows)
 
 # Draw only the secondary field (without primary geometry)
+mesh.plot(field_to_draw='vec_dir', draw_xyz_field=False, field_artist=arrows)
+
+# A field is itself a MeshField, so it can also draw its own geometry
 mesh['vec_dir'].plot()
-
-# Custom artist for arrows instead of line segments
-import pyvista as pv
-def arrow_artist(scene, locs, values):
-    scene.add_arrows(locs, values, mag=0.1)
-
-mesh.plot(field_to_draw='vec_dir', field_artist=arrow_artist)
 ```
+
+The last of those is a different picture from the other two: a `MeshField`
+drawn on its own plots its *values* as if they were coordinates, so a field of
+unit normals comes out as the unit sphere rather than as anything laid over the
+cube.
+Generally, this should be avoided as it is hard to interpret.
+However, it highlights that xyz fields are, in fact, just another field of the mesh.
 
 ---
 
 ## Tips
 
-- Use **`H3Basis`** for smooth vector fields (fibre directions, velocities)
+- Use **`H3`** for smooth vector fields (fibre directions, velocities)
   that must interpolate continuously across element boundaries.
-- Use **`L1Basis`** or **`L2Basis`** for simpler scalar fields (pressure,
+  **`B3`** is also good for this case, but is often harder to define.
+- Use **`L1`** or **`L2`** for simpler scalar fields (pressure,
   temperature) where smoothness is less critical.
-- Ensure you have **more sample points than nodal degrees of freedom**.  If
-  `linear_fit` raises an assertion error, add more sample points or reduce
+- Ensure you have **more sample points than free nodal degrees of freedom**.
+  If `linear_fit` raises an assertion error, add more sample points or reduce
   the basis order.

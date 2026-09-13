@@ -29,11 +29,16 @@ plugins:
             merge_init_into_class: true
             members_order: source
 
+#Executes the documentation examples and captures what they draw.
+hooks:
+  - scripts/doc_scenes.py
+
 nav:
   - Home: index.md
   - Architecture: architecture.md
   - How-To Guides:
     - Working with 3D meshes: how-to/3d-meshes.md
+    - Basis function definitions: how-to/basis-definitions.md
     - Mixed basis functions: how-to/mixed-basis.md
     - Mesh refinement: how-to/refinement.md
     - Basis conversion (rebase): how-to/rebase.md
@@ -43,6 +48,7 @@ nav:
     - Strain evaluation: how-to/strain.md
     - Plotting: how-to/plotting.md
     - Topology mapping: how-to/topology.md
+    - Saving and loading: how-to/io.md
     - Node indexing: how-to/node-indexing.md
   - API Reference:
     - mesh: api/mesh.md
@@ -51,6 +57,7 @@ nav:
     - fitting: api/fitting.md
     - io: api/io.md
     - geometry: api/geometry.md
+    - examples: api/examples.md
     - jacobian_evaluator: api/jacobian_evaluator.md
     - utils: api/utils.md
     - embedding: api/embedding.md
@@ -58,6 +65,10 @@ nav:
     - internals: api/internals.md
 
 markdown_extensions:
+  #the basis-function guide is written in the notation of the FEM/BEM notes,
+  #which needs a maths renderer; extra_javascript below wires up MathJax.
+  - pymdownx.arithmatex:
+      generic: true
   - admonition
   - pymdownx.details
   - pymdownx.superfences
@@ -71,3 +82,7 @@ markdown_extensions:
   - md_in_html
   - toc:
       permalink: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js

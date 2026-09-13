@@ -36,7 +36,7 @@ class Mesh(MeshField):
         mesh = Mesh(nodes=[...], elements=[...])
         mesh.new_field('fibre', field_dimension=3,
                        field_locs=data_pts, field_values=fibre_vectors,
-                       new_basis=[H3Basis]*3)
+                       new_basis=[H3]*3)
         fibre_field = mesh['fibre']   # MeshField
 
     :param nodes:
@@ -172,8 +172,8 @@ class Mesh(MeshField):
         :param new_basis:
             The 1-D bases for the new field, one per
             parametric direction.  May differ from the primary mesh basis.
-            For example, use ``[H3Basis]*3`` for a smooth vector field or
-            ``[L1Basis]*3`` for a piecewise-linear scalar field.
+            For example, use ``[H3]*3`` for a smooth vector field or
+            ``[L1]*3`` for a piecewise-linear scalar field.
         :param field_locs:
             Physical-space sample locations where field values are known,
             shape ``(n_samples, fdim)``.  When ``None``, an empty field is
@@ -194,14 +194,14 @@ class Mesh(MeshField):
                 field_dimension=3,
                 field_locs=sample_pts,       # shape (N, 3)
                 field_values=normal_vectors, # shape (N, 3)
-                new_basis=H3Basis * 3,
+                new_basis=H3 * 3,
             )
             mesh.new_field(
                 'height',
                 field_dimension=1,
                 field_locs=sample_pts,       # shape (N, 3)
                 field_values=sample_pts[:, 2],  # scalar Z values
-                new_basis=L1Basis * 3,
+                new_basis=L1 * 3,
             )
 
             # Retrieve and evaluate

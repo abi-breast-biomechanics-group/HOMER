@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from HOMER import Mesh, MeshElement, MeshField, MeshNode
-from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis, L3Basis
+from HOMER.basis_definitions import H3, L1, L2, L3
 from HOMER.geometry import cube
 
 from _helpers import CLOSE, EXACT, arr
@@ -41,12 +41,12 @@ def sampled_shells():
 @pytest.fixture(scope="module")
 def field_mesh(sampled_shells):
     points, directions, heights = sampled_shells
-    mesh = cube(basis=[L1Basis] * 3, centre=np.array([0.5, 0.5, 0.5]))
+    mesh = cube(basis=[L1] * 3, centre=np.array([0.5, 0.5, 0.5]))
     mesh.refine(2)
     mesh.new_field('vec_dir', field_dimension=3, field_locs=points,
-                   field_values=directions, new_basis=[H3Basis] * 3)
+                   field_values=directions, new_basis=[H3] * 3)
     mesh.new_field('vec_mag', field_dimension=1, field_locs=points,
-                   field_values=heights, new_basis=[L3Basis] * 3)
+                   field_values=heights, new_basis=[L3] * 3)
     return mesh
 
 
@@ -80,7 +80,7 @@ def test_fitted_field_reproduces_the_data_it_was_fitted_to(field_mesh, sampled_s
 
 
 def test_a_field_can_be_given_its_parameters_directly():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     values = np.arange(8, dtype=float)
 
     mesh.new_field('index', field_dimension=1, field_params=values)
@@ -91,7 +91,7 @@ def test_a_field_can_be_given_its_parameters_directly():
 
 
 def test_a_field_can_be_assigned_directly():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     doubled = MeshField(nodes=[MeshNode(loc=node.loc * 2.0) for node in mesh.nodes],
                         elements=MeshElement(node_indexes=mesh.elements[0].nodes,
                                              basis_functions=mesh.elements[0].basis_functions))
@@ -109,7 +109,7 @@ def test_refining_the_mesh_refines_its_fields():
     """The field must follow the geometry, or the two stop agreeing on what
     (element, xi) means -- and the value read at a physical point changes."""
     rng = np.random.default_rng(1)
-    mesh = cube(basis=[L1Basis] * 3, centre=np.array([0.5, 0.5, 0.5]))
+    mesh = cube(basis=[L1] * 3, centre=np.array([0.5, 0.5, 0.5]))
     mesh.new_field('linear', field_dimension=1,
                    field_params=np.array([n.loc[0] * 2 - n.loc[1] for n in mesh.nodes]))
     probes = rng.random((50, 3)) * 0.8 + 0.1
@@ -128,10 +128,10 @@ def test_refining_the_mesh_refines_its_fields():
 
 
 def test_rebasing_the_mesh_keeps_its_fields():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     mesh.new_field('index', field_dimension=1, field_params=np.arange(8, dtype=float))
 
-    out = mesh.rebase([L2Basis] * 3)
+    out = mesh.rebase([L2] * 3)
 
     assert 'index' in out.fields
 
@@ -139,14 +139,14 @@ def test_rebasing_the_mesh_keeps_its_fields():
 def test_a_field_value_is_recovered_at_the_point_it_was_placed():
     """The end-to-end contract: embed a point, read the field, get the value
     that was fitted there."""
-    mesh = cube(basis=[L1Basis] * 3, centre=np.array([0.5, 0.5, 0.5]))
+    mesh = cube(basis=[L1] * 3, centre=np.array([0.5, 0.5, 0.5]))
     mesh.refine(2)
     rng = np.random.default_rng(0)
     locs = rng.random((400, 3)) * 0.8 + 0.1
     values = locs[:, 0] * 2.0 - locs[:, 1]        #linear, so L1 can hold it exactly
 
     mesh.new_field('linear', field_dimension=1, field_locs=locs,
-                   field_values=values, new_basis=[L1Basis] * 3)
+                   field_values=values, new_basis=[L1] * 3)
 
     ele, xi = mesh.embed_points(locs, iterations=20)
     got = arr(mesh['linear'].evaluate_embeddings_ele_xi_pair(np.asarray(ele), np.asarray(xi))).ravel()
@@ -155,7 +155,7 @@ def test_a_field_value_is_recovered_at_the_point_it_was_placed():
 
 
 def test_asking_for_a_field_that_is_not_there_raises():
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
 
     with pytest.raises(KeyError):
         mesh['no_such_field']

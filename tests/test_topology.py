@@ -9,7 +9,7 @@ the neighbour reaches at the mapped coordinate.
 import numpy as np
 import pytest
 
-from HOMER.basis_definitions import B3Basis, H3Basis, L1Basis, L2Basis
+from HOMER.basis_definitions import B3, H3, L1, L2
 from HOMER.geometry import basic_surface, basic_surfaceMN, cube, cubeMNO
 from HOMER.topomap_operations import refine_connectivity
 
@@ -18,7 +18,7 @@ from _helpers import EXACT, arr
 
 @pytest.fixture(scope="module")
 def block():
-    mesh = cube(scale=1, centre=np.zeros(3), basis=[L1Basis] * 3)
+    mesh = cube(scale=1, centre=np.zeros(3), basis=[L1] * 3)
     mesh.refine(2)
     return mesh
 
@@ -46,8 +46,8 @@ def test_stepping_off_the_mesh_is_reported_invalid(block):
 
 
 @pytest.mark.parametrize("mesh_factory", [
-    lambda: cubeMNO([3, 3, 3], basis=[L1Basis] * 3),
-    lambda: basic_surfaceMN([3, 3], basis=[L1Basis] * 2),
+    lambda: cubeMNO([3, 3, 3], basis=[L1] * 3),
+    lambda: basic_surfaceMN([3, 3], basis=[L1] * 2),
 ], ids=["volume", "surface"])
 def test_topomap_preserves_the_physical_point(mesh_factory):
     """The invariant that makes topomap usable for marching across a mesh."""
@@ -86,7 +86,7 @@ def test_get_faces_lists_every_exposed_element_face(block):
 
 
 def test_a_surface_mesh_has_no_exposed_volume_faces():
-    assert basic_surface(basis=[L1Basis] * 2).get_faces() == []
+    assert basic_surface(basis=[L1] * 2).get_faces() == []
 
 
 def test_get_xi_surface_nodes_selects_one_face_of_the_mesh(block):
@@ -101,7 +101,7 @@ def test_hermite_surface_nodes_leave_the_far_node_behind():
     """A Hermite node carries derivative weights as well as a value weight, and
     all of them vanish at the far end of the direction - so the node at xi = 0
     is no more a part of the xi = 1 face than it is for a Lagrange basis."""
-    mesh = cube(scale=1, centre=np.zeros(3), basis=[H3Basis] * 3)
+    mesh = cube(scale=1, centre=np.zeros(3), basis=[H3] * 3)
     mesh.refine(2)
 
     elements, nodes = mesh.get_xi_surface_nodes(2, 1)
@@ -119,9 +119,9 @@ def test_control_net_surface_spans_every_layer_with_support():
     position in the element node list alone would return only the nearest
     layer, which does not determine the surface.
     """
-    mesh = cube(scale=1, centre=np.zeros(3), basis=[L1Basis] * 3)
+    mesh = cube(scale=1, centre=np.zeros(3), basis=[L1] * 3)
     mesh.refine(2)
-    mesh = mesh.rebase([B3Basis] * 3)
+    mesh = mesh.rebase([B3] * 3)
 
     elements, nodes = mesh.get_xi_surface_nodes(2, 0)
 
@@ -129,14 +129,14 @@ def test_control_net_surface_spans_every_layer_with_support():
     assert len(nodes) == 3 * 25            #three of the five 5x5 control layers
 
 
-@pytest.mark.parametrize('basis', [[H3Basis] * 3, [B3Basis] * 3], ids=['H3', 'B3'])
+@pytest.mark.parametrize('basis', [[H3] * 3, [B3] * 3], ids=['H3', 'B3'])
 def test_surface_nodes_are_the_nodes_that_move_the_surface(basis):
     """The contract, stated as geometry rather than as topology.
 
     Shifting a node the call returns has to be able to move the face; shifting
     any other node must leave it exactly where it was.
     """
-    mesh = cube(scale=1, centre=np.zeros(3), basis=[L1Basis] * 3)
+    mesh = cube(scale=1, centre=np.zeros(3), basis=[L1] * 3)
     mesh.refine(2)
     mesh = mesh.rebase(basis)
 

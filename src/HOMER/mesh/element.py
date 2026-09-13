@@ -25,14 +25,14 @@ class MeshElement:
     The number of nodes required per element equals the product of the numbers
     of 1-D basis nodes:
 
-    * H3Basis × H3Basis → 2 × 2 = 4 nodes (2-D)
-    * H3Basis × H3Basis × H3Basis → 2 × 2 × 2 = 8 nodes (3-D)
-    * L2Basis × L2Basis → 3 × 3 = 9 nodes (2-D)
+    * H3 × H3 → 2 × 2 = 4 nodes (2-D)
+    * H3 × H3 × H3 → 2 × 2 × 2 = 8 nodes (3-D)
+    * L2 × L2 → 3 × 3 = 9 nodes (2-D)
 
     :param basis_functions:
         The 1-D bases of the element, one per parametric direction, defining the
         parametric-direction interpolation.  E.g.
-        ``H3Basis * 2`` for a 2-D cubic-Hermite element.
+        ``H3 * 2`` for a 2-D cubic-Hermite element.
     :param node_indexes:
         Zero-based integer indices into the parent mesh's ``nodes`` list.
         Exactly one of *node_indexes* or *node_ids* must be given.
@@ -67,7 +67,7 @@ class MeshElement:
         :param basis_functions:
             The 1-D bases of the element, one per parametric direction (1, 2
             or 3 of them).  Accepts a :class:`~HOMER.basis_definitions.BasisGroup`
-            (``H3Basis * 2 + L1Basis``), a list or tuple of bases, or a single
+            (``H3**2 * L1``), a list or tuple of bases, or a single
             basis for a 1-D element.
         :param node_indexes:
             Zero-based indices into the parent mesh's node list.

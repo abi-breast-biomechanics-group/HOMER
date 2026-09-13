@@ -12,10 +12,11 @@ Masked and multi-state embedding is covered separately in
 import numpy as np
 import pytest
 
-from HOMER.basis_definitions import H3Basis, L1Basis, L2Basis
+from HOMER.basis_definitions import H3, L1, L2
 from HOMER.geometry import basic_surface, cube
 
-from _helpers import EXACT, arr, bulged_patch, hermite_cube
+from _helpers import EXACT, arr
+from HOMER.examples import bulged_patch, hermite_cube
 
 
 def residual_norm(residual):
@@ -103,7 +104,7 @@ def test_residual_of_an_off_surface_point_is_along_the_normal():
 def test_projection_is_the_closest_point_on_a_flat_patch():
     """On a plane the answer is known in closed form."""
     rng = np.random.default_rng(2)
-    mesh = basic_surface(basis=[L1Basis] * 2)
+    mesh = basic_surface(basis=[L1] * 2)
     query = np.column_stack([rng.uniform(-1, 1, 200), rng.uniform(0.1, 0.9, 200),
                              rng.uniform(0.1, 0.9, 200)])
 
@@ -119,7 +120,7 @@ def test_projection_is_the_closest_point_on_a_flat_patch():
 
 def test_interior_points_of_a_volume_mesh_have_no_residual():
     rng = np.random.default_rng(3)
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     inside = rng.random((200, 3)) - 0.5
 
     (ele, xi), residual = mesh.embed_points(inside, return_residual=True, iterations=20)
@@ -130,7 +131,7 @@ def test_interior_points_of_a_volume_mesh_have_no_residual():
 
 def test_surface_embed_pins_the_result_to_an_element_face():
     rng = np.random.default_rng(4)
-    mesh = cube(basis=[L1Basis] * 3)
+    mesh = cube(basis=[L1] * 3)
     outside = rng.random((200, 3)) * 3 - 1.5
 
     (_, xi), _ = mesh.embed_points(outside, return_residual=True,

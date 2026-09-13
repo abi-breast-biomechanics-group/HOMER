@@ -16,11 +16,12 @@ import numpy as np
 import pytest
 
 from HOMER import Mesh, MeshElement, MeshNode
-from HOMER.basis_definitions import (B3Basis, BasisGroup, H3Basis, L1Basis, L2Basis,
-                                     L3Basis, L4Basis)
+from HOMER.basis_definitions import (B3, BasisGroup, H3, L1, L2,
+                                     L3, L4)
 from HOMER.mesh import GAUSS, quadrature_order
 
-from _helpers import EXACT, arr, bulged_patch, hermite_cube, node_locs, unit_hex
+from _helpers import EXACT, arr, node_locs
+from HOMER.examples import bulged_patch, hermite_cube, unit_hex
 
 CORNERS_3D = np.array(list(itertools.product([0.0, 1.0], repeat=3)))
 CORNERS_2D = np.array(list(itertools.product([0.0, 1.0], repeat=2)))
@@ -50,14 +51,14 @@ def distorted_hex(basis):
     locs = np.array(list(np.ndindex(2, 2, 2)), dtype=float)
     locs = locs + rng.uniform(-0.25, 0.25, locs.shape)
     element = MeshElement(node_indexes=list(range(8)),
-                          basis_functions=(L1Basis, L1Basis, L1Basis))
+                          basis_functions=(L1, L1, L1))
     mesh = Mesh(nodes=[MeshNode(loc=l) for l in locs], elements=element)
-    return mesh if basis is L1Basis else mesh.rebase([basis] * 3)
+    return mesh if basis is L1 else mesh.rebase([basis] * 3)
 
 
 ############################################### single elements, every basis
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis],
+@pytest.mark.parametrize("basis", [L1, L2, L3, L4, H3],
                          ids=lambda b: b.__name__)
 def test_volume_element_interpolates_its_corner_nodes(basis):
     """Whatever the basis, the eight xi-corners must land on the eight nodes."""
@@ -68,21 +69,21 @@ def test_volume_element_interpolates_its_corner_nodes(basis):
     #these meshes are built by rebasing, so the corners come out of a float32
     #least-squares solve; the quartic one has 125 nodes and sits right on the
     #round-off floor for a system that size
-    atol = 2e-5 if basis is L4Basis else EXACT
+    atol = 2e-5 if basis is L4 else EXACT
     np.testing.assert_allclose(np.sort(corners, axis=0),
                                np.sort(np.array(list(itertools.product([0., 1.], repeat=3))), axis=0),
                                atol=atol)
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis],
+@pytest.mark.parametrize("basis", [L1, L2, L3, L4, H3],
                          ids=lambda b: b.__name__)
 def test_unit_cube_has_unit_volume_in_every_basis(basis):
     assert unit_hex(basis=[basis] * 3).get_volume() == pytest.approx(1.0, abs=EXACT)
 
 
-@pytest.mark.parametrize("basis", [(H3Basis, L1Basis, H3Basis),
-                                   (L2Basis, H3Basis, L1Basis),
-                                   (L3Basis, L1Basis, L2Basis)],
+@pytest.mark.parametrize("basis", [(H3, L1, H3),
+                                   (L2, H3, L1),
+                                   (L3, L1, L2)],
                          ids=lambda b: "".join(x.__name__[:2] for x in b))
 def test_mixed_bases_build_and_keep_the_geometry(basis):
     """Each parametric direction may carry its own basis."""
@@ -93,7 +94,7 @@ def test_mixed_bases_build_and_keep_the_geometry(basis):
                                np.sort(CORNERS_3D, axis=0), atol=EXACT)
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, L3Basis, H3Basis],
+@pytest.mark.parametrize("basis", [L1, L2, L3, H3],
                          ids=lambda b: b.__name__)
 def test_surface_element_interpolates_its_corner_nodes(basis):
     from HOMER.geometry import basic_surface
@@ -102,7 +103,7 @@ def test_surface_element_interpolates_its_corner_nodes(basis):
 
     corners = arr(mesh.evaluate_embeddings(0, CORNERS_2D))
     np.testing.assert_allclose(np.sort(corners, axis=0),
-                               np.sort(node_locs(basic_surface(basis=[L1Basis] * 2)), axis=0),
+                               np.sort(node_locs(basic_surface(basis=[L1] * 2)), axis=0),
                                atol=EXACT)
 
 
@@ -121,7 +122,7 @@ def test_bulged_patch_is_actually_curved():
 def test_hermite_basis_without_nodal_derivatives_is_rejected():
     """The clearest failure mode when hand-building a Hermite mesh."""
     nodes = [MeshNode(loc=np.array(l, dtype=float)) for l in CORNERS_3D]
-    element = MeshElement(node_indexes=list(range(8)), basis_functions=(H3Basis,) * 3)
+    element = MeshElement(node_indexes=list(range(8)), basis_functions=(H3,) * 3)
 
     with pytest.raises(ValueError, match="did not have the required field"):
         Mesh(nodes=nodes, elements=element)
@@ -140,7 +141,7 @@ def test_collapsed_element_maps_several_corners_onto_one_node():
     nodes = [MeshNode(loc=np.array(l, dtype=float), du=zero, dv=zero,
                       dw=np.array(t, dtype=float), dudv=zero, dudw=zero, dvdw=zero, dudvdw=zero)
              for l, t in zip(locs, tangents)]
-    element = MeshElement(node_indexes=[0, 1, 2, 3, 5, 5, 5, 5], basis_functions=(H3Basis,) * 3)
+    element = MeshElement(node_indexes=[0, 1, 2, 3, 5, 5, 5, 5], basis_functions=(H3,) * 3)
 
     mesh = Mesh(nodes=nodes, elements=element)
 
@@ -188,7 +189,7 @@ def test_get_volume_is_exact_on_a_curved_element():
     assert mesh.get_volume() < 1.0                  #the dw tangents pinch the element
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis],
+@pytest.mark.parametrize("basis", [L1, L2, L3, L4, H3],
                          ids=lambda b: b.__name__)
 def test_get_volume_is_exact_on_a_distorted_hexahedron(basis):
     """The case the old basis-order rule got wrong: a non-affine element.
@@ -203,24 +204,24 @@ def test_get_volume_is_exact_on_a_distorted_hexahedron(basis):
 
 def test_quadrature_order_follows_the_degree_of_det_J():
     """n = ceil(ndim*p/2), per direction, and mixed bases are handled per direction."""
-    assert quadrature_order([L1Basis] * 3) == [2, 2, 2]
-    assert quadrature_order([L2Basis] * 3) == [3, 3, 3]
-    assert quadrature_order([H3Basis] * 3) == [5, 5, 5]
-    assert quadrature_order([L4Basis] * 3) == [6, 6, 6]
-    assert quadrature_order([L1Basis, H3Basis, L4Basis]) == [2, 5, 6]
+    assert quadrature_order([L1] * 3) == [2, 2, 2]
+    assert quadrature_order([L2] * 3) == [3, 3, 3]
+    assert quadrature_order([H3] * 3) == [5, 5, 5]
+    assert quadrature_order([L4] * 3) == [6, 6, 6]
+    assert quadrature_order([L1, H3, L4]) == [2, 5, 6]
 
     #the rule follows the element's dimensionality, not a hard-coded 3: over
     #ndim directions det(J) reaches degree ndim * p - 1, so a 2-D element
     #needs ceil(2 * p / 2) = p points per direction
-    assert quadrature_order([L1Basis] * 2) == [1, 1]
-    assert quadrature_order([L2Basis] * 2) == [2, 2]
-    assert quadrature_order([H3Basis] * 2) == [3, 3]
-    assert quadrature_order([L4Basis] * 2) == [4, 4]
+    assert quadrature_order([L1] * 2) == [1, 1]
+    assert quadrature_order([L2] * 2) == [2, 2]
+    assert quadrature_order([H3] * 2) == [3, 3]
+    assert quadrature_order([L4] * 2) == [4, 4]
 
 
 def test_quadrature_order_warns_rather_than_failing_on_an_exotic_basis(caplog):
     """A degree past the tabulated rules is clamped, loudly."""
-    degree7 = replace(L4Basis, name='Degree7Basis', order=7)
+    degree7 = replace(L4, name='Degree7Basis', order=7)
 
     with caplog.at_level(logging.WARNING):
         orders = quadrature_order(degree7 * 3)
@@ -238,7 +239,7 @@ def test_get_volume_rejects_a_surface_mesh():
     from HOMER.geometry import basic_surface
 
     with pytest.raises(ValueError, match="only defined on a 3-D mesh"):
-        basic_surface(basis=[L1Basis] * 2).get_volume()
+        basic_surface(basis=[L1] * 2).get_volume()
 
 
 ############################################### identifiers
@@ -250,7 +251,7 @@ def test_elements_may_reference_nodes_by_id():
     locs = [[0, 0, 1], [0, 0, 0], [0, 1, 1], [0, 1, 0]]
     nodes = [MeshNode(loc=np.array(l, dtype=float), du=zero, dv=zero, dudv=zero, id=i)
              for l, i in zip(locs, ids)]
-    element = MeshElement(node_ids=ids, basis_functions=(H3Basis, H3Basis), id='test_elem')
+    element = MeshElement(node_ids=ids, basis_functions=(H3, H3), id='test_elem')
 
     mesh = Mesh(nodes=nodes, elements=element)
 
@@ -262,7 +263,7 @@ def test_elements_may_reference_nodes_by_id():
 
 def test_associated_node_index_locates_named_fields_in_the_param_vector():
     """Answers "which entries of the parameter array are node 3's du?"."""
-    mesh = unit_hex(basis=[H3Basis] * 3)
+    mesh = unit_hex(basis=[H3] * 3)
     per_node = len(mesh.true_param_array) // len(mesh.nodes)
 
     loc_inds = arr(mesh.associated_node_index(['loc'])).reshape(len(mesh.nodes), 3)
@@ -275,7 +276,7 @@ def test_associated_node_index_locates_named_fields_in_the_param_vector():
 
 def test_associated_node_index_leaves_the_mesh_unchanged():
     """It walks the parameter vector by overwriting it, so it must put it back."""
-    mesh = unit_hex(basis=[H3Basis] * 3)
+    mesh = unit_hex(basis=[H3] * 3)
     before = arr(mesh.true_param_array)
 
     mesh.associated_node_index(['loc'], nodes_to_gather=[0, 2])
@@ -301,8 +302,8 @@ def test_transform_moves_every_node_and_preserves_volume():
 def test_adding_two_meshes_concatenates_them():
     from HOMER.geometry import cube
 
-    left = cube(basis=[L1Basis] * 3)
-    right = cube(basis=[L1Basis] * 3, centre=np.array([1.0, 0.0, 0.0]))
+    left = cube(basis=[L1] * 3)
+    right = cube(basis=[L1] * 3, centre=np.array([1.0, 0.0, 0.0]))
 
     joined = left + right
 
@@ -314,7 +315,7 @@ def test_adding_two_meshes_concatenates_them():
 def test_drop_elements_removes_the_element_and_its_orphaned_nodes():
     from HOMER.geometry import cubeMNO
 
-    mesh = cubeMNO([2, 2, 2], basis=[L1Basis] * 3)
+    mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
     before_volume = mesh.get_volume()
 
     mesh.drop_elements([0])
@@ -349,7 +350,7 @@ def test_fixing_a_parameter_shrinks_the_optimisable_vector():
 
 
 def test_get_element_params_gathers_the_element_dofs():
-    mesh = unit_hex(basis=[L2Basis] * 3)
+    mesh = unit_hex(basis=[L2] * 3)
 
     params = arr(mesh.get_element_params(0))
 
@@ -358,19 +359,19 @@ def test_get_element_params_gathers_the_element_dofs():
 
 def test_an_element_accepts_every_spelling_of_its_basis_group():
     """A group, a list, a tuple and a bare basis all mean the same element."""
-    spellings = [L1Basis * 3,
-                 [L1Basis, L1Basis, L1Basis],
-                 (L1Basis, L1Basis, L1Basis)]
+    spellings = [L1 * 3,
+                 [L1, L1, L1],
+                 (L1, L1, L1)]
     for basis in spellings:
         element = MeshElement(node_indexes=list(range(8)), basis_functions=basis)
-        assert element.basis_functions == L1Basis * 3
+        assert element.basis_functions == L1 * 3
         assert element.ndim == 3
 
-    line = MeshElement(node_indexes=[0, 1], basis_functions=L1Basis)
-    assert line.basis_functions == BasisGroup([L1Basis]) and line.ndim == 1
+    line = MeshElement(node_indexes=[0, 1], basis_functions=L1)
+    assert line.basis_functions == BasisGroup([L1]) and line.ndim == 1
 
 
 def test_an_element_rejects_a_dimensionality_it_cannot_build():
     """Four directions used to fail deep inside the basis-product indices."""
     with pytest.raises(ValueError, match="1, 2 or 3 bases"):
-        MeshElement(node_indexes=list(range(16)), basis_functions=L1Basis * 4)
+        MeshElement(node_indexes=list(range(16)), basis_functions=L1 * 4)

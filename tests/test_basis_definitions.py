@@ -12,12 +12,12 @@ import pytest
 
 from dataclasses import replace
 
-from HOMER.basis_definitions import (B3Basis, BasisGroup, H3Basis, L1Basis,
-                                     L2Basis, L3Basis, L4Basis, Lagrange,
+from HOMER.basis_definitions import (B3, BasisGroup, H3, L1,
+                                     L2, L3, L4, Lagrange,
                                      basis_by_name, registered_bases)
 
-ALL_BASES = [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis, B3Basis]
-LAGRANGE = [L1Basis, L2Basis, L3Basis, L4Basis]
+ALL_BASES = [L1, L2, L3, L4, H3, B3]
+LAGRANGE = [L1, L2, L3, L4]
 
 SAMPLE = jnp.linspace(0.0, 1.0, 11)
 
@@ -29,7 +29,7 @@ def tol(basis):
     coefficients into the hundreds that then cancel -- and lose about two
     digits more than the rest.
     """
-    return 1e-4 if basis is L4Basis else 1e-6
+    return 1e-4 if basis is L4 else 1e-6
 
 
 @pytest.mark.parametrize("basis", ALL_BASES, ids=lambda b: b.__name__)
@@ -37,7 +37,7 @@ def test_weight_names_match_the_evaluated_columns(basis):
     assert basis.fn(SAMPLE).shape == (len(SAMPLE), len(basis.weights))
 
 
-@pytest.mark.parametrize("basis", LAGRANGE + [B3Basis], ids=lambda b: b.__name__)
+@pytest.mark.parametrize("basis", LAGRANGE + [B3], ids=lambda b: b.__name__)
 def test_partition_of_unity(basis):
     """A constant field must be reproduced exactly, at every xi."""
     np.testing.assert_allclose(np.asarray(basis.fn(SAMPLE)).sum(-1), 1.0, atol=tol(basis))
@@ -45,9 +45,9 @@ def test_partition_of_unity(basis):
 
 def test_hermite_splits_into_value_and_derivative_weights():
     """H3 is not a partition of unity; only its two value weights are."""
-    weights = np.asarray(H3Basis.fn(SAMPLE))
-    value_cols = [i for i, w in enumerate(H3Basis.weights) if not w.startswith('d')]
-    deriv_cols = [i for i, w in enumerate(H3Basis.weights) if w.startswith('d')]
+    weights = np.asarray(H3.fn(SAMPLE))
+    value_cols = [i for i, w in enumerate(H3.weights) if not w.startswith('d')]
+    deriv_cols = [i for i, w in enumerate(H3.weights) if w.startswith('d')]
 
     np.testing.assert_allclose(weights[:, value_cols].sum(-1), 1.0, atol=1e-6)
     #the derivative weights vanish at both ends, so nodal values alone fix the endpoints
@@ -63,13 +63,13 @@ def test_lagrange_bases_are_interpolatory(basis):
 
 
 def test_hermite_is_interpolatory_in_value_and_slope():
-    at_nodes = np.asarray(H3Basis.fn(jnp.array([0.0, 1.0])))
-    slope_at_nodes = np.asarray(H3Basis.deriv[1](jnp.array([0.0, 1.0])))
+    at_nodes = np.asarray(H3.fn(jnp.array([0.0, 1.0])))
+    slope_at_nodes = np.asarray(H3.deriv[1](jnp.array([0.0, 1.0])))
 
     #columns are [x0, dx0, x1, dx1]
     np.testing.assert_allclose(at_nodes, [[1, 0, 0, 0], [0, 0, 1, 0]], atol=1e-6)
     np.testing.assert_allclose(slope_at_nodes, [[0, 1, 0, 0], [0, 0, 0, 1]], atol=1e-6)
-    assert H3Basis.interpolatory
+    assert H3.interpolatory
 
 
 def test_b3_is_flagged_as_a_control_net():
@@ -78,8 +78,8 @@ def test_b3_is_flagged_as_a_control_net():
     Refinement relies on this flag to decide whether a fixed nodal value may
     be carried across verbatim, so it is worth pinning.
     """
-    assert not B3Basis.interpolatory
-    at_nodes = np.asarray(B3Basis.fn(jnp.array([0.0, 1.0])))
+    assert not B3.interpolatory
+    at_nodes = np.asarray(B3.fn(jnp.array([0.0, 1.0])))
     assert np.abs(at_nodes - np.eye(4)[:2]).max() > 0.1
 
 
@@ -123,7 +123,7 @@ def test_lagrange_is_not_exact_one_order_higher(basis):
 @pytest.mark.parametrize("basis", ALL_BASES, ids=lambda b: b.__name__)
 def test_derivative_of_a_constant_field_is_zero(basis):
     """Follows from partition of unity, and catches a mis-scaled derivative."""
-    if basis is H3Basis:
+    if basis is H3:
         coeffs = np.array([1.0, 0.0, 1.0, 0.0])   #constant 1, zero slope
     else:
         coeffs = np.ones(len(basis.weights))
@@ -135,44 +135,81 @@ def test_derivative_of_a_constant_field_is_zero(basis):
 # --------------------------------------------------------------------------
 
 def test_multiplication_repeats_a_basis_across_directions():
-    assert tuple(H3Basis * 3) == (H3Basis, H3Basis, H3Basis)
-    assert tuple(3 * H3Basis) == (H3Basis, H3Basis, H3Basis)
-    assert tuple(H3Basis ** 3) == (H3Basis, H3Basis, H3Basis)
+    assert tuple(H3 * 3) == (H3, H3, H3)
+    assert tuple(3 * H3) == (H3, H3, H3)
+    assert tuple(H3 ** 3) == (H3, H3, H3)
 
 
-def test_addition_concatenates_directions_in_order():
-    assert tuple(H3Basis * 2 + B3Basis) == (H3Basis, H3Basis, B3Basis)
-    assert tuple(2 * H3Basis + B3Basis) == (H3Basis, H3Basis, B3Basis)
-    assert tuple(L1Basis + H3Basis) == (L1Basis, H3Basis)
-    assert tuple((H3Basis + L1Basis) * 2) == (H3Basis, L1Basis, H3Basis, L1Basis)
+def test_multiplication_joins_directions_in_order():
+    assert tuple(H3 * B3) == (H3, B3)
+    assert tuple(H3 * B3**2) == (H3, B3, B3)
+    assert tuple(H3**2 * B3) == (H3, H3, B3)
+    assert tuple(H3 * H3 * B3) == (H3, H3, B3)
+    assert tuple(H3 * 2 * B3) == (H3, H3, B3)
+    assert tuple((H3 * L1)**2) == (H3, L1, H3, L1)
+    assert tuple((H3 * L1) * 2) == (H3, L1, H3, L1)
+
+
+def test_a_sequence_on_the_left_prepends_rather_than_appends():
+    """``list * basis`` reaches ``Basis.__rmul__``, which must not be the
+    mirror of ``__mul__``: the left operand stays on the left."""
+    assert tuple([H3, L1] * B3) == (H3, L1, B3)
+    assert tuple((L1,) * H3) == (L1, H3)
+    assert tuple(B3 * [H3, L1]) == (B3, H3, L1)
+    assert tuple([H3] * (L1 * B3)) == (H3, L1, B3)
+
+
+def test_addition_is_gone_and_says_what_to_write_instead():
+    """``BasisGroup`` subclasses ``tuple``, so a deleted ``__add__`` would be
+    inherited and silently return a plain tuple.  It has to raise."""
+    with pytest.raises(TypeError):
+        H3 + L1
+    for expr in (lambda: H3 + (L1 * B3),
+                 lambda: (H3 * L1) + B3,
+                 lambda: (H3 * L1) + (B3 * H3)):
+        with pytest.raises(TypeError, match="no longer combines"):
+            expr()
+
+
+def test_a_count_has_to_be_an_actual_count():
+    """``bool`` is an ``int`` subclass; ``H3 * True`` is a mistake."""
+    for expr in (lambda: H3 * True, lambda: H3 * 'abc',
+                 lambda: H3 ** 1.5, lambda: (H3 * L1) * None):
+        with pytest.raises(TypeError):
+            expr()
 
 
 def test_a_group_is_a_tuple_so_the_old_list_spelling_still_works():
     """Everything downstream indexes, iterates and lens the basis group."""
-    group = H3Basis * 2 + B3Basis
+    group = H3**2 * B3
     assert isinstance(group, tuple)
-    assert group == (H3Basis, H3Basis, B3Basis) == BasisGroup([H3Basis, H3Basis, B3Basis])
-    assert group[0] is H3Basis and len(group) == 3 and group.ndim == 3
-    assert list(group) == [H3Basis, H3Basis, B3Basis]
+    assert group == (H3, H3, B3) == BasisGroup([H3, H3, B3])
+    assert group[0] is H3 and len(group) == 3 and group.ndim == 3
+    assert list(group) == [H3, H3, B3]
 
 
 def test_group_interpolatory_is_the_and_of_its_directions():
-    assert (H3Basis * 3).interpolatory
-    assert not (H3Basis * 2 + B3Basis).interpolatory
+    assert (H3 * 3).interpolatory
+    assert not (H3**2 * B3).interpolatory
 
 
 def test_a_group_repr_reads_back_as_the_expression_that_built_it():
-    assert repr(H3Basis * 2 + B3Basis) == "H3Basis*2 + B3Basis"
+    assert repr(H3**2 * B3) == "H3**2 * B3"
+    assert repr(H3 * L1 * B3) == "H3 * L1 * B3"
+    assert repr(BasisGroup()) == "BasisGroup()"
+    #and the repr is the expression: it evaluates back to the group
+    expr = repr(H3**2 * B3)
+    assert tuple(eval(expr, {'H3': H3, 'B3': B3})) == (H3, H3, B3)
 
 
 def test_bases_are_values_that_survive_copying():
     """Identity is the name, so a basis stays itself through a round-trip."""
     import copy
     import pickle
-    assert copy.deepcopy(H3Basis) is H3Basis
-    assert pickle.loads(pickle.dumps(H3Basis)) is H3Basis
-    assert H3Basis == basis_by_name('H3Basis')
-    assert len({H3Basis, H3Basis, L1Basis}) == 2
+    assert copy.deepcopy(H3) is H3
+    assert pickle.loads(pickle.dumps(H3)) is H3
+    assert H3 == basis_by_name('H3')
+    assert len({H3, H3, L1}) == 2
 
 
 @pytest.mark.parametrize("basis", ALL_BASES, ids=lambda b: b.__name__)
@@ -183,38 +220,38 @@ def test_every_basis_registers_under_its_own_name(basis):
 
 
 def test_an_unknown_basis_name_says_what_is_available():
-    with pytest.raises(KeyError, match="L1Basis"):
+    with pytest.raises(KeyError, match="L1"):
         basis_by_name('NoSuchBasis')
 
 
 def test_lagrange_selects_a_basis_by_order():
-    assert Lagrange(1) is L1Basis and Lagrange(4) is L4Basis
+    assert Lagrange(1) is L1 and Lagrange(4) is L4
     with pytest.raises(ValueError, match="No Lagrange basis of order 7"):
         Lagrange(7)
 
 
 def test_a_basis_may_be_varied_without_subclassing():
     """`replace` is how you get a one-off variant now that bases are values."""
-    degree7 = replace(L4Basis, name='ADegree7Basis', order=7)
-    assert degree7.order == 7 and degree7.fn is L4Basis.fn
-    assert degree7 != L4Basis
+    degree7 = replace(L4, name='ADegree7Basis', order=7)
+    assert degree7.order == 7 and degree7.fn is L4.fn
+    assert degree7 != L4
     assert basis_by_name('ADegree7Basis') is degree7
 
 
 def test_a_malformed_basis_fails_where_it_is_defined():
     """The checks that used to be implicit in "the mesh looked wrong"."""
     with pytest.raises(ValueError, match="weight names"):
-        replace(L1Basis, name='TooFewWeights', weights=('x0',))
+        replace(L1, name='TooFewWeights', weights=('x0',))
     with pytest.raises(ValueError, match="deriv\\[0\\] must be fn"):
-        replace(L1Basis, name='WrongDeriv', deriv=(L2Basis.fn,))
+        replace(L1, name='WrongDeriv', deriv=(L2.fn,))
 
 
 def test_a_name_may_not_be_reused_for_a_different_basis():
     """Names are the serialisation key; two meanings would corrupt a load."""
     with pytest.raises(ValueError, match="already registered"):
-        replace(L1Basis, name='H3Basis')
+        replace(L1, name='H3')
 
 
 def test_a_group_rejects_anything_that_is_not_a_basis():
-    with pytest.raises(TypeError, match="pass H3Basis, not H3Basis"):
-        BasisGroup([H3Basis, 'H3Basis'])
+    with pytest.raises(TypeError, match="pass H3, not H3"):
+        BasisGroup([H3, 'H3'])

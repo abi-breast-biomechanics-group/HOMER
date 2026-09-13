@@ -35,7 +35,7 @@ def _basis_node_fractions(basis: Basis, max_denominator: int = MAX_XI_DENOMINATO
 
     ``node_locs`` are fixed constants of the basis, so the snap to a rational is exact
     in intent.  Note that they are not required to lie inside ``[0, 1]``:
-    :class:`~HOMER.basis_definitions.B3Basis` places its shared control points
+    :class:`~HOMER.basis_definitions.B3` places its shared control points
     at ``[-1, 0, 1, 2]``.
     """
     return [Fraction(float(loc)).limit_denominator(max_denominator) for loc in basis.node_locs]
@@ -139,15 +139,35 @@ def _parent_node_map(old_field: 'MeshField', old_bases, new_bases, new_ele_nodes
     return parent_of_new
 
 
-def _transfer_fixed_params(old_nodes, new_nodes, parent_of_new: np.ndarray, interpolatory: bool) -> tuple[int, int, int]:
+def _hold_pinned_locations(old_nodes, new_nodes, parent_of_new: np.ndarray) -> None:
+    """Pin the coincident new nodes to their old locations, before the fit runs.
+
+    A ``loc`` constraint on an interpolatory basis is the one kind whose value
+    is known ahead of the least-squares solve, so it is the one kind the solve
+    can honour: the landmark is held and the parameters around it are fitted
+    to the best they can be given it.  Everything else -- derivative
+    constraints, whose magnitude is element-scale dependent (a refined
+    element's ``du`` is legitimately the parent's divided by the refinement
+    factor), and ``loc`` on a control net, where the node is not on the
+    surface -- takes the value the fit produces, so :func:`_transfer_fixed_params`
+    flags it afterwards.
+    """
+    for new_index, old_index in enumerate(parent_of_new):
+        if old_index < 0:
+            continue
+        inds = np.asarray(old_nodes[old_index].fixed_params.get('loc', []), dtype=int)
+        if inds.size == 0:
+            continue
+        new_nodes[new_index].fix_parameter('loc', values=np.asarray(old_nodes[old_index].loc)[inds],
+                                           inds=inds)
+
+
+def _transfer_fixed_params(old_nodes, new_nodes, parent_of_new: np.ndarray) -> tuple[int, int, int]:
     """Carry :attr:`MeshNode.fixed_params` across to the coincident new nodes.
 
-    ``loc`` constraints are re-asserted with the original value for
-    interpolatory bases, so a pinned landmark survives the least-squares fit
-    exactly.  Derivative constraints keep their fitted value, because their
-    magnitude is element-scale dependent (a refined element's ``du`` is
-    legitimately the parent's divided by the refinement factor).  For a
-    control-net basis no value is restored at all - only the flag.
+    The flags only: a pinned location was already held through the fit by
+    :func:`_hold_pinned_locations`, and every other constraint is asserted at
+    whatever value the fit gave it.
 
     :returns:
         tuple
@@ -171,14 +191,10 @@ def _transfer_fixed_params(old_nodes, new_nodes, parent_of_new: np.ndarray, inte
             inds = np.asarray(inds, dtype=int)
             if inds.size == 0:
                 continue
-            if param == 'loc':
-                values = np.asarray(old_node.loc)[inds] if interpolatory else None
-                new_node.fix_parameter('loc', values=values, inds=inds)
-            elif param in new_node:
-                new_node.fix_parameter(param, inds=inds)
-            else:
+            if param != 'loc' and param not in new_node:
                 dropped += 1 #the new basis carries no such derivative
                 continue
+            new_node.fix_parameter(param, inds=inds)
             transferred += 1
 
     unmatched = sum(1 for i, node in enumerate(old_nodes) if node.fixed_params and i not in matched_old)
@@ -228,10 +244,10 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
     :param preserve_fixed_params:
         When ``True`` (default), any node of the refined mesh that sits
         exactly on an existing node inherits that node's
-        :attr:`MeshNode.fixed_params`.  Fixed ``loc`` values are restored
-        verbatim for interpolatory bases so pinned landmarks do not drift
-        with the fit; constraints with no counterpart in the refined mesh
-        are dropped and reported.
+        :attr:`MeshNode.fixed_params`.  For an interpolatory basis a pinned
+        ``loc`` is held *through* the fit, so the landmark keeps its value
+        exactly and the rest of the mesh is fitted around it; constraints
+        with no counterpart in the refined mesh are dropped and reported.
     :param reorder_nodes:
         Refinement rebuilds the node list, and the order it falls out in is
         an artefact of the sub-element sweep.  When ``True`` (default) the
@@ -299,20 +315,25 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
 
     targets = self.evaluate_embeddings_ele_xi_pair(old_eles, old_xis)
 
-    weights, columns = new_mesh.get_xi_weight_blocks(new_eles, new_xi)
-    new_mesh.linear_fit(targets, weights, sparse_columns=columns)
-
     #must happen while self still holds the old nodes.  Both the constraint
     #transfer and the reordering are answering the same question - which old
-    #node is this new node - so the map is built once for whichever wants it.
+    #node is this new node - so the map is built once for whichever wants it,
+    #and before the fit, which is what the pinned locations constrain.
     parent_of_new = None
     n_old = len(self.nodes)
+    interpolatory = basis.interpolatory
     if preserve_fixed_params or resolve_strategy(reorder_nodes) is not None:
         parent_of_new = _parent_node_map(self, basis, basis, ele_indexes, parent_connectivity,
                                          refinement_factor, f_xi_locs, len(new_mesh.nodes))
+    if preserve_fixed_params and interpolatory:
+        _hold_pinned_locations(self.nodes, new_mesh.nodes, parent_of_new)
+        new_mesh.generate_mesh()
+
+    weights, columns = new_mesh.get_xi_weight_blocks(new_eles, new_xi)
+    new_mesh.linear_fit(targets, weights, sparse_columns=columns)
+
     if preserve_fixed_params:
-        interpolatory = basis.interpolatory
-        stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new, interpolatory)
+        stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new)
         _report_fixed_param_transfer('refine', stats, interpolatory)
 
     self.elements = new_mesh.elements
@@ -337,8 +358,8 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
     Constructs a new :class:`MeshField` with *new_basis*, sampling the
     current mesh on a dense xi grid and linearly fitting the new nodal
     parameters to match the sampled geometry.  This allows, for example,
-    converting a trilinear (``L1Basis``) mesh into a cubic-Hermite
-    (``H3Basis``) mesh without losing the shape.
+    converting a trilinear (``L1``) mesh into a cubic-Hermite
+    (``H3``) mesh without losing the shape.
 
     The three-step algorithm is:
 
@@ -352,7 +373,7 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
 
     :param new_basis:
         The new 1-D bases, one per parametric direction; a
-        :class:`~HOMER.basis_definitions.BasisGroup` such as ``H3Basis * 3``,
+        :class:`~HOMER.basis_definitions.BasisGroup` such as ``H3 * 3``,
         or any list or tuple of bases.
     :param in_place:
         When ``True``, replace this field's nodes and elements with the
@@ -363,8 +384,9 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
     :param preserve_fixed_params:
         When ``True`` (default), a node of the rebased mesh that sits
         exactly on an existing node inherits that node's
-        :attr:`MeshNode.fixed_params`.  Only parameters that exist in both
-        bases carry across - rebasing H3 to L1 necessarily drops the
+        :attr:`MeshNode.fixed_params`, and a pinned ``loc`` is held through
+        the fit when both bases are interpolatory.  Only parameters that exist
+        in both bases carry across - rebasing H3 to L1 necessarily drops the
         derivative constraints - and the dropped ones are reported.
     :param reorder_nodes:
         A rebase rebuilds the node list from the new basis, so the order it
@@ -408,23 +430,28 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
     egrid = self.xi_grid(res=res, boundary_points=False)
     el = (np.ones((1, res**self.ndim)) * np.arange(len(self.elements))[:, None]).flatten().astype(int)
     xi = np.tile(egrid.reshape(-1, self.ndim), (len(self.elements), 1))
-    weights, columns = new_mesh.get_xi_weight_blocks(el, xi)
-    locs = self.evaluate_embeddings_ele_xi_pair(el, xi)
-    new_mesh.linear_fit(weight_mat=weights, targets=locs, sparse_columns=columns)
-
     #rebasing keeps the element topology, so the parent element is the element.
-    #The map serves the constraint transfer and the reordering alike.
+    #The map serves the constraint transfer and the reordering alike, and is
+    #built before the fit, which is what the pinned locations constrain.
     parent_of_new = None
     old_basis = self.elements[0].basis_functions
+    interpolatory = old_basis.interpolatory and new_basis.interpolatory
     if preserve_fixed_params or resolve_strategy(reorder_nodes) is not None:
         parent_of_new = _parent_node_map(self, old_basis, new_basis, ele_indexes,
                                          np.zeros((len(new_elements), self.ndim), dtype=int),
                                          [1] * self.ndim,
                                          [[Fraction(0), Fraction(1)]] * self.ndim,
                                          len(new_mesh.nodes))
+    if preserve_fixed_params and interpolatory:
+        _hold_pinned_locations(self.nodes, new_mesh.nodes, parent_of_new)
+        new_mesh.generate_mesh()
+
+    weights, columns = new_mesh.get_xi_weight_blocks(el, xi)
+    locs = self.evaluate_embeddings_ele_xi_pair(el, xi)
+    new_mesh.linear_fit(weight_mat=weights, targets=locs, sparse_columns=columns)
+
     if preserve_fixed_params:
-        interpolatory = old_basis.interpolatory and new_basis.interpolatory
-        stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new, interpolatory)
+        stats = _transfer_fixed_params(self.nodes, new_mesh.nodes, parent_of_new)
         _report_fixed_param_transfer('rebase', stats, interpolatory)
 
     #a rebase keeps the element topology, so this mesh's connectivity is the

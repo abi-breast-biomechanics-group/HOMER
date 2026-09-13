@@ -12,12 +12,13 @@ import numpy as np
 import pytest
 
 from HOMER import Mesh, MeshElement, MeshField, MeshNode
-from HOMER.basis_definitions import (B3Basis, H3Basis, L1Basis, L2Basis,
-                                     L3Basis, L4Basis)
+from HOMER.basis_definitions import (B3, H3, L1, L2,
+                                     L3, L4)
 from HOMER.io import (STR_LOOKUP, dump_mesh_to_dict, dump_meshfield_to_dict,
                       load_mesh, parse_mesh_from_dict, save_mesh)
 
-from _helpers import EXACT, arr, hermite_cube, node_locs, unit_hex
+from _helpers import EXACT, arr, node_locs
+from HOMER.examples import hermite_cube, unit_hex
 
 
 def roundtrip(mesh, tmp_path, name='mesh.json'):
@@ -31,7 +32,7 @@ def unit_cube_field():
     locs = list(np.ndindex(2, 2, 2))
     nodes = [MeshNode(loc=np.array(l, dtype=float)) for l in locs]
     element = MeshElement(node_indexes=list(range(8)),
-                          basis_functions=(L1Basis, L1Basis, L1Basis))
+                          basis_functions=(L1, L1, L1))
     return Mesh(nodes=nodes, elements=element)
 
 
@@ -49,7 +50,7 @@ def test_geometry_survives_a_round_trip(tmp_path):
     np.testing.assert_allclose(node_locs(loaded), node_locs(mesh), atol=EXACT)
 
 
-@pytest.mark.parametrize("basis", [L1Basis, L2Basis, L3Basis, L4Basis, H3Basis, B3Basis],
+@pytest.mark.parametrize("basis", [L1, L2, L3, L4, H3, B3],
                          ids=lambda b: b.__name__)
 def test_every_basis_can_be_named_and_looked_up_again(basis, tmp_path):
     mesh = unit_hex(basis=[basis] * 3)
@@ -91,7 +92,7 @@ def test_an_unknown_basis_name_is_rejected():
 ############################################### constraints
 
 def test_fixed_parameters_survive_a_round_trip(tmp_path):
-    mesh = unit_hex(basis=[H3Basis] * 3)
+    mesh = unit_hex(basis=[H3] * 3)
     mesh.nodes[0].fix_parameter('loc', inds=[2])
     mesh.nodes[3].fix_parameter(['loc', 'du'])
     mesh.generate_mesh()
@@ -114,7 +115,7 @@ def test_node_and_element_ids_survive_a_round_trip(tmp_path):
     zero = np.zeros(3)
     nodes = [MeshNode(loc=np.array(l, dtype=float), du=zero, dv=zero, dudv=zero, id=i)
              for l, i in zip(locs, ids)]
-    element = MeshElement(node_ids=ids, basis_functions=(H3Basis, H3Basis), id='patch')
+    element = MeshElement(node_ids=ids, basis_functions=(H3, H3), id='patch')
     mesh = Mesh(nodes=nodes, elements=element)
 
     loaded = roundtrip(mesh, tmp_path)
@@ -130,7 +131,7 @@ def test_an_element_referencing_nodes_by_id_reloads_the_same_way(tmp_path):
     locs = [[0, 0, 1], [0, 0, 0], [0, 1, 1], [0, 1, 0]]
     nodes = [MeshNode(loc=np.array(l, dtype=float), id=i) for l, i in zip(locs, ids)]
     mesh = Mesh(nodes=nodes,
-                elements=MeshElement(node_ids=ids, basis_functions=(L1Basis, L1Basis)))
+                elements=MeshElement(node_ids=ids, basis_functions=(L1, L1)))
 
     loaded = roundtrip(mesh, tmp_path)
 
@@ -187,7 +188,7 @@ def test_dump_of_a_bare_meshfield_uses_the_legacy_shape():
     field = MeshField(nodes=[MeshNode(loc=np.array(l, dtype=float))
                              for l in np.ndindex(2, 2, 2)],
                       elements=MeshElement(node_indexes=list(range(8)),
-                                           basis_functions=(L1Basis,) * 3))
+                                           basis_functions=(L1,) * 3))
 
     payload = dump_mesh_to_dict(field)
 
@@ -195,7 +196,7 @@ def test_dump_of_a_bare_meshfield_uses_the_legacy_shape():
 
 
 def test_save_mesh_and_load_mesh_are_the_module_level_pair(tmp_path):
-    mesh = unit_hex(basis=[L2Basis] * 3)
+    mesh = unit_hex(basis=[L2] * 3)
     path = tmp_path / 'field.json'
 
     save_mesh(mesh, path)
@@ -206,17 +207,50 @@ def test_save_mesh_and_load_mesh_are_the_module_level_pair(tmp_path):
 
 def test_str_lookup_covers_every_exported_basis():
     """A basis missing from the registry cannot be loaded back."""
-    assert {'L1Basis', 'L2Basis', 'L3Basis', 'L4Basis',
-            'H3Basis', 'B3Basis'} <= set(STR_LOOKUP)
+    assert {'L1', 'L2', 'L3', 'L4',
+            'H3', 'B3'} <= set(STR_LOOKUP)
 
 
 def test_a_basis_group_round_trips_through_json(tmp_path):
     """The saved name is what rebuilds the group, direction by direction."""
     from HOMER.geometry import cube
 
-    mesh = cube(basis=H3Basis * 2 + L1Basis)
+    mesh = cube(basis=H3**2 * L1)
     path = tmp_path / 'group.json'
     save_mesh(mesh, path)
     loaded = load_mesh(path)
 
-    assert loaded.elements[0].basis_functions == H3Basis * 2 + L1Basis
+    assert loaded.elements[0].basis_functions == H3**2 * L1
+
+
+def test_a_mesh_saved_under_the_pre_1_0_basis_names_still_loads(tmp_path):
+    """The bases were renamed H3Basis -> H3; files written before that carry
+    the old key, and the registry has to keep resolving it."""
+    import json
+    from HOMER.geometry import cube
+
+    mesh = cube(basis=H3**2 * L1)
+    path = tmp_path / 'legacy.json'
+    save_mesh(mesh, path)
+
+    #new files write the short name
+    doc = json.loads(path.read_text())
+    assert doc['main']['elements']['0']['basis'] == ['H3', 'H3', 'L1']
+
+    #rewrite every basis key the way a pre-1.0 HOMER would have
+    def to_legacy(obj):
+        if isinstance(obj, dict):
+            for key, val in obj.items():
+                if key == 'basis':
+                    obj[key] = [f'{name}Basis' for name in val]
+                else:
+                    to_legacy(val)
+        elif isinstance(obj, list):
+            for val in obj:
+                to_legacy(val)
+
+    to_legacy(doc)
+    assert 'H3Basis' in json.dumps(doc)
+    path.write_text(json.dumps(doc))
+
+    assert load_mesh(path).elements[0].basis_functions == H3**2 * L1

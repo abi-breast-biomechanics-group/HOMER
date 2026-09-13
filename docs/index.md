@@ -1,3 +1,18 @@
+```python exec="true" session="index"
+import pyvista as pv
+
+from HOMER.examples import wordmark
+
+s = pv.Plotter(window_size=(2100, 900))
+wordmark().plot(s, node_size=1)
+
+# the letters lie in the z = 0 plane, so a camera down z reads them as text
+s.view_xy()
+s.camera.Dolly(2.0)
+s.reset_camera_clipping_range()
+s.show()
+```
+
 # HOMER – High Order Mesh Representations
 
 HOMER is a Python library for constructing, fitting, evaluating, and visualising
@@ -19,9 +34,9 @@ provides tools for:
 
 ## Quick Example
 
-```python
+```python exec="true" source="above" session="index"
 import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, H3Basis
+from HOMER import Mesh, MeshNode, MeshElement, H3
 
 # 1. Create four corner nodes for a flat 2-D patch
 node0 = MeshNode(loc=np.array([0., 0., 0.]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
@@ -30,7 +45,7 @@ node2 = MeshNode(loc=np.array([0., 1., 0.]), du=np.zeros(3), dv=np.zeros(3), dud
 node3 = MeshNode(loc=np.array([1., 1., 0.]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 
 # 2. Link the nodes through a bicubic-Hermite element
-element = MeshElement(node_indexes=[0, 1, 2, 3], basis_functions=H3Basis * 2)
+element = MeshElement(node_indexes=[0, 1, 2, 3], basis_functions=H3 * 2)
 
 # 3. Create the mesh
 mesh = Mesh(nodes=[node0, node1, node2, node3], elements=element)
@@ -43,6 +58,10 @@ pts = mesh.evaluate_embeddings_in_every_element(xis)  # (100, 3)
 mesh.plot()
 ```
 
+While the hexagonal lattice is stylistically HOMER, it also shows the xi spacing of the created mesh.
+As we created a Hermite mesh with 'degenerate' 0 node derivatives, the grid is not even over the surface of the mesh!
+As a result, it is often better to use the `cube()` geometry object. 
+
 ---
 
 ## Getting Started
@@ -52,7 +71,7 @@ mesh.plot()
 A conda environment is recommended:
 
 ```bash
-conda create --name HOMER python=3.13
+conda create --name HOMER "python=3.13"
 conda activate HOMER
 ```
 
@@ -79,8 +98,16 @@ pip install -e ".[docs]"   # mkdocs, mkdocstrings
 
 ### Troubleshooting
 
-**JAX installs but runs on the CPU.** `pip install jax` gives you the CPU
-build. For GPU or TPU you need the matching accelerator wheel from the
+**JAX installs but runs on the CPU.** 
+
+Nothing in HOMER is CPU-specific — evaluation, fitting and embedding are
+ordinary JAX, and they run wherever JAX does — but the CPU build is what
+the test suite, the benchmarks and every example in these guides are run
+against, and what the defaults are tuned for.  Treat an accelerator
+backend as untested rather than unsupported.
+
+`pip install jax` gives you the CPU build. For GPU or TPU you need the matching
+accelerator wheel from the
 [JAX install guide](https://docs.jax.dev/en/latest/installation.html);
 HOMER does not pin one, because the right wheel depends on your CUDA version.
 Check what you got with:
@@ -144,14 +171,14 @@ suite uses those two tolerances throughout.
 
 | Class | Type | Nodes/dir | Continuity | Node fields |
 |---|---|---|---|---|
-| `H3Basis` | Cubic Hermite | 2 | C¹ | `du`, `dv`, … |
-| `L1Basis` | Linear Lagrange | 2 | C⁰ | – |
-| `L2Basis` | Quadratic Lagrange | 3 | C⁰ | – |
-| `L3Basis` | Cubic Lagrange | 4 | C⁰ | – |
-| `L4Basis` | Quartic Lagrange | 5 | C⁰ | – |
-| `B3Basis` | Cubic B-spline | 4 control points | C² | – |
+| `H3` | Cubic Hermite | 2 | C¹ | `du`, `dv`, … |
+| `L1` | Linear Lagrange | 2 | C⁰ | – |
+| `L2` | Quadratic Lagrange | 3 | C⁰ | – |
+| `L3` | Cubic Lagrange | 4 | C⁰ | – |
+| `L4` | Quartic Lagrange | 5 | C⁰ | – |
+| `B3` | Cubic B-spline | 4 control points | C² | – |
 
-`B3Basis` is not interpolatory: its parameters are control points shared with
+`B3` is not interpolatory: its parameters are control points shared with
 the neighbouring elements, so they do not lie on the curve.
 
 ---
@@ -162,7 +189,7 @@ The core workflow demonstrated in the test suite is:
 
 1. **Create nodes** – instantiate `MeshNode` objects with physical coordinates
    and (for Hermite bases) derivative vectors.
-2. **Create elements** – combine nodes with a group of bases, e.g. `H3Basis * 3`.
+2. **Create elements** – combine nodes with a group of bases, e.g. `H3 * 3`.
 3. **Build the mesh** – pass nodes and elements to `Mesh(...)`.
 4. **Evaluate** – call `evaluate_embeddings()`, `evaluate_jacobians()`, etc.
 5. **Fit** – use `linear_fit()` or `point_cloud_fit()` to update node parameters.

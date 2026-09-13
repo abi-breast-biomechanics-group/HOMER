@@ -22,7 +22,7 @@ class MeshNode(dict):
     :class:`numpy.ndarray` objects of the same length as ``loc``.
 
     For a 2-D manifold mesh with cubic-Hermite basis in both directions
-    (``H3Basis``, ``H3Basis``), each node must carry ``du``, ``dv``, and
+    (``H3``, ``H3``), each node must carry ``du``, ``dv``, and
     ``dudv`` derivatives::
 
         node = MeshNode(
@@ -32,7 +32,7 @@ class MeshNode(dict):
             dudv=np.zeros(3),
         )
 
-    For a 3-D volume mesh with ``H3Basis`` in all three directions, the
+    For a 3-D volume mesh with ``H3`` in all three directions, the
     additional derivatives ``dw``, ``dudw``, ``dvdw``, and ``dudvdw`` are
     also required::
 
@@ -127,10 +127,15 @@ class MeshNode(dict):
                 self.fixed_params[param] = inds
 
             if values[idp] is not None:
+                #promote before assigning: storing a float value into an
+                #integer array truncates it silently
+                current = self.loc if param == 'loc' else self[param]
+                promoted = current.astype(np.result_type(current, np.asarray(values[idp])))
+                promoted[inds] = values[idp]
                 if param == 'loc':
-                    self.loc[inds] = values[idp]
+                    self.loc = promoted
                 else:
-                    self[param][inds] = values[idp]
+                    self[param] = promoted
 
     def get_optimisability_arr(self):
         """
