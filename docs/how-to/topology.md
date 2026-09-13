@@ -33,16 +33,58 @@ After `generate_mesh()`, the following topology attributes are available:
 
 ## Accessing External Faces
 
-```python
+```python exec="true" source="above" session="topology"
+import numpy as np
+
+from HOMER import L1
+from HOMER.geometry import cube
+
+# a 2x2x2 block of trilinear elements, as tests/test_topology.py builds it
+mesh = cube(scale=1, centre=np.zeros(3), basis=L1**3)
+mesh.refine(2)
+mesh.plot()
+
 # All external faces of a 3-D mesh
 faces = mesh.get_faces()
 # Each face is a tuple: (elem_index, parametric_dim, 0_or_1)
 # (elem_index, -1, -1) indicates a 2-D manifold element
 
-for face in faces:
+print(f"{len(faces)} external faces")
+for face in faces[:4]:
     elem_id, dim, side = face
     print(f"Element {elem_id}, face at xi_{dim} = {side}")
 ```
+
+---
+
+## Selecting the Nodes on One Boundary
+
+`get_xi_surface_nodes(xi_dim, bound_val)` asks the same question the other way
+round: which elements have *no* neighbour at one end of one parametric
+direction, and which nodes have basis support on the face they expose.  That is
+the selection you want for a boundary condition, a fit that is free to move
+only on one surface, or a landmark set.
+
+It reads the answer off the topology and the 1-D basis rather than off the
+coordinates, so it is exact on a deformed mesh and picks up a B-spline's
+off-surface control points as well as an interpolatory basis's face nodes.
+
+```python exec="true" source="above" session="topology"
+import pyvista as pv
+
+# the xi_0 = 1 boundary of the block
+face_elements, face_nodes = mesh.get_xi_surface_nodes(0, 1)
+print(f"{len(face_elements)} elements expose it, across {len(face_nodes)} nodes")
+
+s = pv.Plotter()
+mesh.plot(s, node_size=4)                    # every node, drawn small
+s.add_points(np.array([mesh.nodes[i].loc for i in face_nodes]),
+             color='b', point_size=10, render_points_as_spheres=True)
+s.show()
+```
+
+The blue spheres are the selected layer; the small red markers are every other
+node of the mesh.
 
 ---
 
@@ -50,13 +92,14 @@ for face in faces:
 
 The `topomap` function is a JAX-JIT-compiled function:
 
-```python
+```python exec="true" source="above" session="topology"
 import jax.numpy as jnp
 
 elem = jnp.array(0)
 xi   = jnp.array([1.05, 0.5, 0.5])  # slightly outside element 0
 
 new_elem, new_xi, valid = mesh.topomap(elem, xi)
+print(f"elem {elem} xi {xi} -> elem {new_elem} xi {new_xi} (valid={valid})")
 # new_elem: the neighbouring element
 # new_xi:   xi mapped into the neighbour's parameter space
 # valid:    True if a valid neighbour was found
@@ -68,10 +111,11 @@ new_elem, new_xi, valid = mesh.topomap(elem, xi)
 
 `bmap` is a dictionary mapping element face identifiers to their neighbours:
 
-```python
+```python exec="true" source="above" session="topology"
 # Key: (element_index, parametric_dim, side)
 # Value: [(neighbour_index, dim, side), rel_dirs_bool_array]
-for key, (neighbour, rel_dirs) in mesh.bmap.items():
+print(f"{len(mesh.bmap)} internal faces")
+for key, (neighbour, rel_dirs) in list(mesh.bmap.items())[:4]:
     elem, dim, side = key
     n_elem, n_dim, n_side = neighbour
     print(f"Elem {elem} face (dim={dim}, side={side}) "

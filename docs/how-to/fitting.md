@@ -17,12 +17,25 @@ while still automatically defining the Jacobian.
 Use this when you can compute (or embed) the xi coordinates in advance and
 only need to update nodal values.
 
-```python
-import numpy as np
-from HOMER import Mesh, MeshNode, MeshElement, H3
+```python exec="true" source="above" session="fitting"
+from copy import deepcopy
 
-# 1. Assume you have a mesh and some target points
-mesh = ...   # your MeshField or Mesh
+import numpy as np
+import pyvista as pv
+
+from HOMER import L3
+from HOMER.examples import bulged_patch
+from HOMER.geometry import basic_surface
+
+# 1. A curved target and a flat cubic mesh to pull onto it, as
+#    tests/test_fitting.py fits them: both refined from one quad, so element
+#    k of each covers the same parametric patch
+target_mesh = bulged_patch()
+target_mesh.refine(2)
+
+mesh = basic_surface(basis=L3**2)
+mesh.refine(2)
+before = deepcopy(mesh)
 
 res = 5
 xis = mesh.xi_grid(res)
@@ -31,14 +44,28 @@ xis_tiled = np.tile(xis, (4, 1))
 elem_ids = np.repeat(np.arange(4), res**2)
 
 # 2. Sample target geometry at those (elem, xi) locations
-target_pts = target_mesh.evaluate_embeddings_ele_xi_pair(elem_ids, xis_tiled)
+target_pts = np.asarray(target_mesh.evaluate_embeddings_ele_xi_pair(elem_ids, xis_tiled))
 
 # 3. Build the weight matrix
 W = mesh.get_xi_weight_mat(elem_ids, xis_tiled)
 
 # 4. Solve the linear system in-place
 mesh.linear_fit(target_pts, weight_mat=W)
+
+def with_targets(scene):
+    scene.add_points(target_pts, color='b', point_size=3,
+                     render_points_as_spheres=True)
+
+s = pv.Plotter(shape=(1, 2))
+s.subplot(0, 0); before.plot(s); with_targets(s)
+s.subplot(0, 1); mesh.plot(s, node_colour='g'); with_targets(s)
+s.link_views()
+s.show()
 ```
+
+The blue points are the targets, drawn into both views so the fit is read
+against the same data it was given, and `link_views()` keeps the two cameras
+together as the scene is turned.
 
 !!! note
     `linear_fit` needs at least as many points as the system has *free*
@@ -54,7 +81,7 @@ values.  They are a known contribution to the targets, so the solve moves them
 to the right-hand side and fits only the free columns -- the constrained
 minimiser, not an unconstrained fit that overwrites the constraint afterwards:
 
-```python
+```python exec="true" source="above" session="fitting"
 mesh.nodes[0].fix_parameter('loc')          # this corner stays where it is
 mesh.nodes[4].fix_parameter('loc', inds=[2])  # this one only holds its z
 mesh.generate_mesh()
@@ -85,29 +112,47 @@ comes out of JAX rather than a finite difference.  Use it -- or the same three
 steps written out for your own cost -- when you want to optimise node positions
 (and optionally derivative vectors) to best match an unstructured point cloud.
 
-```python
+```python exec="true" source="above" session="fitting"
+from HOMER import H3
 from HOMER.fitting import point_cloud_fit
 from scipy.optimize import least_squares
 
-# 1. Optionally fix some nodes to prevent the mesh from drifting
-mesh.get_node('corner').fix_parameter('loc')
+# 1. The target as an unstructured cloud, and a flat Hermite patch to fit
+cloud = bulged_patch()
+cloud_grid = cloud.xi_grid(20)
+target_cloud = np.asarray(cloud.evaluate_embeddings_ele_xi_pair(
+    np.zeros(len(cloud_grid), int), cloud_grid))
+
+fit_mesh = basic_surface(basis=H3**2)
+start = np.asarray(fit_mesh.optimisable_param_array)
+flat = deepcopy(fit_mesh)
 
 # 2. Build the cost function and Jacobian
 fitting_fn, jac_fn = point_cloud_fit(
-    mesh, target_pts, sob_weight=0.01
+    fit_mesh, target_cloud, sob_weight=0.0, compile=True
 )
 
 # 3. Run the optimiser
-result = least_squares(
-    fitting_fn,
-    mesh.optimisable_param_array.copy(),
-    jac=jac_fn,
-    verbose=2,
-)
+result = least_squares(fitting_fn, start, jac=jac_fn, max_nfev=60)
 
 # 4. Apply the optimised parameters
-mesh.update_from_params(result.x)
+fit_mesh.update_from_params(result.x)
+
+def with_cloud(scene):
+    scene.add_points(target_cloud, color='b', point_size=2,
+                     render_points_as_spheres=True)
+
+s = pv.Plotter(shape=(1, 2))
+s.subplot(0, 0); flat.plot(s); with_cloud(s)
+s.subplot(0, 1); fit_mesh.plot(s, node_colour='g'); with_cloud(s)
+s.link_views()
+s.show()
 ```
+
+The flat patch it started from is on the left and the fitted one on the right,
+against the same cloud.  Only the four corner nodes moved: what pulls the
+interior onto the curve is the Hermite tangents, which are parameters of those
+same four nodes.
 
 ### Sobolev Regularisation
 
@@ -115,8 +160,8 @@ The `sob_weight` parameter adds a Sobolev smoothness term that penalises
 high curvature in the mesh surface.  Increase it if the mesh develops
 wrinkles:
 
-```python
-fitting_fn, jac_fn = point_cloud_fit(mesh, pts, sob_weight=0.1)
+```python exec="true" source="above" session="fitting"
+fitting_fn, jac_fn = point_cloud_fit(fit_mesh, target_cloud, sob_weight=0.1)
 ```
 
 The term itself is `mesh.evaluate_sobolev()`, which evaluates every non-trivial
@@ -136,11 +181,15 @@ in the shape `scipy.optimize.least_squares` expects.  Nothing about the cost
 has to be a built-in fit -- deform the mesh, evaluate a secondary field, embed
 points, compose the lot, and the derivative still follows.
 
-```python
+```python exec="true" source="above" session="fitting"
+import jax.numpy as jnp
+
 from HOMER import jacobian
 
+elements, xis = elem_ids, xis_tiled
+
 def cost(params):
-    pts = mesh.evaluate_embeddings(elements, xis, fit_params=params)
+    pts = mesh.evaluate_embeddings_ele_xi_pair(elements, xis, fit_params=params)
     return jnp.ravel(pts - target_pts)
 
 fitting_fn, jac_fn = jacobian(cost, init_estimate=mesh.optimisable_param_array)
@@ -167,10 +216,29 @@ A mesh already knows its sparsity pattern -- it is the element-to-node map (see
 [Topology mapping](topology.md)).  `get_colouring_dict` turns that into a
 colouring, grouping parameters that can never influence the same output:
 
-```python
-colours, seed_values, seed_indices = mesh.get_colouring_dict(
+```python exec="true" source="above" session="fitting"
+from HOMER import L1
+from HOMER.geometry import cube
+
+coloured = cube(basis=L1**3)
+coloured.refine(4)
+
+colours, seed_values, seed_indices = coloured.get_colouring_dict(
     fields_seperable=True, seed_matrix=True)
 n_colours = max(colours.values()) + 1
+print(f"{n_colours} colours over {len(colours)} parameters")
+```
+
+Drawn on the mesh it is the pattern you would guess: a trilinear node's
+parameters reach the eight elements around it, so the colouring is the
+eight-way checkerboard that lets every node be perturbed alongside its
+next-but-one neighbours.  Each node carries its `x`, `y` and `z` parameter
+consecutively, so the node's own colour is the one its first parameter got.
+
+```python exec="true" source="above" session="fitting"
+node_colours = np.array([colours[3 * i] for i in range(len(coloured.nodes))])
+coloured.plot(node_colour=node_colours, node_size=25,
+              node_col_scalar_name='colour')
 ```
 
 `fields_seperable=True` treats each component of a vector field as its own
@@ -188,11 +256,17 @@ index, so dividing one by the other says which column each value came from.
 
 `make_jac_for_mesh_func` is that loop, wrapped:
 
-```python
+```python exec="true" source="above" session="fitting"
 from HOMER import make_jac_for_mesh_func, make_static_jac_for_mesh_func
+
+params = np.asarray(mesh.optimisable_param_array)
+
+def residual(params):
+    return cost(params)
 
 jac_fn = make_jac_for_mesh_func(mesh, residual, fields_seperable=True)
 jac = jac_fn(params)          # BCOO, (n_residuals, n_parameters)
+print(jac.shape, jac.nse, "non-zeros")
 ```
 
 Because the indices are decoded on every call, the *pattern* is free to move
@@ -207,7 +281,9 @@ Pass `approx_jac=True` to `embed_points` for this.  It holds each point at the
 each residual component dependent on only the matching field component --
 i.e. what makes `fields_seperable=True` true:
 
-```python
+```python exec="true" source="above" session="fitting"
+points = np.asarray(target_pts)
+
 def residual(params):
     return mesh.embed_points(points, fit_params=params, return_residual=True,
                              approx_jac=True)[1].flatten()
@@ -229,8 +305,10 @@ never moves, and decoding it on every call is half the work done twice.
 `make_static_jac_for_mesh_func` decodes once at a starting estimate, keeps the
 indices, and leaves one `jvp` per colour to do per call:
 
-```python
-jac_fn = make_static_jac_for_mesh_func(mesh, residual, p_start,
+```python exec="true" source="above" session="fitting"
+p_start = np.asarray(mesh.optimisable_param_array)
+
+jac_fn = make_static_jac_for_mesh_func(mesh, cost, p_start,
                                        fields_seperable=True)
 ```
 
@@ -244,9 +322,11 @@ version.
 Both return a `BCOO`.  `scipy.optimize.least_squares` wants a SciPy matrix, so
 convert on the way out:
 
-```python
+```python exec="true" source="above" session="fitting"
+import scipy.sparse
+
 jac = jac_fn(params)
-scipy.sparse.coo_array((jac.data, jac.indices.T), shape=jac.shape)
+sparse_jac = scipy.sparse.coo_array((jac.data, jac.indices.T), shape=jac.shape)
 ```
 
 ---
@@ -304,7 +384,7 @@ the bare operator.
 `MeshNode.fix_parameter()` excludes specific degrees of freedom from
 optimisation.  This is useful for anchoring corners or enforcing symmetry:
 
-```python
+```python exec="true" source="above" session="fitting"
 # Fix the full location of node at index 0
 mesh.nodes[0].fix_parameter('loc')
 
@@ -320,7 +400,7 @@ mesh.generate_mesh()
 
 To remove all fixed parameters:
 
-```python
+```python exec="true" source="above" session="fitting"
 mesh.unfix_mesh()
 ```
 
@@ -332,3 +412,42 @@ on other functions or parameters.
 Both fitting pathways read that same subset: the nonlinear one optimises
 `optimisable_param_array` directly, and `linear_fit` solves for the columns it
 selects.
+
+### A Constrained Fit
+
+Nothing else changes: pin what must not move, regenerate, and hand the same
+optimiser the shorter parameter vector.  Here the patch of the nonlinear fit
+above is refitted with one corner nailed down.
+
+```python exec="true" source="above" session="fitting"
+pinned = basic_surface(basis=H3**2)
+
+# pin the corner somewhere the fit would never have put it, so the constraint
+# is visible rather than merely asserted
+anchor = pinned.nodes[0].loc + np.array([0.4, 0., -0.3])
+pinned.nodes[0].fix_parameter('loc', values=anchor)
+pinned.generate_mesh()
+
+fitting_fn, jac_fn = point_cloud_fit(pinned, target_cloud, sob_weight=0.0,
+                                     compile=True)
+result = least_squares(fitting_fn, np.asarray(pinned.optimisable_param_array),
+                       jac=jac_fn, max_nfev=60)
+pinned.update_from_params(result.x)
+
+print(f"free parameters: {len(fit_mesh.optimisable_param_array)}"
+      f" -> {len(pinned.optimisable_param_array)}")
+print("anchor held exactly:", np.array_equal(pinned.nodes[0].loc, anchor))
+```
+
+The free fit is on the left and the constrained one on the right.  The pinned
+corner is pulled well clear of the cloud and stays exactly there, while the
+rest of the patch does the best it can around it — the constrained minimiser,
+not a free fit with the constraint stamped back on afterwards.
+
+```python exec="true" source="above" session="fitting"
+s = pv.Plotter(shape=(1, 2))
+s.subplot(0, 0); fit_mesh.plot(s); with_cloud(s)
+s.subplot(0, 1); pinned.plot(s, node_colour='g'); with_cloud(s)
+s.link_views()
+s.show()
+```

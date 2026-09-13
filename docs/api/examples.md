@@ -1,0 +1,3 @@
+# API – examples
+
+::: HOMER.examples

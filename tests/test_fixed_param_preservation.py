@@ -16,7 +16,8 @@ from HOMER.mesh import Mesh, MeshField, MeshNode, MeshElement
 from HOMER.basis_definitions import H3, L1, L2, L3, B3
 from HOMER.geometry import basic_surface, cube
 
-from _helpers import arr, bulged_patch
+from _helpers import arr
+from HOMER.examples import bulged_patch
 
 
 def node_at(mesh, loc, tol=1e-4):

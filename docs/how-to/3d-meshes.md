@@ -11,15 +11,20 @@ A tri-cubic-Hermite volume mesh requires 8 corner nodes, each carrying seven
 derivative vectors.
 HOMER uses the lexicographical ordering of mesh nodes within each element.
 
-```python
+The corners at `x = 1` are pulled in to 0.8 of their position, so the block is
+tapered rather than a cube — that taper is what makes it recognisable when the
+same nodes are read through a different basis further down the page.
+
+```python exec="true" source="above" session="3d-meshes"
 import numpy as np
 from HOMER import Mesh, MeshNode, MeshElement, H3
 
-# Eight corner nodes of a unit cube
+# Eight corner nodes of a tapered block
 # Every node needs: du, dv, dw, dudv, dudw, dvdw, dudvdw
 def corner_node(loc, dw):
+    taper = 0.8 if loc[0] == 1 else 1.0
     return MeshNode(
-        loc=np.array(loc), 
+        loc=np.array(loc) * taper,
         du=np.zeros(3), dv=np.zeros(3), dw=np.array(dw),
         dudv=np.zeros(3), dudw=np.zeros(3),
         dvdw=np.zeros(3), dudvdw=np.zeros(3),
@@ -36,10 +41,7 @@ nodes = [
     corner_node([1,1,0], [1, 0.5,-0.5]),
 ]
 
-element = MeshElement(
-    node_indexes=[0, 1, 2, 3, 4, 5, 6, 7],
-    basis_functions=(H3, H3, H3),
-)
+element = MeshElement(node_indexes=list(range(8)), basis_functions=H3**3)
 
 mesh = Mesh(nodes=nodes, elements=element)
 mesh.plot()
@@ -52,14 +54,17 @@ mesh.plot()
 Use `L1` in the *w* direction for a mesh that is linear along one axis
 but smooth in the other two:
 
-```python
+```python exec="true" source="above" session="3d-meshes"
 from HOMER import L1
 
-element = MeshElement(
-    node_indexes=[0, 1, 2, 3, 4, 5, 6, 7],
-    basis_functions=H3**2 * L1,
-)
+element = MeshElement(node_indexes=list(range(8)), basis_functions=H3**2 * L1)
+
+Mesh(nodes=nodes, elements=element).plot()
 ```
+
+Same eight nodes, same taper: only the *w* direction has changed.  The `dw`
+tangents that bowed the vertical edges outwards above are simply not read by
+`L1`, so those edges come back straight.
 
 !!! note
     Nodes used with `L1` in a given direction do **not** need a derivative field.
@@ -76,19 +81,19 @@ pyramid shapes:
 With node indices running `xi_0` fastest, then `xi_1`, then `xi_2`, repeating
 an index collapses that part of the element:
 
-```python
+```python exec="true" source="above" session="3d-meshes"
 # Fully collapsed in w: the top face repeats the bottom face, so the
 # element has four distinct nodes instead of eight
-collapsed_element = MeshElement(
-    node_indexes=[0, 1, 2, 3, 0, 1, 2, 3],
-    basis_functions=(H3, H3, H3),
-)
+collapsed_element = MeshElement(node_indexes=[0, 1, 2, 3, 0, 1, 2, 3],
+                                basis_functions=H3**3)
 
 # 6-node wedge: the top face collapses to the edge (4, 5)
-wedge_element = MeshElement(
-    node_indexes=[0, 1, 2, 3, 4, 5, 4, 5],
-    basis_functions=(H3, H3, H3),
-)
+wedge_element = MeshElement(node_indexes=[0, 1, 2, 3, 4, 5, 4, 5],
+                            basis_functions=H3**3)
+
+# only the six nodes the element names -- a node no element references is an
+# orphan, carried through every parameter array for nothing
+Mesh(nodes=nodes[:6], elements=wedge_element).plot()
 ```
 
 Collapsed elements are useful for certain geometries with a shared central point.
@@ -101,26 +106,23 @@ A convenient workflow is to create a coarse `L1` × `L1` × `L1` mesh, then
 rebase it to the desired configuration (e.g. `H3`).
 This is especially useful for `H3` meshes, which otherwise have large numbers of non-zero derivatives:
 
-```python
+```python exec="true" source="above" session="3d-meshes"
 from HOMER.geometry import cube
 
 # Creates a unit-cube mesh in H3×H3×H3 automatically
 mesh = cube(scale=1.0)
 
 # Or manually:
-from HOMER import L1
-seed = Mesh(nodes=nodes, elements=MeshElement(
-    node_indexes=list(range(8)),
-    basis_functions=(L1, L1, L1),
-))
-mesh = seed.rebase([H3, H3, H3])
+seed = Mesh(nodes=nodes, elements=MeshElement(node_indexes=list(range(8)),
+                                              basis_functions=L1**3))
+mesh = seed.rebase(H3**3)
 ```
 
 ---
 
 ## Evaluating Mesh Quantities
 
-```python
+```python exec="true" source="above" session="3d-meshes"
 import numpy as np
 
 # 5×5×5 interior grid per element

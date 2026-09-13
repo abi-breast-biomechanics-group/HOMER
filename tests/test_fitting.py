@@ -24,7 +24,8 @@ from HOMER.jacobian_evaluator import (estimate_column_norms, estimate_sparsity,
                                       matrix_free_jacobian)
 from HOMER.mesh import column_equilibrated_lstsq, sparse_equilibrated_lstsq
 
-from _helpers import CLOSE, EXACT, arr, bulged_patch, unit_hex
+from _helpers import CLOSE, EXACT, arr
+from HOMER.examples import bulged_patch, unit_hex
 
 
 def dense(jac_result):

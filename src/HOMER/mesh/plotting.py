@@ -283,12 +283,16 @@ def plot(self, scene:Optional[pv.Plotter] = None,
 
     # tri_surf, tris = self.get_triangle_surface(res=res)
     hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling, fit_params=fit_params)
-    surf_mesh = pv.PolyData(hex_surf, lines)
+    #the connectivity is [2, i, j] line segments; as PolyData's positional
+    #`faces` they become two-point polygons, which VTK draws but vtk.js drops
+    surf_mesh = pv.PolyData(hex_surf, lines=lines)
 
     if isinstance(mesh_colour, np.ndarray):
         surf_mesh[mesh_col_scalar_name] = mesh_colour
     # surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
-    s.add_mesh(surf_mesh, style='wireframe', color=None if isinstance(mesh_colour, np.ndarray) else mesh_colour, opacity=mesh_opacity, name=h_tag, line_width=mesh_width, render_lines_as_tubes=True)
+    s.add_mesh(surf_mesh, 
+               # style='wireframe', 
+               color=None if isinstance(mesh_colour, np.ndarray) else mesh_colour, opacity=mesh_opacity, name=h_tag, line_width=mesh_width, render_lines_as_tubes=True)
     if labels:
         s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])], name=v_tag)
     if elem_labels:
@@ -429,8 +433,8 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
     :param draw_xyz_field:
         When ``False``, suppress drawing of the primary geometry.
     :param field_artist:
-        Custom callable ``(plotter, locs, values) → None`` for rendering
-        the secondary field.  Defaults to line segments for 3-D fields
+        Custom callable ``(plotter, locs, values, field_xi) → None`` for
+        rendering the secondary field.  Defaults to line segments for 3-D fields
         and coloured spheres for 1-D scalar fields.
     :param default_field_point_size:
         Point size used by the default scalar field artist.

@@ -56,6 +56,18 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
+      # the examples in the docs are executed and drawn as the site is built,
+      # and VTK still needs a GL context to render into
+      - uses: pyvista/setup-headless-display-action@v5
+
+      # those examples fit and refine real meshes, so the docs build pays the
+      # same XLA compile the suite does -- and benefits from the same cache
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/HOMER
+          key: jax-compile-docs-${{ github.run_id }}
+          restore-keys: jax-compile-docs-
+
       # mkdocstrings imports HOMER, so the package itself has to be installed
       - run: pip install -e ".[docs]"
 

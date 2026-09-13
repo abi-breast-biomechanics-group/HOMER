@@ -15,7 +15,8 @@ import pytest
 from HOMER.basis_definitions import H3, L1, L2
 from HOMER.geometry import basic_surface, cube
 
-from _helpers import arr, hermite_cube, node_locs, unit_hex
+from _helpers import arr, node_locs
+from HOMER.examples import hermite_cube, unit_hex
 
 
 def drawn_bounds(scene):

@@ -29,6 +29,10 @@ plugins:
             merge_init_into_class: true
             members_order: source
 
+#Executes the documentation examples and captures what they draw.
+hooks:
+  - scripts/doc_scenes.py
+
 nav:
   - Home: index.md
   - Architecture: architecture.md
@@ -43,6 +47,7 @@ nav:
     - Strain evaluation: how-to/strain.md
     - Plotting: how-to/plotting.md
     - Topology mapping: how-to/topology.md
+    - Saving and loading: how-to/io.md
     - Node indexing: how-to/node-indexing.md
   - API Reference:
     - mesh: api/mesh.md
@@ -51,6 +56,7 @@ nav:
     - fitting: api/fitting.md
     - io: api/io.md
     - geometry: api/geometry.md
+    - examples: api/examples.md
     - jacobian_evaluator: api/jacobian_evaluator.md
     - utils: api/utils.md
     - embedding: api/embedding.md

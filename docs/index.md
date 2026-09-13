@@ -1,3 +1,18 @@
+```python exec="true" session="index"
+import pyvista as pv
+
+from HOMER.examples import wordmark
+
+s = pv.Plotter(window_size=(2100, 900))
+wordmark().plot(s, node_size=1)
+
+# the letters lie in the z = 0 plane, so a camera down z reads them as text
+s.view_xy()
+s.camera.Dolly(2.0)
+s.reset_camera_clipping_range()
+s.show()
+```
+
 # HOMER – High Order Mesh Representations
 
 HOMER is a Python library for constructing, fitting, evaluating, and visualising
@@ -19,7 +34,7 @@ provides tools for:
 
 ## Quick Example
 
-```python
+```python exec="true" source="above" session="index"
 import numpy as np
 from HOMER import Mesh, MeshNode, MeshElement, H3
 
@@ -43,6 +58,10 @@ pts = mesh.evaluate_embeddings_in_every_element(xis)  # (100, 3)
 mesh.plot()
 ```
 
+While the hexagonal lattice is stylistically HOMER, it also shows the xi spacing of the created mesh.
+As we created a Hermite mesh with 'degenerate' 0 node derivatives, the grid is not even over the surface of the mesh!
+As a result, it is often better to use the `cube()` geometry object. 
+
 ---
 
 ## Getting Started
@@ -52,7 +71,7 @@ mesh.plot()
 A conda environment is recommended:
 
 ```bash
-conda create --name HOMER python=3.13
+conda create --name HOMER "python=3.13"
 conda activate HOMER
 ```
 
@@ -79,8 +98,16 @@ pip install -e ".[docs]"   # mkdocs, mkdocstrings
 
 ### Troubleshooting
 
-**JAX installs but runs on the CPU.** `pip install jax` gives you the CPU
-build. For GPU or TPU you need the matching accelerator wheel from the
+**JAX installs but runs on the CPU.** 
+
+Nothing in HOMER is CPU-specific — evaluation, fitting and embedding are
+ordinary JAX, and they run wherever JAX does — but the CPU build is what
+the test suite, the benchmarks and every example in these guides are run
+against, and what the defaults are tuned for.  Treat an accelerator
+backend as untested rather than unsupported.
+
+`pip install jax` gives you the CPU build. For GPU or TPU you need the matching
+accelerator wheel from the
 [JAX install guide](https://docs.jax.dev/en/latest/installation.html);
 HOMER does not pin one, because the right wheel depends on your CUDA version.
 Check what you got with:

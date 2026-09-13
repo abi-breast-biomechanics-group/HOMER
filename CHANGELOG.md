@@ -4,6 +4,17 @@ Notable changes to HOMER.
 
 ## Unreleased
 
+### Added
+- `HOMER.examples`, the example meshes the documentation and the test suite
+  share: `bulged_patch`, `hermite_cube`, `unit_hex`, and `wordmark`, the
+  library's own name written as a mesh.  The first three were private to the
+  suite (`tests/_helpers.py`); making them public means a page that shows a
+  mesh and the test that asserts on it cannot drift apart.
+- The documentation examples are executed while the site is built and whatever
+  they draw is embedded as an interactive vtk.js scene, so every example on
+  every page carries the picture it produces.  A broken example now fails
+  `mkdocs build --strict`, which makes the docs a second test suite.
+
 ### Changed
 - `linear_fit` respects fixed parameters.  Parameters pinned with
   `MeshNode.fix_parameter` are held at their current values and moved to the
@@ -24,6 +35,12 @@ Notable changes to HOMER.
   and `loc` on a control net) still take the value the fit gives them.
 
 ### Fixed
+- The hexagonal surface lattice is built as line cells rather than as
+  two-point polygons.  VTK drew the degenerate polygons as edges anyway, so
+  desktop rendering is unchanged, but any exporter stricter than VTK -- vtk.js
+  in a browser among them -- discarded them and drew no lattice at all.
+- `plot_mesh`'s docstring gave `field_artist` as `(plotter, locs, values)`;
+  it is called with `(plotter, locs, values, field_xi)`.
 - `MeshNode.fix_parameter(values=...)` no longer truncates the value it pins
   when the node's array is an integer one, as it is for any mesh whose
   coordinates were stated as whole numbers.

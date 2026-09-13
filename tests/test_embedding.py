@@ -15,7 +15,8 @@ import pytest
 from HOMER.basis_definitions import H3, L1, L2
 from HOMER.geometry import basic_surface, cube
 
-from _helpers import EXACT, arr, bulged_patch, hermite_cube
+from _helpers import EXACT, arr
+from HOMER.examples import bulged_patch, hermite_cube
 
 
 def residual_norm(residual):

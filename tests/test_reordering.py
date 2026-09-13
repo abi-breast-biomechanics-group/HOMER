@@ -16,7 +16,8 @@ from HOMER.mesh.reordering import (apply_node_permutation, element_lattice_coord
                                    node_permutation, preserving_permutation,
                                    reorder_nodes, resolve_strategy)
 
-from _helpers import CLOSE, EXACT, arr, node_locs, unit_hex
+from _helpers import CLOSE, EXACT, arr, node_locs
+from HOMER.examples import unit_hex
 
 
 def is_lexicographic(locs, decimals=4):

@@ -17,7 +17,8 @@ from HOMER.basis_definitions import (B3, H3, L1, L2,
 from HOMER.io import (STR_LOOKUP, dump_mesh_to_dict, dump_meshfield_to_dict,
                       load_mesh, parse_mesh_from_dict, save_mesh)
 
-from _helpers import EXACT, arr, hermite_cube, node_locs, unit_hex
+from _helpers import EXACT, arr, node_locs
+from HOMER.examples import hermite_cube, unit_hex
 
 
 def roundtrip(mesh, tmp_path, name='mesh.json'):

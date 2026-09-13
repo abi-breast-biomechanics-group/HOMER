@@ -26,7 +26,7 @@ The Green-Lagrange strain tensor is then:
 
 ## Basic Usage
 
-```python
+```python exec="true" source="above" session="strain"
 from copy import deepcopy
 import numpy as np
 from HOMER import Mesh, MeshNode, MeshElement, L1, H3
@@ -34,9 +34,8 @@ from HOMER import Mesh, MeshNode, MeshElement, L1, H3
 # 1. Build a reference mesh
 nodes = [MeshNode(loc=[x,y,z])
          for x in [0,1] for y in [0,1] for z in [0,1]]
-element = MeshElement(node_indexes=list(range(8)),
-                      basis_functions=(L1, L1, L1))
-mesh_ref = Mesh(nodes=nodes, elements=element).rebase([H3]*3)
+element = MeshElement(node_indexes=list(range(8)), basis_functions=L1**3)
+mesh_ref = Mesh(nodes=nodes, elements=element).rebase(H3**3)
 
 # 2. Copy and apply a deformation
 mesh_def = deepcopy(mesh_ref)
@@ -82,12 +81,25 @@ provide a meaninful basis
 surface normal as a third Jacobian column, giving a square frame in which the
 out-of-plane direction carries no stretch:
 
-```python
+```python exec="true" source="above" session="strain"
 from HOMER.geometry import basic_surface
 from HOMER.utils import surface_normal_mapping
 
-strains = mesh_ref.evaluate_strain(elem_ids, xis, mesh_def,
-                                   coord_function=surface_normal_mapping)
+# a flat patch, stretched by 1.5 along y
+patch_ref = basic_surface(basis=H3**2)
+patch_def = deepcopy(patch_ref)
+
+xis = patch_ref.xi_grid(res=6, dim=2)
+elem_ids = np.zeros(len(xis), dtype=int)
+flat = patch_ref.evaluate_embeddings_in_every_element(xis)
+stretched = np.stack([flat[:, 0], flat[:, 1] * 1.5, flat[:, 2]], axis=1)
+patch_def.linear_fit(stretched, weight_mat=patch_def.get_xi_weight_mat(elem_ids, xis))
+
+strains = patch_ref.evaluate_strain(elem_ids, xis, patch_def,
+                                    coord_function=surface_normal_mapping)
+
+centre = len(strains) // 2
+print(f"E_yy at the centre: {strains[centre, 1, 1]:.3f}")
 ```
 
 Stretch a flat patch by 1.5 along one in-plane axis and the centre comes back
@@ -103,7 +115,7 @@ pass your own when you want a different frame — fibre-aligned axes, say.
 
 Pass `return_F=True` to get **F** instead of **E**:
 
-```python
+```python exec="true" source="above" session="strain"
 F = mesh_ref.evaluate_strain_in_every_element(eval_grid, mesh_def,
                                               return_F=True)
 # F: shape (n_pts, ndim, ndim)
@@ -113,19 +125,12 @@ F = mesh_ref.evaluate_strain_in_every_element(eval_grid, mesh_def,
 
 ## Visualising Strain
 
-```python
-import pyvista as pv
+`plot_strains` draws the tensors as strain ellipsoids, one per evaluation
+point, coloured by the length change along each direction:
 
-slocs  = mesh_ref.evaluate_embeddings(0, eval_grid)
-svecs  = mesh_def.evaluate_jacobians(0, eval_grid)
+```python exec="true" source="above" session="strain"
+strains = mesh_ref.evaluate_strain_in_every_element(eval_grid, mesh_def)
 
-s = pv.Plotter()
-mesh_ref.plot(s, mesh_opacity=0.1)
-mesh_def.plot(s, node_colour='g', mesh_opacity=0.1)
-
-# Draw strain vectors along each principal axis
-s.add_arrows(slocs, strains[:, 0, 0][:, None] * svecs[:, 0], color='r')
-s.add_arrows(slocs, strains[:, 1, 1][:, None] * svecs[:, 1], color='g')
-s.add_arrows(slocs, strains[:, 2, 2][:, None] * svecs[:, 2], color='b')
-s.show()
+eval_eles = np.zeros(len(eval_grid), dtype=int)
+mesh_ref.plot_strains(eval_eles, eval_grid, strains)
 ```

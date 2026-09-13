@@ -9,6 +9,7 @@ from HOMER.jacobian_evaluator import (jacobian, make_jac_for_mesh_func,
                                      make_static_jac_for_mesh_func,
                                      matrix_free_jacobian)
 from HOMER.geometry import cube
+from HOMER import examples
 from HOMER.mac_plotting_patch import apply_macos_fullscreen_close_patch
 
 # macOS tears down the Cocoa render window while it may still be in a
@@ -59,5 +60,5 @@ __all__ = [
     'load_mesh', 'save_mesh',
     'jacobian', 'matrix_free_jacobian',
     'make_jac_for_mesh_func', 'make_static_jac_for_mesh_func',
-    'cube',
+    'cube', 'examples',
 ]

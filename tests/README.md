@@ -32,7 +32,7 @@ nothing waits for input.
 
 | file | covers |
 | --- | --- |
-| `_helpers.py` | shared mesh builders and the two tolerances (`EXACT`, `CLOSE`) |
+| `_helpers.py` | the two tolerances (`EXACT`, `CLOSE`) and small array helpers; the meshes themselves are `HOMER.examples` |
 | `conftest.py` | headless rendering setup, the `plotter` fixture |
 | `test_basis_definitions.py` | partition of unity, interpolation, derivatives vs autodiff, polynomial reproduction |
 | `test_utils.py` | rotations, nearest-neighbour searches, volumes, transforms, indexing helpers |

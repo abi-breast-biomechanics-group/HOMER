@@ -69,7 +69,11 @@ Mesh` keeps working.
 A `MeshNode` subclasses `dict` so it can carry *named* derivative arrays
 alongside the spatial location `loc`.
 
-```python
+```python exec="true" source="above" session="architecture"
+import numpy as np
+
+from HOMER import MeshNode
+
 node = MeshNode(
     loc=np.array([0., 0., 1.]),   # world-space position
     du=np.zeros(3),               # ∂x/∂u tangent
@@ -89,14 +93,16 @@ optimisation) via `node.fix_parameter(...)`.
 An element connects nodes through a **product of 1-D basis functions**, one
 per parametric direction:
 
-```python
+```python exec="true" source="above" session="architecture"
+from HOMER import MeshElement, H3, L1
+
 # 2-D cubic-Hermite surface element: 2 × 2 = 4 nodes
 elem2d = MeshElement(node_indexes=[0, 1, 2, 3],
-                     basis_functions=(H3, H3))
+                     basis_functions=H3**2)
 
 # 3-D volume element with trilinear basis: 2 × 2 × 2 = 8 nodes
-elem3d = MeshElement(node_indexes=[0,1,2,3,4,5,6,7],
-                     basis_functions=(L1, L1, L1))
+elem3d = MeshElement(node_indexes=[0, 1, 2, 3, 4, 5, 6, 7],
+                     basis_functions=L1**3)
 ```
 
 The element computes the **tensor-product weight matrix** at construction time
@@ -161,19 +167,10 @@ instances, interned by name in a registry.  Each carries:
 | `node_fields` | `DerivativeField` instance (Hermite), or `None` (Lagrange) |
 | `interpolatory` | Whether nodal parameters are field values at the nodes |
 
-An element's parametric directions are built with arithmetic — `*` joins
-directions, the operator nearest the outer product the element actually takes,
-and `**` is the tensor power.  Against an `int`, `*` repeats instead.  The
-result is a `BasisGroup`, a `tuple` subclass, so lists and tuples of bases
-remain valid input everywhere:
-
-```python
-H3 ** 3            # tricubic-Hermite volume
-H3**2 * L1         # Hermite surface extruded linearly
-H3 * H3 * L1       # the same shape, written out
-(H3 * L1)**2       # H3, L1, H3, L1
-H3 * 3             # a spelling of H3 ** 3
-```
+An element's parametric directions are built from those values with
+arithmetic, and the result is a `BasisGroup`, a `tuple` subclass, so lists and
+tuples of bases remain valid input everywhere — see
+[Combining bases](how-to/mixed-basis.md#combining-bases) for the algebra.
 
 Equality and hashing are by name, so a basis survives a deepcopy, a pickle
 and a JSON round-trip as the same value.  `Basis` validates itself on
@@ -199,36 +196,3 @@ All evaluation functions are JAX-compatible.  The key integration points are:
   mapping.
 - `jacobian_evaluator.jacobian` uses `sparsejac` (forward-mode AD with
   sparsity exploitation) to build efficient Jacobians for `scipy.optimize`.
-
----
-
-## Data Flow for Fitting
-
-```
-Target data
-    │
-    ▼
-embed_points()  →  (elem_ids, xis)
-    │
-    ▼
-get_xi_weight_mat(elem_ids, xis)  →  W  (n_pts × n_nodes)
-    │
-    ▼
-linear_fit(targets, W)  →  updated node parameters
-    │
-    ▼
-generate_mesh()  →  recompile JAX functions
-```
-
-For nonlinear fitting (shape optimisation):
-
-```
-point_cloud_fit(mesh, target_pts)  →  fitting_fn, jacobian_fn
-    │
-    ▼
-scipy.optimize.least_squares(fitting_fn, mesh.optimisable_param_array,
-                              jac=jacobian_fn)
-    │
-    ▼
-mesh.update_from_params(result.x)
-```

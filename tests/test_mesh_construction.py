@@ -20,7 +20,8 @@ from HOMER.basis_definitions import (B3, BasisGroup, H3, L1, L2,
                                      L3, L4)
 from HOMER.mesh import GAUSS, quadrature_order
 
-from _helpers import EXACT, arr, bulged_patch, hermite_cube, node_locs, unit_hex
+from _helpers import EXACT, arr, node_locs
+from HOMER.examples import bulged_patch, hermite_cube, unit_hex
 
 CORNERS_3D = np.array(list(itertools.product([0.0, 1.0], repeat=3)))
 CORNERS_2D = np.array(list(itertools.product([0.0, 1.0], repeat=2)))

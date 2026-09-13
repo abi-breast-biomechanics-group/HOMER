@@ -1,0 +1,240 @@
+"""Interactive scenes for the documentation examples.
+
+Every example in the docs is executed while the site is built, and whatever it
+draws is captured as a vtk.js scene shown underneath the code.  The capture is
+PyVista's own gallery mechanism: with ``PYVISTA_BUILDING_GALLERY`` set, a
+plotter survives ``show()`` with the serialised scene on ``last_vtksz``, so an
+example keeps the plain ``mesh.plot()`` spelling a reader would actually type.
+
+The scenes and the one viewer they share are written straight into the built
+site, so nothing generated lands in ``docs/``.  A scene carrying node or
+element labels is the exception: the viewer's vtk.js build has no label
+engine, so that one is rendered to a PNG instead and shown as an image.
+"""
+
+import os
+
+#Both must be set before pyvista is imported.
+os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
+os.environ.setdefault("PYVISTA_BUILDING_GALLERY", "true")
+
+import shutil
+from io import BytesIO
+from pathlib import Path
+
+import markdown_exec
+import numpy as np
+import pyvista as pv
+from PIL import Image
+from markupsafe import Markup
+from mkdocs.utils import get_relative_url
+from pyvista.plotting.plotter import _ALL_PLOTTERS
+from trame_vtk.tools.vtksz2html import HTML_VIEWER_PATH
+
+#A scene is addressed relative to the site root, which is a different number of
+#levels up on every page; on_page_content substitutes the right one.
+ROOT = "%%SCENE_ROOT%%"
+
+FRAME = (
+    '<iframe class="scene" data-src="{root}viewer.html?fileURL={name}"'
+    ' style="width:100%;aspect-ratio:{aspect};border:1px solid'
+    ' var(--md-default-fg-color--lightest);border-radius:.2rem"></iframe>'
+)
+
+#Each frame is a separate vtk.js viewer -- a megabyte of javascript and a WebGL
+#context of its own -- and a browser keeps only a handful of contexts alive.  A
+#page with several would drop the ones it could not keep, which is why a scene
+#would arrive late or blank.  So a frame is handed its source when it comes near
+#the viewport and has it taken away again when it leaves: only the scenes the
+#reader is actually looking at are ever live.
+FRAME_LOADER = """
+<script>
+(() => {
+  const frames = document.querySelectorAll('iframe.scene[data-src]');
+  if (!frames.length) return;
+  const watch = new IntersectionObserver((entries) => {
+    for (const {target, isIntersecting} of entries) {
+      if (isIntersecting === !!target.src) continue;
+      if (isIntersecting) target.src = target.dataset.src;
+      else target.removeAttribute('src');
+    }
+  }, {rootMargin: '400px'});
+  frames.forEach((frame) => watch.observe(frame));
+})();
+</script>
+"""
+
+#The frame takes the shape of the plotter, so an example that wants a wide scene
+#asks for a wide window.  PyVista's own default means "no preference", and gets
+#the shape these pages read best at.
+DEFAULT_ASPECT = "16/10"
+
+
+def aspect(plotter):
+    """The frame shape this scene asked for.
+
+    Read before ``show()``, which takes the render window down with it and
+    leaves ``window_size`` unreadable.
+    """
+    width, height = plotter.window_size
+    if (width, height) == tuple(pv.global_theme.window_size):
+        return DEFAULT_ASPECT
+    return f"{width}/{height}"
+
+IMAGE = (
+    '<img class="scene" loading="lazy" src="{root}{name}"'
+    ' style="width:100%;border:1px solid'
+    ' var(--md-default-fg-color--lightest);border-radius:.2rem">'
+)
+
+scenes: dict[str, bytes] = {}
+
+#The viewer's vtk.js build has no renderPointsAsSpheres and no renderLinesAsTubes,
+#so a scene drawn with either arrives as flat square dots and hairlines.  It does
+#honour geometry, line width and opacity, which is what these two put back.
+MIN_LINE_OPACITY = 0.01
+NODE_RADIUS = 0.004  #of the scene diagonal, per sqrt(point in pixels)
+#Glyphing turns one point into a sphere's worth of them, so the resolution steps
+#down as the cloud grows and the whole scene stays affordable.  A sphere of
+#resolution r carries r * (r - 2) + 2 points; below the coarsest one the markers
+#are left flat, which is what vtk.js would have drawn anyway.
+GLYPH_POINT_BUDGET = 60_000
+SPHERE_RESOLUTIONS = (10, 8, 6)
+
+
+def sphere_resolution(n_points):
+    """The roundest sphere this many markers can afford, or None for flat."""
+    for r in SPHERE_RESOLUTIONS:
+        if n_points * (r * (r - 2) + 2) <= GLYPH_POINT_BUDGET:
+            return r
+    return None
+
+
+def web_safe(plotter):
+    """Redraw what vtk.js cannot, in terms it can.
+
+    Nodes become real sphere geometry -- a few thousand points, against the
+    quarter-million that tubing every lattice line would cost -- and the
+    lattice keeps its lines but at an opacity that survives a 2px hairline.
+    """
+    for renderer in plotter.renderers:
+        lo, hi = np.array(renderer.bounds).reshape(3, 2).T
+        diagonal = float(np.linalg.norm(hi - lo)) or 1.0
+        for actor in list(renderer.actors.values()):
+            prop = getattr(actor, "prop", None)
+            dataset = getattr(getattr(actor, "mapper", None), "dataset", None)
+            if prop is None or dataset is None:
+                continue
+            if prop.render_points_as_spheres and sphere_resolution(dataset.n_points):
+                res = sphere_resolution(dataset.n_points)
+                radius = diagonal * NODE_RADIUS * prop.point_size**0.5
+                sphere = pv.Sphere(radius, theta_resolution=res, phi_resolution=res)
+                actor.mapper.dataset = dataset.glyph(geom=sphere, scale=False, orient=False)
+                prop.render_points_as_spheres = False
+                #`add_points` draws with style='points', which would render the
+                #glyphed spheres as their own vertices -- flat dots again.
+                prop.style = "surface"
+            elif prop.render_lines_as_tubes or str(prop.style).lower() == "wireframe":
+                prop.opacity = max(prop.opacity, MIN_LINE_OPACITY)
+                prop.line_width = max(prop.line_width, 2)
+                prop.render_lines_as_tubes = False
+
+
+def labelled(plotter):
+    """Whether the scene carries labels, which only a real render can draw.
+
+    ``add_point_labels`` places its text through a label-placement mapper, and
+    the viewer's vtk.js build has nothing that drives one, so such a scene
+    arrives with the labels simply missing.  It is the mapper that identifies
+    them: subplot borders and scalar bars are 2-D actors too, and both survive
+    the export.
+    """
+    return any(isinstance(actor.GetMapper(), pv._vtk.vtkLabelPlacementMapper)
+               for renderer in plotter.renderers
+               for actor in renderer.actors.values()
+               if isinstance(actor, pv._vtk.vtkActor2D))
+
+
+def screenshot(plotter):
+    """The scene as PNG bytes, rendered by VTK itself."""
+    buffer = BytesIO()
+    Image.fromarray(plotter.screenshot(return_img=True)).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+#The scene is serialised inside show(), so the fixup has to happen just before it
+#-- and the screenshot before the fixup, which rewrites geometry VTK draws well.
+_show = pv.Plotter.show
+
+
+def show(self, *args, **kwargs):
+    self._doc_png = screenshot(self) if labelled(self) else None
+    self._doc_aspect = aspect(self)
+    web_safe(self)
+    return _show(self, *args, **kwargs)
+
+
+pv.Plotter.show = show
+
+
+def capture(page):
+    """Draw out every scene the block that just ran has shown."""
+    frames = []
+    for key in [k for k, p in _ALL_PLOTTERS.items() if p.last_vtksz is not None]:
+        plotter = _ALL_PLOTTERS.pop(key)
+        png = getattr(plotter, "_doc_png", None)
+        name = f"{page}-{len(scenes):02d}" + (".png" if png else ".vtksz")
+        scenes[name] = png if png else plotter.last_vtksz
+        frames.append(IMAGE.format(root=ROOT, name=name) if png else
+                      FRAME.format(root=ROOT, name=name,
+                                   aspect=getattr(plotter, "_doc_aspect", DEFAULT_ASPECT)))
+        plotter.close()
+    return "".join(frames)
+
+
+def formatter(source, language, css_class, options, md, **kwargs):
+    """markdown-exec's python formatter, plus whatever the code drew."""
+    #Captured stdout is rendered as markdown by default, so a printed array
+    #lands in the prose as a paragraph.  Anything that prints gets a code block.
+    if "print(" in source and not options.get("result"):
+        options["result"] = "text"
+
+    html = markdown_exec.formatter(source, language, css_class, options, md, **kwargs)
+    #Markup escapes whatever is concatenated onto it, and the frames are html.
+    return Markup(str(html) + capture(options.get("session") or "scene"))
+
+
+def on_config(config):
+    #The fence is registered here rather than in mkdocs.yml because a
+    #`!!python/name:` tag is resolved as the YAML is read, before this file --
+    #and so the formatter above -- can be imported.
+    superfences = config.mdx_configs.setdefault("pymdownx.superfences", {})
+    fences = superfences.setdefault("custom_fences", [])
+    #`mkdocs serve` re-runs this on every rebuild, and the fence is registered once.
+    if not any(f["format"] is formatter for f in fences):
+        fences.append(
+            {
+                "name": "python",
+                "class": "python",
+                "validator": markdown_exec.validator,
+                "format": formatter,
+            }
+        )
+    return config
+
+
+def on_pre_build(**kwargs):
+    scenes.clear()
+
+
+def on_page_content(html, page, **kwargs):
+    html = html.replace(ROOT, get_relative_url("scenes/", page.file.url))
+    return html + FRAME_LOADER if 'class="scene" data-src' in html else html
+
+
+def on_post_build(config, **kwargs):
+    out = Path(config.site_dir, "scenes")
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(HTML_VIEWER_PATH, out / "viewer.html")
+    for name, data in scenes.items():
+        (out / name).write_bytes(data)

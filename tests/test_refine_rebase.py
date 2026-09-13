@@ -16,7 +16,8 @@ from HOMER.basis_definitions import (B3, H3, L1, L2,
                                      L3)
 from HOMER.geometry import basic_surface, cube
 
-from _helpers import CLOSE, EXACT, arr, hermite_cube, node_locs, unit_hex
+from _helpers import CLOSE, EXACT, arr, node_locs
+from HOMER.examples import hermite_cube, unit_hex
 
 #(basis, nodes per direction added by a factor-r refinement of one element)
 NODE_COUNT = {L1: lambda r: r + 1,
