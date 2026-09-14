@@ -1,3 +1,4 @@
+---
 title: 'HOMER: High Order MEsh Representations'
 tags:
   - Python
@@ -28,12 +29,10 @@ authors:
   - name: Poul M.F. Nielsen
     affiliation: "1 2"
 affiliations:
- - name: Lyman Spitzer, Jr. Fellow, Princeton University, United States
+ - name: Auckland BioEngineering Institute, New Zealand
    index: 1
- - name: Institution Name, Country
+ - name: The Deparment of Engineering Science and Biomedical Engineering, New Zealand
    index: 2
-  - name: University of Auckland, New Zealand
-    index: 1
 date: 14 September 2026
 bibliography: paper.bib
 
@@ -59,17 +58,14 @@ Many old tools are currently out of date.
 # State of the field
 
 Converting measuremets to objects is a classic problem in computer-science and medical imaging.
-As such, it has classical solutions: /usa
-
+As such, it has classical solutions: marching cubes, GMESH, which are often fed into solvers such as Fenicsx and Fembio.
 Autodifferention is a very powerful tool for enabling analysis of modelled systems.
-
-
+This has outputs that are very useful for a range of problems especially adjoint problems which require optimisation problem gradients.
 
 There has been a reneissance of autodifferentiated, JAX compatible and otherwise, tools for the solution of FEM problems.
 However, HOMER focusses on the topology of the mesh and how it changes, rather than solving equations over the mesh.
 (Technically, you can express and solve these equations in HOMER, but there are no simple primitives.)
-
-As a result, HOMER was built with the fundamental goal of simplifying the expression and optimisation of these problems.
+This gives HOMER it's niche, a shape representation toolbox that makes it easier to write an as yet unknown loss function.
 
 
 # Software Design
@@ -89,7 +85,8 @@ The interface does require that the user follows JAX's functional conventions fo
 
 # Research Impact
 
-
+Although it was originally written to support the skin tissue deformation analysis in the maintainer's thesis, the flexible nature of HOMER's represntations has allowed it to be used on a variety of projects.
+It provides the fitting and optimisation routines used by Mobstr3D to analyse DENSE CMR imaging.
 
 
 
@@ -98,8 +95,10 @@ The interface does require that the user follows JAX's functional conventions fo
 AI tools have been used to document, test, and refactor HOMER.
 Generative models were also used to optimise some functions, e.g. mesh.embed_points() and
 suggested some algorithmic tools, such as the approximate mesh-free jacobian for use with
-lsmr non-linear least squares solvers.
+lsmr non-linear least-squares solvers.
 The majority of this used Claude Opus 5.1 via the scientific plan.
+All documentation generated was manually reviewed and updated. 
+While much of the testing infrastructure has been generated with AI tools, a subset of tests are human-curated integration tests that verify that HOMER is achieving its global goals and aims.
 
 No AI was used to edit, draft, or review this paper.md.
 
