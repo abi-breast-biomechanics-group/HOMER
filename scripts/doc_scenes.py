@@ -8,10 +8,11 @@ is caught through PyVista's own gallery mechanism, where
 ``PYVISTA_BUILDING_GALLERY`` leaves the serialised scene on ``last_vtksz``
 after ``show()``, and a figure is simply one still open when the block ends.
 
-The scenes and the one viewer they share are written straight into the built
-site, so nothing generated lands in ``docs/``.  A scene carrying node or
-element labels is the exception: the viewer's vtk.js build has no label
-engine, so that one is rendered to a PNG instead and shown as an image.
+Each scene is written out as a page carrying its own copy of the vtk.js
+viewer, straight into the built site, so nothing generated lands in ``docs/``
+and a frame has nothing to fetch once it has loaded.  A scene carrying node or
+element labels is the exception: that vtk.js build has no label engine, so
+such a scene is rendered to a PNG instead and shown as an image.
 """
 
 import os
@@ -20,8 +21,7 @@ import os
 os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
 os.environ.setdefault("PYVISTA_BUILDING_GALLERY", "true")
 
-import shutil
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 import matplotlib
@@ -37,14 +37,14 @@ from PIL import Image
 from markupsafe import Markup
 from mkdocs.utils import get_relative_url
 from pyvista.plotting.plotter import _ALL_PLOTTERS
-from trame_vtk.tools.vtksz2html import HTML_VIEWER_PATH
+from trame_vtk.tools.vtksz2html import write_html
 
 #A scene is addressed relative to the site root, which is a different number of
 #levels up on every page; on_page_content substitutes the right one.
 ROOT = "%%SCENE_ROOT%%"
 
 FRAME = (
-    '<iframe class="scene" data-src="{root}viewer.html?fileURL={name}"'
+    '<iframe class="scene" data-src="{root}{name}"'
     ' style="width:100%;aspect-ratio:{aspect};border:1px solid'
     ' var(--md-default-fg-color--lightest);border-radius:.2rem"></iframe>'
 )
@@ -92,6 +92,16 @@ def aspect(plotter):
 IMAGE = (
     '<img class="scene" loading="lazy" src="{root}{name}"'
     ' style="width:100%;border:1px solid'
+    ' var(--md-default-fg-color--lightest);border-radius:.2rem">'
+)
+
+#A plot is drawn at a size, and an SVG carries it; stretching every one to the
+#column would redraw a single-panel figure at twice the scale of a four-panel
+#one, and its text with it.  So a figure is shown at the size it was drawn,
+#centred, and only shrinks when the column is narrower than that.
+FIGURE = (
+    '<img class="figure" loading="lazy" src="{root}{name}"'
+    ' style="max-width:100%;display:block;margin:0 auto;border:1px solid'
     ' var(--md-default-fg-color--lightest);border-radius:.2rem">'
 )
 
@@ -185,14 +195,28 @@ def show(self, *args, **kwargs):
 pv.Plotter.show = show
 
 
+def viewer(vtksz):
+    """A scene as a page that carries its own viewer.
+
+    ``write_html`` inlines the vtk.js viewer and the scene itself, base64, into
+    one document.  The alternative -- one shared viewer fetching a ``.vtksz``
+    beside it -- is a request that has to survive whatever serves the site, and
+    on GitHub Pages it does not: the frame comes up empty.  A scene that is
+    already whole when it loads has nothing left to go wrong.
+    """
+    document = StringIO()
+    write_html(vtksz, document)
+    return document.getvalue().encode("utf-8")
+
+
 def capture(page):
     """Draw out every scene the block that just ran has shown."""
     frames = []
     for key in [k for k, p in _ALL_PLOTTERS.items() if p.last_vtksz is not None]:
         plotter = _ALL_PLOTTERS.pop(key)
         png = getattr(plotter, "_doc_png", None)
-        name = f"{page}-{len(scenes):02d}" + (".png" if png else ".vtksz")
-        scenes[name] = png if png else plotter.last_vtksz
+        name = f"{page}-{len(scenes):02d}" + (".png" if png else ".html")
+        scenes[name] = png if png else viewer(plotter.last_vtksz)
         frames.append(IMAGE.format(root=ROOT, name=name) if png else
                       FRAME.format(root=ROOT, name=name,
                                    aspect=getattr(plotter, "_doc_aspect", DEFAULT_ASPECT)))
@@ -214,7 +238,7 @@ def figures(page):
         figure.savefig(buffer, format="svg", bbox_inches="tight")
         name = f"{page}-{len(scenes):02d}.svg"
         scenes[name] = buffer.getvalue()
-        frames.append(IMAGE.format(root=ROOT, name=name))
+        frames.append(FIGURE.format(root=ROOT, name=name))
         plt.close(figure)
     return "".join(frames)
 
@@ -263,6 +287,5 @@ def on_page_content(html, page, **kwargs):
 def on_post_build(config, **kwargs):
     out = Path(config.site_dir, "scenes")
     out.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(HTML_VIEWER_PATH, out / "viewer.html")
     for name, data in scenes.items():
         (out / name).write_bytes(data)
