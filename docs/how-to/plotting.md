@@ -34,11 +34,6 @@ s.link_views()
 s.show()
 ```
 
-Two habits worth keeping for any before-and-after: `link_views()` so the pair
-share one camera and stay comparable as the scene is turned, and a different
-`node_colour` on the *after*, so which panel is which survives being cropped
-into a slide.
-
 Overlaying two configurations in one scene is the same idea, with the
 reference drawn faintly:
 
@@ -174,8 +169,7 @@ s.show()
 ```
 
 Drawn into one scene, the two are directly comparable: the mesh's own
-parameters in red and the trial ones in green, with nothing written back to
-the mesh in between.
+parameters in red and the trial ones in green, with no change in mesh state.
 
 ---
 
