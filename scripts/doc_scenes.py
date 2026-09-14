@@ -39,6 +39,12 @@ from mkdocs.utils import get_relative_url
 from pyvista.plotting.plotter import _ALL_PLOTTERS
 from trame_vtk.tools.vtksz2html import write_html
 
+#pyvista reads the flag once, as it is imported, and keeps a shown plotter alive
+#only while it is set.  Had anything imported pyvista before this module, the
+#setdefault above would have come too late and every scene would be dropped.
+if not pv.BUILDING_GALLERY:
+    raise RuntimeError("pyvista was imported before PYVISTA_BUILDING_GALLERY was set")
+
 #A scene is addressed relative to the site root, which is a different number of
 #levels up on every page; on_page_content substitutes the right one.
 ROOT = "%%SCENE_ROOT%%"
@@ -189,7 +195,19 @@ def show(self, *args, **kwargs):
     self._doc_png = screenshot(self) if labelled(self) else None
     self._doc_aspect = aspect(self)
     web_safe(self)
-    return _show(self, *args, **kwargs)
+    result = _show(self, *args, **kwargs)
+    #pyvista exports the scene behind a suppressed ImportError, so an unreachable
+    #trame component leaves `last_vtksz` unset and the scene out of the page --
+    #silently, and a --strict build still passes with nothing in it.
+    if self._doc_png is None and self.last_vtksz is None:
+        raise RuntimeError(
+            "pyvista exported no scene; its trame component is unreachable, which"
+            " is `pip install trame-pyvista` and the trame versions it pins"
+        )
+    #What marks a plotter as this block's, rather than the export doing it: a
+    #labelled scene is a screenshot and has no export to be recognised by.
+    self._doc_shown = True
+    return result
 
 
 pv.Plotter.show = show
@@ -212,14 +230,13 @@ def viewer(vtksz):
 def capture(page):
     """Draw out every scene the block that just ran has shown."""
     frames = []
-    for key in [k for k, p in _ALL_PLOTTERS.items() if p.last_vtksz is not None]:
+    for key in [k for k, p in _ALL_PLOTTERS.items() if getattr(p, "_doc_shown", False)]:
         plotter = _ALL_PLOTTERS.pop(key)
-        png = getattr(plotter, "_doc_png", None)
+        png = plotter._doc_png
         name = f"{page}-{len(scenes):02d}" + (".png" if png else ".html")
         scenes[name] = png if png else viewer(plotter.last_vtksz)
         frames.append(IMAGE.format(root=ROOT, name=name) if png else
-                      FRAME.format(root=ROOT, name=name,
-                                   aspect=getattr(plotter, "_doc_aspect", DEFAULT_ASPECT)))
+                      FRAME.format(root=ROOT, name=name, aspect=plotter._doc_aspect))
         plotter.close()
     return "".join(frames)
 

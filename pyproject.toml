@@ -27,11 +27,15 @@ docs = [
     "mkdocs-autorefs>=1.0",
     #runs the examples in the docs at build time
     "markdown-exec>=1.8",
-    #exports what those examples draw as an interactive vtk.js scene
-    "trame",
+    #exports what those examples draw as an interactive vtk.js scene.  The trame
+    #plotter component moved out of pyvista into its own package in 0.49, and
+    #carries the trame versions it has to be matched with; without it pyvista
+    #exports nothing and says nothing.  nest_asyncio2 is what lets the export
+    #start trame's server outside a notebook.
+    "trame-pyvista",
+    "nest_asyncio2",
+    #turns an exported scene into a page carrying its own viewer
     "trame-vtk",
-    "trame-vuetify",
-    "nest_asyncio",
 ]
 
 [tool.pytest.ini_options]
