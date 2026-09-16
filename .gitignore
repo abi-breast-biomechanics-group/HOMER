@@ -13,3 +13,4 @@ __pycache__
 
 #local working data -- meshes, .ipdata, .ipelem and the scripts over them
 /bin
+paper/paper.pdf

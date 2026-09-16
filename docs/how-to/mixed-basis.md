@@ -26,9 +26,7 @@ H3 * 3             # a spelling of H3 ** 3
 
 The result is a `BasisGroup`, a `tuple` subclass, so a plain tuple or list of
 bases — `(H3, H3, L1)` — means the same thing and is accepted everywhere.  The
-algebra is the spelling used throughout these guides: it says how many
-directions there are and what varies between them, which a hand-written list
-leaves you to count.
+algebra is the spelling used throughout these guides.
 
 ---
 
