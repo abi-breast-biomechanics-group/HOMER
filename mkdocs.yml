@@ -5,6 +5,8 @@ repo_url: https://github.com/abi-breast-biomechanics-group/HOMER
 
 theme:
   name: material
+  custom_dir: overrides
+  favicon: assets/favicon.png
   features:
     - navigation.tabs
     - navigation.sections
