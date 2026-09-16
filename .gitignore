@@ -14,3 +14,6 @@ __pycache__
 #local working data -- meshes, .ipdata, .ipelem and the scripts over them
 /bin
 paper/paper.pdf
+
+# regenerated from DONA.blend by fit_donut.py
+examples/H3_donut/*.ply
