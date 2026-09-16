@@ -35,7 +35,6 @@ hooks:
 
 nav:
   - Home: index.md
-  - Architecture: architecture.md
   - How-To Guides:
     - Working with 3D meshes: how-to/3d-meshes.md
     - Basis function definitions: how-to/basis-definitions.md
@@ -50,6 +49,7 @@ nav:
     - Topology mapping: how-to/topology.md
     - Saving and loading: how-to/io.md
     - Node indexing: how-to/node-indexing.md
+  - Architecture: architecture.md
   - API Reference:
     - mesh: api/mesh.md
     - mesh operations: api/mesh_operations.md

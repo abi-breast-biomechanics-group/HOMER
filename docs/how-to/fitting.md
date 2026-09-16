@@ -63,10 +63,6 @@ s.link_views()
 s.show()
 ```
 
-The blue points are the targets, drawn into both views so the fit is read
-against the same data it was given, and `link_views()` keeps the two cameras
-together as the scene is turned.
-
 !!! note
     `linear_fit` needs at least as many points as the system has *free*
     columns.  The columns are parameters, not nodes: a Hermite node carries
@@ -103,14 +99,14 @@ points, not more.
 
 ## Nonlinear Fitting
 
-The function `point_cloud_fit` gives an example of a model-to-data based fit.
+The function `point_cloud_fit` is an example of a model-to-data based fit.
 It samples the mesh on an xi grid with `evaluate_embeddings`, measures the
 distance from each sample to its nearest target point through a SciPy KD-tree
-(wrapped in a JAX custom-JVP callback, see `HOMER.optim`), appends a Sobolev
-smoothness term, and hands the whole residual to `jacobian` so the derivative
-comes out of JAX rather than a finite difference.  Use it -- or the same three
-steps written out for your own cost -- when you want to optimise node positions
-(and optionally derivative vectors) to best match an unstructured point cloud.
+(wrapped in a JAX custom-JVP callback, see `HOMER.optim`), and appends a Sobolev
+smoothness term. 
+
+The fitting function is passed through `jacobian` using JAX to define the sparse 
+representation of the jacobian.
 
 ```python exec="true" source="above" session="fitting"
 from HOMER import H3
@@ -165,10 +161,7 @@ fitting_fn, jac_fn = point_cloud_fit(fit_mesh, target_cloud, sob_weight=0.1)
 ```
 
 The term itself is `mesh.evaluate_sobolev()`, which evaluates every non-trivial
-combination of derivative orders at the element's Gauss points.  Call it
-directly, with one `weights` entry per term, when a single scalar is too blunt
--- to smooth across a surface without penalising curvature through its
-thickness, say.
+combination of derivative orders at the element's Gauss points.  
 
 ---
 
@@ -177,9 +170,7 @@ thickness, say.
 Because the mesh evaluation is written in JAX, any residual you can express
 with it is differentiated for you: `jacobian(cost_function,
 init_estimate=...)` returns the JIT-compiled cost and a Jacobian function, both
-in the shape `scipy.optimize.least_squares` expects.  Nothing about the cost
-has to be a built-in fit -- deform the mesh, evaluate a secondary field, embed
-points, compose the lot, and the derivative still follows.
+in the shape `scipy.optimize.least_squares` expects.  
 
 ```python exec="true" source="above" session="fitting"
 import jax.numpy as jnp
@@ -228,12 +219,10 @@ colours, seed_values, seed_indices = coloured.get_colouring_dict(
 n_colours = max(colours.values()) + 1
 print(f"{n_colours} colours over {len(colours)} parameters")
 ```
-
 Drawn on the mesh it is the pattern you would guess: a trilinear node's
 parameters reach the eight elements around it, so the colouring is the
 eight-way checkerboard that lets every node be perturbed alongside its
-next-but-one neighbours.  Each node carries its `x`, `y` and `z` parameter
-consecutively, so the node's own colour is the one its first parameter got.
+next-but-one neighbours.  
 
 ```python exec="true" source="above" session="fitting"
 node_colours = np.array([colours[3 * i] for i in range(len(coloured.nodes))])
@@ -272,9 +261,9 @@ print(jac.shape, jac.nse, "non-zeros")
 Because the indices are decoded on every call, the *pattern* is free to move
 between them -- which is what a data-to-model term needs.  A residual built on
 `embed_points` re-embeds its data as the mesh deforms, so a point can land in a
-different element from one iteration to the next; the colouring stays valid
-throughout, since every residual entry still draws on a single element's
-parameters, while the decoded indices follow the data.
+different element from one iteration to the next.
+Despite the changing location, the colouring stays valid, as each point only embeds 
+into one element at a time.
 
 Pass `approx_jac=True` to `embed_points` for this.  It holds each point at the
 `(element, xi)` it embedded to instead of letting it slide, which is what keeps
@@ -301,7 +290,7 @@ def residual(params):
 
 Most fits are not data-to-model.  Anything evaluated at fixed `(element, xi)`
 pairs -- a grid fit, a Sobolev term, a field residual -- has a pattern that
-never moves, and decoding it on every call is half the work done twice.
+never moves, so repeatedly decoding it is uneccessary.
 `make_static_jac_for_mesh_func` decodes once at a starting estimate, keeps the
 indices, and leaves one `jvp` per colour to do per call:
 
@@ -337,8 +326,7 @@ sparse_jac = scipy.sparse.coo_array((jac.data, jac.indices.T), shape=jac.shape)
 sparsity colouring to keep it affordable. That stops working on two kinds of
 problem: one where the matrix itself is too big (a residual of ~1e5 entries in
 ~1e4 parameters costs gigabytes), and one where the blocks that matter are
-dense, so the colouring saves nothing — every dof supporting a sample excites
-the same rows, which is what a field fitted over embedded points looks like.
+dense, so the colouring cannot compress the parameters.
 
 `matrix_free_jacobian` hands SciPy a `LinearOperator` over JAX's `jvp`/`vjp`
 instead. Nothing larger than a residual vector is ever allocated, and
