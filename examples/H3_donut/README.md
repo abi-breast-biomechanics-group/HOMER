@@ -22,8 +22,8 @@ ignored.
 |------|------|
 | `DONA.blend` | Original Blender model |
 | `export_donut_points.py` | Runs inside Blender: writes `donut_points.ply` (the body `Rosca` with its subdivision modifier applied, 36,864 vertices with faces and normals) and `donut_scene.ply` (body, icing and sprinkles with modifiers applied and per-vertex RGB from each material's base colour) |
-| `donut_points.ply` | Fitting target, kept in the repo so the fit runs without Blender |
-| `donut_scene.ply` | Coloured whole-donut surface for visualisation, kept for the same reason |
+| `donut_points.ply` | Fitting target, not tracked: regenerated from `DONA.blend` on first run |
+| `donut_scene.ply` | Coloured whole-donut surface for visualisation, regenerated the same way |
 | `fit_donut.py` | Builds the initial torus, fits it, reports residuals, saves both meshes and the figure |
 | `h3_donut_initial.json` | Initial H3 x H3 torus before fitting |
 | `h3_donut.json` | Fitted HOMER mesh (32 H3 x H3 elements, 32 nodes) |
@@ -36,9 +36,10 @@ python fit_donut.py           # fit, save h3_donut.json and h3_donut_fit.png
 python fit_donut.py --show    # also open the interactive PyVista scene
 ```
 
-Requires HOMER (`pip install -e .` from the repo root). Blender 4.x is only
-needed to regenerate the PLY files; `fit_donut.py` calls it automatically
-when either is missing (`--blender` overrides the executable path).
+Requires HOMER (`pip install -e .` from the repo root) and Blender 4.x. The
+PLY files are not kept in the repo; `fit_donut.py` runs Blender over
+`DONA.blend` to write them whenever either is missing (`--blender` overrides
+the executable path).
 
 ## Method
 
