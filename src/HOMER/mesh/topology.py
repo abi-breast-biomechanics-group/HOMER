@@ -83,7 +83,21 @@ def associated_node_index(self, index_list:list, nodes_to_gather: Optional[list]
 
 def _explore_topology(self, rounding_res=5):
     """
-    Explores the mesh topology, finding how neighbouring points connet to each other"""
+    Explores the mesh topology, finding how neighbouring points connet to each other
+
+    What it finds depends only on where the nodes are and which elements hold
+    them, so a regeneration that moved neither has nothing new to say.  That
+    is worth checking because :meth:`~HOMER.mesh.field.MeshField.generate_mesh`
+    is called far more often than a mesh changes -- once per element added,
+    several times per refinement -- and this is the expensive half of it.
+    """
+    signature = (self.true_param_array.tobytes(),
+                 np.asarray(self.ele_map).tobytes(),
+                 self.ndim, len(self.elements))
+    if (getattr(self, "_topo_signature", None) == signature
+            and getattr(self, "topomap", None) is not None):
+        return
+
     if self.ndim == 2:
         xi_l = np.array([
             [0, 0.5], [1, 0.5],
@@ -97,14 +111,15 @@ def _explore_topology(self, rounding_res=5):
             [0.5, 0.5, 0], [0.5, 0.5, 1],
         ])
         tzip = ((0,0), (0,1), (1, 0), (1,1), (2, 0), (2, 1))
-    locs = self.evaluate_embeddings_in_every_element(xi_l)
-    l_jacs = self.evaluate_jacobians_in_every_element(xi_l)
-    n_ele = len(self.elements)
     n_test = len(xi_l)
 
-
-
-    locs = np.round(locs, rounding_res)
+    #pinned to the mesh's own parameters rather than whatever is ambient: this
+    #can be reached from inside a jit trace, and the topology is a property of
+    #where the mesh actually is, not of the tangent being pushed through it
+    concrete = np.asarray(self.optimisable_param_array)
+    locs = np.round(
+        np.asarray(self.evaluate_embeddings_in_every_element(xi_l, fit_params=concrete)),
+        rounding_res)
     _, idx, inv, cnt = np.unique(
         locs, axis=0,
         return_index=True,
@@ -114,31 +129,36 @@ def _explore_topology(self, rounding_res=5):
     faces = []
     bmap = {}
 
-
     lookup_arr = np.ones((len(self.elements), self.ndim, 2), dtype=int) * -1
 
-    for idu, cn in enumerate(cnt): #undefined behaviour here, what even is a face for a 2D object
-        if cn == 1 and self.ndim == 3: #this region appeared once, so it's a "face"
-            ele = idx[idu]//n_test
-            test_n = idx[idu]%n_test
-            faces.append((int(ele),) + tzip[test_n])
-        if cn == 2: #this point appeared multiple times, and defines a transition boundary.
-            inds = np.where(inv == idu)[0]
-            ele = inds//n_test
-            test_n = inds%n_test
-            tested = [tzip[t] for t in test_n]
-            rel_jac = [l_jacs[t] for t in inds]
-            rel_dirs = np.sum(rel_jac[0]*rel_jac[1], axis=0) > 0
-            bmap[(ele[0],) + tested[0]] = [(ele[1],) + tested[1], rel_dirs]
-            bmap[(ele[1],) + tested[1]] = [(ele[0],) + tested[0], rel_dirs]
+    #a location seen once is a face, seen twice is a boundary between two
+    #elements.  Sorting by which location each test point landed on groups the
+    #repeats in one pass, rather than rescanning every point per location.
+    order = np.argsort(inv.ravel(), kind="stable")
+    starts = np.cumsum(cnt) - cnt
 
-            #bmap is extra
-            lookup_arr[ele[0], tested[0][0], tested[0][1]] = ele[1]
-            # print(ele, tested)
-            lookup_arr[ele[1], tested[1][0], tested[1][1]] = ele[0]
+    if self.ndim == 3: #undefined behaviour otherwise, what even is a face for a 2D object
+        for single in idx[cnt == 1]:
+            faces.append((int(single) // n_test,) + tzip[int(single) % n_test])
 
-        # elif cn > 2:
-        #     raise ValueError("Mesh had multiple elements intersecting at a single point")
+    shared = np.flatnonzero(cnt == 2)
+    if shared.size:
+        #only a shared boundary reads the jacobians, and a mesh of one element
+        #has none, so the pass that finds them is left until it is wanted
+        l_jacs = np.asarray(
+            self.evaluate_jacobians_in_every_element(xi_l, fit_params=concrete))
+
+        for first, second in zip(order[starts[shared]], order[starts[shared] + 1]):
+            ele_a, side_a = int(first) // n_test, tzip[int(first) % n_test]
+            ele_b, side_b = int(second) // n_test, tzip[int(second) % n_test]
+
+            rel_dirs = np.sum(l_jacs[first] * l_jacs[second], axis=0) > 0
+            bmap[(ele_a,) + side_a] = [(ele_b,) + side_b, rel_dirs]
+            bmap[(ele_b,) + side_b] = [(ele_a,) + side_a, rel_dirs]
+
+            lookup_arr[ele_a, side_a[0], side_a[1]] = ele_b
+            lookup_arr[ele_b, side_b[0], side_b[1]] = ele_a
+
     lookup_arr = jnp.asarray(lookup_arr)
     #face if once, 
     # test_faces = self.get_faces()
@@ -247,6 +267,7 @@ def _explore_topology(self, rounding_res=5):
 
         return out_ele.squeeze(), out_xi.squeeze(), final_valid.squeeze()
     self.topomap = topomap_fast_subset
+    self._topo_signature = signature
 
 
 def get_xi_surface_nodes(self, xi_dim, bound_val):
