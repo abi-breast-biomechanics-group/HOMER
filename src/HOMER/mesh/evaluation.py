@@ -192,7 +192,7 @@ def eval_numeric_jac(self, element_ids, xis, locals=None, step=2e-1, fit_params=
 
 
 @wide_eval
-def evaluate_jacobians(self, element_ids, xis, fit_params=None):
+def evaluate_jacobians(self, element_ids, xis, fit_params=None, arrays=None):
     """Evaluate the Jacobian matrix of the embedding at parametric coordinates.
 
     Returns ∂x/∂ξ, the matrix mapping parametric-space tangent vectors to
@@ -214,17 +214,22 @@ def evaluate_jacobians(self, element_ids, xis, fit_params=None):
         fit_params = self.optimisable_param_array
 
     if self.ndim == 2:
-        du = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
-        dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
+        du = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
+        dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
         jmats = jnp.concatenate((du, dv), axis=1)
     if self.ndim == 3:
 
-        du = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
-        dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1, 0], fit_params=fit_params).reshape(-1, 1, self.fdim)
-        dw = self.evaluate_deriv_embeddings(element_ids, xis, [0, 0, 1], fit_params=fit_params).reshape(-1, 1, self.fdim)
+        du = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0, 0], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
+        dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1, 0], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
+        dw = self.evaluate_deriv_embeddings(element_ids, xis, [0, 0, 1], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
         jmats = jnp.concatenate((du, dv, dw), axis=1)
     # return jmats
     return jnp.swapaxes(jmats, -1,-2) #differing jacobin implementation.
+
+
+#reads every piece of field state it needs through *arrays*, so one compiled
+#copy can serve any field sharing a basis.  See _wide_eval_key.
+evaluate_jacobians.accepts_arrays = True
 
 
 def xi_grid(self, res: int, dim=None, surface=False, boundary_points=True, lattice=None) -> np.ndarray | tuple[np.ndarray, np.ndarray]:

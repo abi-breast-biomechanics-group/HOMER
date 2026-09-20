@@ -163,6 +163,7 @@ class MeshField:
         self.true_param_array: Optional[np.ndarray] = None
         self.optimisable_param_array: Optional[np.ndarray] = None
         self.optimisable_param_bool: Optional[np.ndarray] = None
+        self.optimisable_param_indices: Optional[np.ndarray] = None
         self.ele_map: Optional[np.ndarray] = None
         
         ######### field stuff
@@ -198,6 +199,10 @@ class MeshField:
         self.true_param_array = np.concatenate([np.concatenate([node.loc] + [d.flatten() for d in node.values()]) for node in self.nodes]).copy()
         self.optimisable_param_bool = np.concatenate([node.get_optimisability_arr() for node in self.nodes], axis=0).astype(bool)
         self.optimisable_param_array = self.true_param_array[self.optimisable_param_bool]
+        #the same selection as positions rather than flags: a boolean index has
+        #a result shape that depends on its contents, so it can never be a
+        #traced argument, while positions can
+        self.optimisable_param_indices = np.flatnonzero(self.optimisable_param_bool)
 
 
         ########## build the lookup from the input values.
@@ -409,16 +414,17 @@ class MeshField:
             Code is structured so that the result can express custom derivatives
         """
         @wide_eval 
-        def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array):
+        def evaluate_embeddings(element_ids, xis, fit_params = self.optimisable_param_array, arrays=None):
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(jnp.array(xis))
-            params = self._element_params(element_ids, fit_params)
+            params = self._element_params(element_ids, fit_params, arrays)
             outputs = jax.vmap(lambda x: self.elem_evals(x, jnp.asarray(xis)).reshape(-1,self.fdim))
             res = outputs(
                 params
             )
             return res.reshape(-1,self.fdim)
         
+        evaluate_embeddings.accepts_arrays = True
         self.evaluate_embeddings = evaluate_embeddings
 
     def _generate_deriv_function(self):
@@ -427,17 +433,18 @@ class MeshField:
             Code is structured so that the result can express custom derivatives
         """
         @wide_eval
-        def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array):
+        def evaluate_deriv_embeddings(element_ids, xis, derivs, fit_params = self.optimisable_param_array, arrays=None):
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(jnp.array(xis))
-            params = self._element_params(element_ids, fit_params)
+            params = self._element_params(element_ids, fit_params, arrays)
             outputs = jax.vmap(lambda x: self.elem_deriv_evals(x, jnp.asarray(xis), derivs).reshape(-1,self.fdim))
             res = outputs(params)
             return res.reshape(-1,self.fdim)
         
+        evaluate_deriv_embeddings.accepts_arrays = True
         self.evaluate_deriv_embeddings = evaluate_deriv_embeddings
 
-    def expand_fit_params(self, fit_params):
+    def expand_fit_params(self, fit_params, param_data=None, indices=None):
         """Widen *fit_params* to a full parameter vector for this field.
 
         ``fit_params`` normally holds only the optimisable entries, so every
@@ -460,21 +467,39 @@ class MeshField:
             already full length, or :attr:`true_param_array` itself when
             ``None``.
         """
-        param_data = jnp.asarray(self.true_param_array)
+        param_data = jnp.asarray(
+            self.true_param_array if param_data is None else param_data)
         if fit_params is None:
             return param_data
         fit_params = jnp.asarray(fit_params)
         if fit_params.shape[-1] == param_data.shape[-1]:
             return fit_params
-        return param_data.at[self.optimisable_param_bool].set(fit_params)
+        if indices is None:
+            indices = self.optimisable_param_indices
+            if indices is None:
+                indices = np.flatnonzero(np.asarray(self.optimisable_param_bool))
+        return param_data.at[indices].set(fit_params)
 
-    def _element_params(self, element_ids, fit_params):
-        """Gather the parameters of *element_ids*, scaled, shape ``(n_e, n_p)``."""
-        fit_params = self.expand_fit_params(fit_params)
-        emap = jnp.asarray(self.ele_map)[jnp.asarray(element_ids).astype(int)].astype(int)
-        params = fit_params[emap]
-        if self.ele_scales is not None:
-            params = params * jnp.asarray(self.ele_scales)[jnp.asarray(element_ids).astype(int)]
+    def _element_params(self, element_ids, fit_params, arrays=None):
+        """Gather the parameters of *element_ids*, scaled, shape ``(n_e, n_p)``.
+
+        *arrays* stands in for the field's own ``(ele_map, ele_scales,
+        true_param_array, optimisable indices)``.  All four are read here as
+        data -- a gather, a multiply and a scatter -- so a caller holding
+        traced copies can evaluate without this closure touching any concrete
+        state of its own, which is what lets one compiled evaluation serve
+        every field sharing a basis.
+        """
+        if arrays is None:
+            arrays = (self.ele_map, self.ele_scales,
+                      self.true_param_array, self.optimisable_param_indices)
+        ele_map, ele_scales, param_data, indices = arrays
+
+        fit_params = self.expand_fit_params(fit_params, param_data, indices)
+        eles = jnp.asarray(element_ids).astype(int)
+        params = fit_params[jnp.asarray(ele_map)[eles].astype(int)]
+        if ele_scales is not None:
+            params = params * jnp.asarray(ele_scales)[eles]
         return params
 
     def _generate_value_jac_function(self):
@@ -482,7 +507,7 @@ class MeshField:
             Generates the fused evaluator returning both the embedding and its
             Jacobian at the same parametric coordinates.
         """
-        def evaluate_embeddings_and_jacobians(element_ids, xis, fit_params=None):
+        def evaluate_embeddings_and_jacobians(element_ids, xis, fit_params=None, arrays=None):
             """Field values and Jacobians at *xis* in *element_ids*.
 
             Returns ``(values, jacobians)`` shaped ``(n, fdim)`` and
@@ -493,7 +518,7 @@ class MeshField:
             """
             element_ids = jnp.atleast_1d(jnp.array(element_ids))
             xis = jnp.atleast_2d(jnp.array(xis))
-            params = self._element_params(element_ids, fit_params)
+            params = self._element_params(element_ids, fit_params, arrays)
 
             values, jacs = jax.vmap(
                 lambda p: self.elem_value_jac_evals(p, xis)
@@ -501,6 +526,7 @@ class MeshField:
             return (values.reshape(-1, self.fdim),
                     jacs.reshape(-1, self.fdim, self.ndim))
 
+        evaluate_embeddings_and_jacobians.accepts_arrays = True
         self.evaluate_embeddings_and_jacobians = evaluate_embeddings_and_jacobians
 
     def _generate_weight_function(self):

@@ -140,6 +140,56 @@ def depreciation(fn):
         return(fn(*a, **kw))
     return new_fn
 
+#: Jitted wide evaluations, shared by every field with the same basis and
+#: shapes.  Capped because each entry holds the closure of the field that
+#: first built it, and so keeps that field alive.
+_WIDE_EVAL_JITS = {}
+_WIDE_EVAL_CACHE_MAX = 256
+
+
+def _is_traceable(x):
+    """Whether an argument may be passed to the jit rather than baked into it.
+
+    Floating-point arrays are coordinates and can be traced.  Integers index
+    basis derivatives and other Python structure, so they have to stay
+    concrete.
+    """
+    try:
+        dtype = getattr(x, "dtype", None)
+        dtype = dtype if dtype is not None else np.asarray(x).dtype
+    except Exception:
+        return False
+    return np.issubdtype(dtype, np.floating)
+
+
+def _wide_eval_key(obj, variant, name, chunk_size, remat):
+    """What makes two wide evaluations the same computation.
+
+    Only what JAX cannot see for itself belongs here.  Everything the
+    evaluation reads as *data* -- the element map, the scale factors, the
+    parameters and which of them are free -- reaches the jit as an argument,
+    and every shape is dispatched on by ``jax.jit`` internally, so neither
+    needs a key of its own.  What is left is read through the closure and so
+    is invisible to JAX: the basis being contracted against, the dimensions
+    the result is reshaped to, and the chunking that decides the loop
+    structure.  Keeping the key this small is what lets one entry serve every
+    field built on the same basis, at whatever size.
+    """
+    element = obj.elements[0]
+    #by name, not by class: every basis is an instance of the same Basis type,
+    #so the class says nothing about which one this is
+    basis = (tuple(b.name for b in element.basis_functions),
+             tuple(b.order for b in element.basis_functions),
+             np.asarray(element.BasisProductInds).tobytes())
+    return (variant, name, basis, obj.fdim, obj.ndim, chunk_size, bool(remat),
+            getattr(obj, "ele_scales", None) is None)
+
+
+def _wide_eval_arrays(obj):
+    return (obj.ele_map, obj.ele_scales,
+            obj.true_param_array, obj.optimisable_param_indices)
+
+
 def make_iee(name):
     """Build the ``*_in_every_element`` variant of the evaluator called *name*.
 
@@ -170,12 +220,36 @@ def make_iee(name):
         chunk_size = _resolve_chunk_size(self, chunk_size)
         if chunk_size and a:
             chunk_size = max(1, chunk_size // _n_xi(a[0]))
-        mapped = _chunked_vmap(
-            lambda e: new_fn(e, *a, fit_params=fit_params, **kw),
-            (jnp.arange(len(self.elements)),),
-            chunk_size,
-            _resolve_remat(self, remat),
-        )
+        remat = _resolve_remat(self, remat)
+
+        shareable = (not kw
+                     and getattr(new_fn, "accepts_arrays", False)
+                     and self.optimisable_param_indices is not None
+                     and all(_is_traceable(x) for x in a))
+        if not shareable:
+            #keyword arguments and anything used as structure rather than as a
+            #value would have to be compiled in, so those calls stay direct
+            mapped = _chunked_vmap(
+                lambda e: new_fn(e, *a, fit_params=fit_params, **kw),
+                (jnp.arange(len(self.elements)),), chunk_size, remat)
+            return mapped.reshape(-1, *mapped.shape[2:])
+
+        key = _wide_eval_key(self, "in_every_element", name, chunk_size, remat)
+        runner = _WIDE_EVAL_JITS.get(key)
+        if runner is None:
+            def runner(elements, args, fit_params, arrays, _fn=new_fn,
+                       _cs=chunk_size, _rm=remat):
+                return _chunked_vmap(
+                    lambda e: _fn(e, *args, fit_params=fit_params, arrays=arrays),
+                    (elements,), _cs, _rm)
+
+            runner = jax.jit(runner)
+            if len(_WIDE_EVAL_JITS) >= _WIDE_EVAL_CACHE_MAX:
+                _WIDE_EVAL_JITS.pop(next(iter(_WIDE_EVAL_JITS)))
+            _WIDE_EVAL_JITS[key] = runner
+
+        mapped = runner(jnp.arange(len(self.elements)), tuple(a),
+                        fit_params, _wide_eval_arrays(self))
         return mapped.reshape(-1, *mapped.shape[2:])
     return iee
 
@@ -205,13 +279,37 @@ def make_ele_xi_pair(name):
         new_fn = getattr(self, name)
         eval_e = jnp.atleast_1d(jnp.array(eles))
         eval_xi = jnp.atleast_2d(jnp.array(xis))
-        out_sorted = _chunked_vmap( #vmap original over every (element, xi) pair in sorted order
-            lambda single_e, single_xi: new_fn(single_e, single_xi, *a, fit_params=fit_params, **kw),
-            (eval_e, eval_xi),
-            _resolve_chunk_size(self, chunk_size),
-            _resolve_remat(self, remat),
-        ).squeeze()
-        return out_sorted
+        chunk_size = _resolve_chunk_size(self, chunk_size)
+        remat = _resolve_remat(self, remat)
+
+        shareable = (not kw
+                     and getattr(new_fn, "accepts_arrays", False)
+                     and self.optimisable_param_indices is not None
+                     and all(_is_traceable(x) for x in a))
+        if not shareable:
+            return _chunked_vmap( #vmap original over every (element, xi) pair in sorted order
+                lambda single_e, single_xi: new_fn(single_e, single_xi, *a,
+                                                   fit_params=fit_params, **kw),
+                (eval_e, eval_xi), chunk_size, remat,
+            ).squeeze()
+
+        key = _wide_eval_key(self, "ele_xi_pair", name, chunk_size, remat)
+        runner = _WIDE_EVAL_JITS.get(key)
+        if runner is None:
+            def runner(eval_e, eval_xi, args, fit_params, arrays, _fn=new_fn,
+                       _cs=chunk_size, _rm=remat):
+                return _chunked_vmap(
+                    lambda single_e, single_xi: _fn(single_e, single_xi, *args,
+                                                    fit_params=fit_params, arrays=arrays),
+                    (eval_e, eval_xi), _cs, _rm,
+                ).squeeze()
+
+            runner = jax.jit(runner)
+            if len(_WIDE_EVAL_JITS) >= _WIDE_EVAL_CACHE_MAX:
+                _WIDE_EVAL_JITS.pop(next(iter(_WIDE_EVAL_JITS)))
+            _WIDE_EVAL_JITS[key] = runner
+
+        return runner(eval_e, eval_xi, tuple(a), fit_params, _wide_eval_arrays(self))
 
     return ele_xi_pair
 
