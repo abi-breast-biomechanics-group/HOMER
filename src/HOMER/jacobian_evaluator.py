@@ -27,13 +27,13 @@ from time import time
 from typing import Callable, Optional
 import jax
 import jax.numpy as jnp
-from jax.experimental.sparse import BCOO
 import sparsejac
 import numpy as np
 import scipy
 from scipy.sparse.linalg import LinearOperator
 
 from HOMER.mesh import Mesh, MeshField
+from HOMER.mesh.topology import _colour_ranks
 
 def jacobian(
     cost_function: Optional[Callable] = None, 
@@ -305,25 +305,41 @@ def _colouring_seeds(mesh: Mesh | MeshField, fields_seperable: bool):
     """The mesh colouring as two tangent bases, shape ``(n_colours, n_par)``.
 
     Row *c* of the first carries a 1 in every parameter coloured *c*, and the
-    second carries that parameter's own index there.  A jvp against the pair
-    returns each nonzero of the Jacobian alongside the same nonzero weighted by
-    its column, which is what :func:`_decode_compressed_columns` divides apart.
+    second carries that parameter's rank within the colour.  A jvp against the
+    pair returns each nonzero of the Jacobian alongside the same nonzero
+    weighted by that rank, which is what :func:`_decode_compressed_columns`
+    divides apart before reading it back through *members*.
+
+    :returns:
+        ``(seed_values, seed_ranks, members)``, the last being the
+        ``(n_colours, widest colour)`` table turning a decoded rank back into
+        a parameter.
     """
-    _, seed_values, seed_indices = mesh.get_colouring_dict(
+    colouring, seed_values, seed_ranks = mesh.get_colouring_dict(
         fields_seperable=fields_seperable, seed_matrix=True)
-    return seed_values.todense().T, seed_indices.todense().T
+
+    colour_of = np.empty(len(colouring), dtype=int)
+    colour_of[list(colouring)] = list(colouring.values())
+    _, members = _colour_ranks(colour_of, int(colour_of.max()) + 1)
+
+    return seed_values.todense().T, seed_ranks.todense().T, jnp.asarray(members)
 
 
-@partial(jax.jit, static_argnames="n_par")
-def _decode_compressed_columns(weighted, values, n_par, eps=1e-6, int_tol=1e-2):
+@jax.jit
+def _decode_compressed_columns(weighted, values, members, eps=1e-6, int_tol=1e-2):
     """Recover which column each compressed entry came from.
 
-    ``weighted / values`` is the column index, because the colouring lets at
-    most one parameter of a colour reach a given residual.  The quotient only
-    means anything where the entry is a real nonzero, so the division is
-    guarded and everything doubtful -- a value under *eps*, a quotient further
-    than *int_tol* from an integer, a column past the end -- is reported as
-    invalid rather than scattered somewhere wrong.
+    ``weighted / values`` is the rank the parameter holds within its colour,
+    because the colouring lets at most one parameter of a colour reach a given
+    residual.  Row *c* came from colour *c*, so that rank and *members* give
+    the column back.  Ranks run to the size of one colour rather than to the
+    parameter count, and it is that smaller range which keeps the quotient
+    sharp enough to round in float32.
+
+    The quotient only means anything where the entry is a real nonzero, so the
+    division is guarded and everything doubtful -- a value under *eps*, a
+    quotient further than *int_tol* from an integer, a rank past the end of
+    its colour -- is reported as invalid rather than scattered somewhere wrong.
 
     :returns:
         ``(columns, valid)``, both shaped like *values*.  Columns where *valid*
@@ -331,12 +347,16 @@ def _decode_compressed_columns(weighted, values, n_par, eps=1e-6, int_tol=1e-2):
     """
     is_nonzero = jnp.abs(values) > eps
     quotient = weighted / jnp.where(is_nonzero, values, 1.0)
-    columns = jnp.round(quotient)
+    ranks = jnp.round(quotient)
+
+    in_range = (ranks >= 0) & (ranks < members.shape[1]) & jnp.isfinite(quotient)
+    columns = jnp.take_along_axis(
+        members, jnp.where(in_range, ranks, 0).astype(jnp.int32), axis=1)
 
     valid = (is_nonzero
-             & (jnp.abs(quotient - columns) < int_tol)
-             & (columns >= 0) & (columns < n_par)
-             & jnp.isfinite(quotient))
+             & (jnp.abs(quotient - ranks) < int_tol)
+             & in_range
+             & (columns >= 0))
     return jnp.where(valid, columns, 0).astype(jnp.int32), valid
 
 
@@ -365,8 +385,9 @@ def make_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Callable,
         optimisable-parameter mask are read, so the mesh may deform afterwards;
         fixing or freeing parameters invalidates it.
     :param function:
-        A JAX-compatible ``params -> residuals``, both 1-D, taking the mesh's
-        :attr:`optimisable_param_array`.
+        A JAX-compatible ``(params, **kwargs) -> residuals``, both 1-D, taking
+        the mesh's :attr:`optimisable_param_array` and differentiated with
+        respect to it alone.
     :param fields_seperable:
         Treat each field component as its own output, which holds for
         embedding evaluation but not for a coupled quantity such as a local
@@ -374,9 +395,11 @@ def make_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Callable,
         fewer jvps.
 
     :returns:
-        ``params -> BCOO`` of shape ``(n_residuals, n_parameters)``.  For
-        ``scipy.optimize.least_squares``, convert with
-        ``scipy.sparse.coo_array((j.data, j.indices.T), shape=j.shape)``.
+        ``(params, **kwargs) -> coo_array`` of shape
+        ``(n_residuals, n_parameters)``, ready for
+        ``scipy.optimize.least_squares``.  Keyword arguments are forwarded to
+        *function* behind its parameter vector, which is how
+        ``least_squares(..., kwargs=...)`` threads per-solve data through.
 
     .. warning::
         *fields_seperable* has to match how the residual actually couples, and
@@ -390,27 +413,32 @@ def make_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Callable,
         parameters -- separable in elements, not in fields, so it needs
         ``fields_seperable=False``.
     """
-    seed_values, seed_indices = _colouring_seeds(initial_mesh, fields_seperable)
+    seed_values, seed_ranks, members = _colouring_seeds(initial_mesh, fields_seperable)
     n_par = seed_values.shape[1]
 
     @jax.jit
-    def dynamic_jac(params):
-        jvp = jax.vmap(jax.linearize(function, params)[1])
+    def compressed(params, **kwargs):
+        jvp = jax.vmap(jax.linearize(lambda p: function(p, **kwargs), params)[1])
         values = jvp(seed_values)
-        columns, valid = _decode_compressed_columns(jvp(seed_indices), values, n_par)
+        return (values,) + _decode_compressed_columns(jvp(seed_ranks), values, members)
 
+    def dynamic_jac(params, **kwargs):
+        values, columns, valid = compressed(params, **kwargs)
         n_res = values.shape[1]
-        rows = jnp.broadcast_to(jnp.arange(n_res)[None, :], values.shape)
-        indices = jnp.column_stack([rows.ravel(), columns.ravel()])
-        return BCOO((jnp.where(valid, values, 0.0).ravel(), indices),
-                    shape=(n_res, n_par))
+
+        kept = np.flatnonzero(np.asarray(valid).ravel())
+        rows = np.broadcast_to(np.arange(n_res)[None, :], values.shape).ravel()[kept]
+        return scipy.sparse.coo_array(
+            (np.asarray(values).ravel()[kept], (rows, np.asarray(columns).ravel()[kept])),
+            shape=(n_res, n_par))
 
     return dynamic_jac
 
 
 def make_static_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Callable,
                                   init_estimate: jax.typing.ArrayLike,
-                                  fields_seperable: bool) -> Callable:
+                                  fields_seperable: bool,
+                                  further_args: Optional[dict] = None) -> Callable:
     """The same coloured Jacobian, with the sparsity decoded once and frozen.
 
     :func:`make_jac_for_mesh_func` spends two jvps per colour on every call,
@@ -423,8 +451,9 @@ def make_static_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Call
     :param initial_mesh:
         The mesh whose colouring is used.
     :param function:
-        A JAX-compatible ``params -> residuals``, both 1-D, taking the mesh's
-        :attr:`optimisable_param_array`.
+        A JAX-compatible ``(params, **kwargs) -> residuals``, both 1-D, taking
+        the mesh's :attr:`optimisable_param_array` and differentiated with
+        respect to it alone.
     :param init_estimate:
         Where the pattern is read.  An entry that happens to vanish here is
         recorded as absent and stays absent, so pass parameters representative
@@ -432,10 +461,18 @@ def make_static_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Call
         :func:`estimate_sparsity` needs, for the same reason.
     :param fields_seperable:
         As in :func:`make_jac_for_mesh_func`.
+    :param further_args:
+        Keyword arguments for *function* while the pattern is read.  They need
+        not be the ones later calls pass, and often should not be: an entry the
+        probe data masks to zero is recorded as absent for good, so probe with
+        data that leaves every entry live -- unit weights rather than a
+        visibility mask, say -- and pass the real data per call.
 
     :returns:
-        ``params -> BCOO`` of shape ``(n_residuals, n_parameters)``, carrying
-        the same indices every call.
+        ``(params, **kwargs) -> coo_array`` of shape
+        ``(n_residuals, n_parameters)``, carrying the same indices every call,
+        so only the values come back from the device.  Keyword arguments are
+        forwarded as in :func:`make_jac_for_mesh_func`.
 
     .. warning::
         Frozen indices are wrong indices once the pattern moves.  A residual
@@ -444,22 +481,31 @@ def make_static_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Call
         that case wants :func:`make_jac_for_mesh_func`.  The restriction in its
         warning applies here too.
     """
-    seed_values, seed_indices = _colouring_seeds(initial_mesh, fields_seperable)
+    seed_values, seed_ranks, members = _colouring_seeds(initial_mesh, fields_seperable)
     n_par = seed_values.shape[1]
 
-    jvp = jax.vmap(jax.linearize(function, jnp.asarray(init_estimate))[1])
-    start_values = jvp(seed_values)
-    columns, valid = _decode_compressed_columns(jvp(seed_indices), start_values, n_par)
+    def coloured_jvps(params, seeds, **kwargs):
+        return jax.vmap(jax.linearize(lambda p: function(p, **kwargs), params)[1])(seeds)
+
+    probe = {} if further_args is None else further_args
+    init_estimate = jnp.asarray(init_estimate)
+    start_values = coloured_jvps(init_estimate, seed_values, **probe)
+    columns, valid = _decode_compressed_columns(
+        coloured_jvps(init_estimate, seed_ranks, **probe), start_values, members)
 
     n_res = start_values.shape[1]
     kept = np.flatnonzero(np.asarray(valid).ravel())
     rows = np.broadcast_to(np.arange(n_res)[None, :], start_values.shape).ravel()[kept]
-    indices = jnp.asarray(np.column_stack([rows, np.asarray(columns).ravel()[kept]]))
+    cols = np.asarray(columns).ravel()[kept]
     kept = jnp.asarray(kept)
 
     @jax.jit
-    def static_jac(params):
-        values = jax.vmap(jax.linearize(function, params)[1])(seed_values)
-        return BCOO((values.ravel()[kept], indices), shape=(n_res, n_par))
+    def entries(params, **kwargs):
+        return coloured_jvps(params, seed_values, **kwargs).ravel()[kept]
+
+    def static_jac(params, **kwargs):
+        #the pattern is frozen, so only the values cross back from the device
+        return scipy.sparse.coo_array((np.asarray(entries(params, **kwargs)), (rows, cols)),
+                                      shape=(n_res, n_par))
 
     return static_jac

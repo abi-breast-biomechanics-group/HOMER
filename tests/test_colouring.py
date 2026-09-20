@@ -15,6 +15,7 @@ import pytest
 
 from HOMER.basis_definitions import H3, L1, L2, L3
 from HOMER.geometry import cube
+from HOMER.mesh.topology import _colour_ranks
 
 from _helpers import arr
 
@@ -86,16 +87,52 @@ def test_seed_matrices_come_back_as_a_triple(coloured_mesh):
 
 
 def test_the_seed_matrix_has_exactly_one_entry_per_parameter(coloured_mesh):
-    colours, seed_values, seed_indices = coloured_mesh.get_colouring_dict(
+    colours, seed_values, seed_ranks = coloured_mesh.get_colouring_dict(
         fields_seperable=True, seed_matrix=True)
 
     values = np.asarray(seed_values.todense())
-    indices = np.asarray(seed_indices.todense())
+    ranks = np.asarray(seed_ranks.todense())
+
+    colour_of = np.empty(len(colours), dtype=int)
+    colour_of[list(colours)] = list(colours.values())
+    rank, members = _colour_ranks(colour_of, colour_of.max() + 1)
 
     np.testing.assert_array_equal(values.sum(axis=1), np.ones(values.shape[0]))
     for parameter, colour in colours.items():
         assert values[parameter, colour] == 1
-        assert indices[parameter, colour] == parameter
+        assert ranks[parameter, colour] == rank[parameter]
+
+
+def test_a_rank_and_its_colour_name_one_parameter(coloured_mesh):
+    """What the decode relies on: (colour, rank) is a parameter, and back.
+
+    The index pass is weighted by rank rather than by parameter index, which
+    is only decodable if the pair identifies the parameter uniquely.
+    """
+    colours = coloured_mesh.get_colouring_dict(fields_seperable=True)
+
+    colour_of = np.empty(len(colours), dtype=int)
+    colour_of[list(colours)] = list(colours.values())
+    rank, members = _colour_ranks(colour_of, colour_of.max() + 1)
+
+    for parameter, colour in colours.items():
+        assert members[colour, rank[parameter]] == parameter
+
+    #every padded slot stays -1, and every real one is claimed exactly once
+    claimed = members[members >= 0]
+    assert sorted(claimed.tolist()) == list(range(len(colours)))
+
+
+def test_ranks_stay_far_smaller_than_parameter_indices(coloured_mesh):
+    """Why rank is used at all: the decode divides, so magnitude is precision."""
+    colours = coloured_mesh.get_colouring_dict(fields_seperable=True)
+
+    colour_of = np.empty(len(colours), dtype=int)
+    colour_of[list(colours)] = list(colours.values())
+    rank, _ = _colour_ranks(colour_of, colour_of.max() + 1)
+
+    n_colours = colour_of.max() + 1
+    assert rank.max() < len(colours) / (n_colours - 1)
 
 
 @pytest.mark.parametrize("basis", [L1, L2, H3], ids=lambda b: b.__name__)

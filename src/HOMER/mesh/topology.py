@@ -16,7 +16,6 @@ from typing import Optional
 import numpy as np
 import jax
 import jax.numpy as jnp
-import networkx as nx
 
 from HOMER.utils import build_full_lookup 
 from HOMER.mesh.reordering import _element_node_lists
@@ -415,6 +414,66 @@ def _clean_pts(self):
     self.generate_mesh()
 
 
+def _colour_ranks(colour_of, num_colours):
+    """Where each parameter sits within its own colour, and the way back.
+
+    The index pass of a coloured Jacobian is decoded by division, so its seed
+    weights set how sharp the recovered integer is.  Weighting by a global
+    parameter index costs precision that weighting by the parameter's rank
+    within its colour does not, and the rank identifies it just as well once
+    the colour is known -- which it is, because the colour is the row.
+
+    :param colour_of:
+        The colour of each parameter, indexed by parameter.
+    :param num_colours:
+        How many colours the mesh needed.
+
+    :returns:
+        ``(rank, members)`` -- every parameter's rank, and a
+        ``(num_colours, widest colour)`` table giving the parameter holding
+        each rank, padded with -1.
+    """
+    order = np.argsort(colour_of, kind="stable")
+    widths = np.bincount(colour_of, minlength=num_colours)
+    ranks_sorted = np.arange(colour_of.size) - np.repeat(np.cumsum(widths) - widths, widths)
+
+    rank = np.empty(colour_of.size, dtype=int)
+    rank[order] = ranks_sorted
+
+    members = np.full((num_colours, max(widths.max(), 1)), -1, dtype=int)
+    members[colour_of[order], ranks_sorted] = order
+    return rank, members
+
+
+def _greedy_colour_largest_first(adj_matrix):
+    """Greedily colour a parameter adjacency graph, highest degree first.
+
+    ``networkx.coloring.greedy_color`` gives an equivalent answer, but building
+    the graph object it wants costs an order of magnitude more than colouring
+    it does.  Walking the CSR rows directly skips that.
+
+    :param adj_matrix:
+        Symmetric ``csr_array`` with the self-loops already removed; an entry
+        means the two parameters meet in some element.
+
+    :returns:
+        The colour of each parameter, as an integer array.
+    """
+    indptr, indices = adj_matrix.indptr, adj_matrix.indices
+    colours = np.full(adj_matrix.shape[0], -1, dtype=int)
+
+    for node in np.argsort(-np.diff(indptr), kind="stable"):
+        used = colours[indices[indptr[node]:indptr[node + 1]]]
+        used = used[used >= 0]
+        #the smallest colour no neighbour has taken; only the first
+        #len(used) + 1 can be free, so nothing beyond that need be considered
+        free = np.ones(used.size + 1, dtype=bool)
+        free[used[used <= used.size]] = False
+        colours[node] = np.argmax(free)
+
+    return colours
+
+
 def get_colouring_dict(self, fields_seperable=False, seed_matrix=False):
     """
     Returns a colouring dict which describes which mesh parameters will never effect the same output variable.
@@ -430,37 +489,41 @@ def get_colouring_dict(self, fields_seperable=False, seed_matrix=False):
 
     :returns:
         The colouring as ``{parameter index: colour}``, or, with
-        *seed_matrix*, a tuple of that dict, a unit-valued seed matrix and an
-        index-weighted one -- both ``BCOO`` of shape
-        ``(n_parameters, n_colours)``.
+        *seed_matrix*, a tuple of that dict, a unit-valued seed matrix and one
+        weighted by each parameter's rank within its colour -- both ``BCOO``
+        of shape ``(n_parameters, n_colours)``.  :func:`_colour_ranks` turns
+        those ranks back into parameters.
     """
-    from sparsejac.sparsejac import _greedy_color, _input_connectivity_from_sparsity
-    from jax.experimental.sparse import BCOO
-    import scipy
+    import scipy.sparse
 
     sf = self.fdim if fields_seperable else 1
 
+    # One row per element, or per field component of an element when separable,
+    # holding the optimisable parameters that row can reach.  Fixed parameters
+    # map to -1 and drop out.
+    ele_map = np.asarray(self.ele_map).astype(int)
+    n_rows = ele_map.shape[0] * sf
+    slots = ele_map.reshape(ele_map.shape[0], -1, sf).transpose(0, 2, 1).reshape(n_rows, -1)
 
-    graph_struct = np.zeros((len(self.elements) * sf, len(self.true_param_array)))
-    for ide, emap in enumerate(self.ele_map):
-        for i in range(sf):
-            graph_struct[ide * sf + i, emap.astype(int)[i::sf]] = 1
-    graph_struct = graph_struct[:, self.optimisable_param_bool] #remove non-optimisable params
-    jax_sparse = BCOO.fromdense(graph_struct)
+    optimisable = np.asarray(self.optimisable_param_bool)
+    position = np.full(len(self.true_param_array), -1)
+    position[optimisable] = np.arange(optimisable.sum())
 
-    graph_struct = scipy.sparse.csr_array(
-                (jax_sparse.data, (jax_sparse.indices[:, 0], jax_sparse.indices[:, 1])),
-                shape=jax_sparse.shape,
-                )
+    columns = position[slots].ravel()
+    rows = np.repeat(np.arange(n_rows), slots.shape[1])[columns >= 0]
+    columns = columns[columns >= 0]
 
-    jacobian = graph_struct #csr_array(graph_struct)
-    adj_matrix = (jacobian.T @ jacobian).tocsr()
+    incidence = scipy.sparse.csr_array(
+        (np.ones(columns.size), (rows, columns)),
+        shape=(n_rows, int(optimisable.sum())),
+    )
+    adj_matrix = (incidence.T @ incidence).tocsr()
     adj_matrix.setdiag(0) # Remove self-loops for coloring
     adj_matrix.eliminate_zeros()
 
-    G = nx.from_scipy_sparse_array(adj_matrix)
-    colouring_dict = nx.coloring.greedy_color(G, strategy="largest_first")
-    num_colours = max(colouring_dict.values()) + 1
+    colouring = _greedy_colour_largest_first(adj_matrix)
+    colouring_dict = {int(node): int(colour) for node, colour in enumerate(colouring)}
+    num_colours = int(colouring.max()) + 1
 
     if not seed_matrix:
         return colouring_dict
@@ -478,8 +541,14 @@ def get_colouring_dict(self, fields_seperable=False, seed_matrix=False):
         (data_vals, indices), shape=(num_vars, num_colours)
     )
 
-    # 2. Index-Weighted Seed Matrix (S2) - Data is the node indices
-    data_idxs = jnp.array(nodes, dtype=jnp.float32)
+    # 2. Rank-Weighted Seed Matrix (S2) - Data is the rank within the colour,
+    # which is smaller than the parameter index by a factor of the colour
+    # count, and so is recovered by the decode's division far more sharply.
+    colour_of = np.empty(num_vars, dtype=int)
+    colour_of[nodes] = colours
+    rank, _ = _colour_ranks(colour_of, num_colours)
+
+    data_idxs = jnp.array(rank[nodes], dtype=jnp.float32)
     seed_matrix_idxs = jax.experimental.sparse.BCOO(
         (data_idxs, indices), shape=(num_vars, num_colours)
     )
