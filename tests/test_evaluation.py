@@ -37,7 +37,10 @@ def test_wide_evaluation_is_the_cross_product_of_elements_and_xis(refined_cube):
         np.repeat(eles, len(xi)), np.tile(xi, (len(eles), 1))))
 
     assert wide.shape == (len(eles) * len(xi), 3)
-    np.testing.assert_array_equal(wide, pair)
+    #the paired spelling is compiled and this one is not, and XLA associates
+    #the float32 contraction its own way, so the two agree to round-off
+    #rather than bit for bit
+    np.testing.assert_allclose(wide, pair, rtol=0, atol=EXACT)
 
 
 def test_in_every_element_covers_all_elements(refined_cube):
@@ -47,7 +50,8 @@ def test_in_every_element_covers_all_elements(refined_cube):
     wide = arr(refined_cube.evaluate_embeddings(np.arange(len(refined_cube.elements)), xi))
 
     assert everywhere.shape == (len(refined_cube.elements) * len(xi), 3)
-    np.testing.assert_array_equal(everywhere, wide)
+    #as above: the wide spelling is compiled, the direct one is not
+    np.testing.assert_allclose(everywhere, wide, rtol=0, atol=EXACT)
 
 
 @pytest.mark.parametrize("chunk_size", [1, 4, 10_000])
