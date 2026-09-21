@@ -234,12 +234,16 @@ coloured.plot(node_colour=node_colours, node_size=25,
 output, which is true of embedding evaluation (but not of, say, a local
 Jacobian determinant) and needs markedly fewer colours.  The seed matrices are
 `(n_parameters, n_colours)`, one entry per parameter: `seed_values` holds a 1
-there and `seed_indices` holds the parameter's own index.
+there and `seed_ranks` holds the parameter's position within its own colour.
 
 One `jvp` per colour then compresses the whole Jacobian, because at most one
 parameter of a given colour reaches any given row.  `J @ seed_values` gives the
-nonzero values and `J @ seed_indices` the same entries weighted by their column
-index, so dividing one by the other says which column each value came from.
+nonzero values and `J @ seed_ranks` the same entries weighted by that position,
+so dividing one by the other says which parameter of the colour each value came
+from -- and the colour is the row, so that names the column.  The weight is a
+rank rather than a parameter index because the decode recovers it by dividing:
+ranks run to the size of one colour instead of to the parameter count, which is
+what keeps the quotient sharp enough to round correctly in float32.
 `n_colours` evaluations recover a pattern that probing would have charged
 `n_parameters` for.
 
@@ -254,8 +258,8 @@ def residual(params):
     return cost(params)
 
 jac_fn = make_jac_for_mesh_func(mesh, residual, fields_seperable=True)
-jac = jac_fn(params)          # BCOO, (n_residuals, n_parameters)
-print(jac.shape, jac.nse, "non-zeros")
+jac = jac_fn(params)          # coo_array, (n_residuals, n_parameters)
+print(jac.shape, jac.nnz, "non-zeros")
 ```
 
 Because the indices are decoded on every call, the *pattern* is free to move
@@ -308,15 +312,30 @@ representative; and if the residual *does* re-embed its data, the indices are
 wrong the moment a point changes element -- that case wants the dynamic
 version.
 
-Both return a `BCOO`.  `scipy.optimize.least_squares` wants a SciPy matrix, so
-convert on the way out:
+Both return a `scipy.sparse.coo_array`, which is what
+`scipy.optimize.least_squares` wants, so they go straight to it with no
+conversion.  The static one holds its indices on the host, so only the values
+come back from the device on each call.
 
-```python exec="true" source="above" session="fitting"
-import scipy.sparse
+A residual whose data changes between solves -- a tracker stepping through
+frames, a correspondence refound each iteration -- takes that data as keyword
+arguments, and both makers forward them to it behind the parameter vector.
+That is the route `least_squares(..., kwargs=...)` already uses, so one dict
+feeds the residual and its Jacobian alike:
 
-jac = jac_fn(params)
-sparse_jac = scipy.sparse.coo_array((jac.data, jac.indices.T), shape=jac.shape)
+```python
+jac_fn = make_static_jac_for_mesh_func(
+    mesh, residual, p_start, fields_seperable=True,
+    further_args={'weights': np.ones(n_obs)})
+
+result = least_squares(residual, p_start, jac=jac_fn,
+                       kwargs={'weights': visibility[frame]})
 ```
+
+`further_args` is deliberately not the data later calls pass.  An entry the
+probe masks to zero is recorded as absent for good, so read the pattern with
+data that leaves every entry live -- unit weights rather than a visibility
+mask -- and pass the real thing per call.
 
 ---
 
