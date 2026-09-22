@@ -81,13 +81,53 @@ def associated_node_index(self, index_list:list, nodes_to_gather: Optional[list]
     return param_ids
 
 
-def _explore_topology(self, rounding_res=5):
-    """
-    Explores the mesh topology, finding how neighbouring points connet to each other
+#relative to the largest weight on the face: a basis evaluates its polynomial
+#form at the boundary, so a weight that is zero there can come back as roundoff,
+#which in float32 sits some two orders below this.  The smallest weight that
+#genuinely shapes a face -- B3's 1/6 -- sits five above.
+_SUPPORT_TOL = 1e-6
 
-    What it finds depends only on where the nodes are and which elements hold
-    them, so a regeneration that moved neither has nothing new to say.  That
-    is worth checking because :meth:`~HOMER.mesh.field.MeshField.generate_mesh`
+
+def _face_support(self) -> dict[tuple[int, int, int], frozenset]:
+    """The parameters that shape each face, keyed by ``(element, direction, side)``.
+
+    An element weight is a product of one 1-D basis function per direction, so it
+    shapes a face when its factor in that face's own direction is non-zero there;
+    the face spans the other directions, so every one of their factors takes part.
+    Read off the bases like this the support holds for all of them: H3 and L1-L4
+    leave the parameters of the face's own nodes, B3 reaches a control point into
+    the element, and two elements that conform reach the same parameters from
+    either side in either case.
+    """
+    support = {}
+    for ide, element in enumerate(self.elements):
+        #ele_map holds a weight's field components together, in the order
+        #BasisProductInds holds the weights, so the first component names the weight
+        params = np.asarray(self.ele_map[ide]).reshape(-1, self.fdim)[:, 0].astype(int)
+        factors = np.asarray(element.BasisProductInds)
+        for dim, basis in enumerate(element.basis_functions):
+            for side in (0, 1):
+                weights = np.abs(np.asarray(basis.fn(np.array([float(side)]))).ravel())
+                on_face = weights > _SUPPORT_TOL * weights.max()
+                support[(ide, dim, side)] = frozenset(params[on_face[factors[:, dim]]].tolist())
+    return support
+
+
+def _explore_topology(self):
+    """
+    Explores the mesh topology, finding how neighbouring elements connect to each other
+
+    Two elements share a face when the same parameters shape them both on it,
+    which is the condition that makes them conform, and which
+    :func:`_face_support` reads straight off their bases.  Hashing the evaluated
+    face centres -- what this used to do -- asks the same question of the
+    geometry instead, and drops an adjacency whenever two coincident centres
+    round apart, which in float32 they do often enough to tear a mesh in half on
+    the next rebase.
+
+    What it finds depends only on the elements and the parameters they are wired
+    to, so a regeneration that moved neither has nothing new to say.  That is
+    worth checking because :meth:`~HOMER.mesh.field.MeshField.generate_mesh`
     is called far more often than a mesh changes -- once per element added,
     several times per refinement -- and this is the expensive half of it.
     """
@@ -98,66 +138,54 @@ def _explore_topology(self, rounding_res=5):
             and getattr(self, "topomap", None) is not None):
         return
 
-    if self.ndim == 2:
-        xi_l = np.array([
-            [0, 0.5], [1, 0.5],
-            [0.5, 0], [0.5, 1],
-        ])
-        tzip = ((0,0), (0,1), (1, 0), (1,1))
-    else:
-        xi_l = np.array([
-            [0, 0.5, 0.5], [1, 0.5, 0.5],
-            [0.5, 0, 0.5], [0.5, 1, 0.5],
-            [0.5, 0.5, 0], [0.5, 0.5, 1],
-        ])
-        tzip = ((0,0), (0,1), (1, 0), (1,1), (2, 0), (2, 1))
-    n_test = len(xi_l)
+    groups = {}
+    for face, key in _face_support(self).items():
+        groups.setdefault(key, []).append(face)
 
-    #pinned to the mesh's own parameters rather than whatever is ambient: this
-    #can be reached from inside a jit trace, and the topology is a property of
-    #where the mesh actually is, not of the tangent being pushed through it
-    concrete = np.asarray(self.optimisable_param_array)
-    locs = np.round(
-        np.asarray(self.evaluate_embeddings_in_every_element(xi_l, fit_params=concrete)),
-        rounding_res)
-    _, idx, inv, cnt = np.unique(
-        locs, axis=0,
-        return_index=True,
-        return_inverse=True,
-        return_counts=True
-    )
+    #a face no other element is shaped by is exposed; one that two elements share
+    #is a boundary between them.  A 2-D mesh is all surface: it has boundaries,
+    #but no exposed faces, whatever a face would even mean for one
     faces = []
-    bmap = {}
+    boundaries = []
+    for group in groups.values():
+        if len(group) == 1:
+            faces += [group[0]] if self.ndim == 3 else []
+        elif len(group) == 2:
+            boundaries.append(group)
+        else:
+            raise ValueError(f"{len(group)} element faces are shaped by the same "
+                             f"parameters, so this is not a manifold mesh: {group}")
 
+    bmap = {}
     lookup_arr = np.ones((len(self.elements), self.ndim, 2), dtype=int) * -1
 
-    #a location seen once is a face, seen twice is a boundary between two
-    #elements.  Sorting by which location each test point landed on groups the
-    #repeats in one pass, rather than rescanning every point per location.
-    order = np.argsort(inv.ravel(), kind="stable")
-    starts = np.cumsum(cnt) - cnt
+    if boundaries:
+        #the face centres, in the order evaluate_jacobians_in_every_element
+        #returns them: direction slowest, side fastest
+        tzip = [(dim, side) for dim in range(self.ndim) for side in (0, 1)]
+        xi_l = np.full((len(tzip), self.ndim), 0.5)
+        xi_l[np.arange(len(tzip)), [dim for dim, _ in tzip]] = [side for _, side in tzip]
+        at = {face: i for i, face in enumerate(tzip)}
 
-    if self.ndim == 3: #undefined behaviour otherwise, what even is a face for a 2D object
-        for single in idx[cnt == 1]:
-            faces.append((int(single) // n_test,) + tzip[int(single) % n_test])
-
-    shared = np.flatnonzero(cnt == 2)
-    if shared.size:
-        #only a shared boundary reads the jacobians, and a mesh of one element
-        #has none, so the pass that finds them is left until it is wanted
+        #which way the two elements run relative to each other is geometry, not
+        #topology, so this much is still read off the mesh where it sits.  Pinned
+        #to the mesh's own parameters rather than whatever is ambient: this can be
+        #reached from inside a jit trace, and the topology is a property of where
+        #the mesh actually is, not of the tangent being pushed through it
+        concrete = np.asarray(self.optimisable_param_array)
         l_jacs = np.asarray(
             self.evaluate_jacobians_in_every_element(xi_l, fit_params=concrete))
 
-        for first, second in zip(order[starts[shared]], order[starts[shared] + 1]):
-            ele_a, side_a = int(first) // n_test, tzip[int(first) % n_test]
-            ele_b, side_b = int(second) // n_test, tzip[int(second) % n_test]
+        for face_a, face_b in boundaries:
+            jac_a = l_jacs[face_a[0] * len(tzip) + at[face_a[1:]]]
+            jac_b = l_jacs[face_b[0] * len(tzip) + at[face_b[1:]]]
+            rel_dirs = np.sum(jac_a * jac_b, axis=0) > 0
 
-            rel_dirs = np.sum(l_jacs[first] * l_jacs[second], axis=0) > 0
-            bmap[(ele_a,) + side_a] = [(ele_b,) + side_b, rel_dirs]
-            bmap[(ele_b,) + side_b] = [(ele_a,) + side_a, rel_dirs]
+            bmap[face_a] = [face_b, rel_dirs]
+            bmap[face_b] = [face_a, rel_dirs]
 
-            lookup_arr[ele_a, side_a[0], side_a[1]] = ele_b
-            lookup_arr[ele_b, side_b[0], side_b[1]] = ele_a
+            lookup_arr[face_a[0], face_a[1], face_a[2]] = face_b[0]
+            lookup_arr[face_b[0], face_b[1], face_b[2]] = face_a[0]
 
     lookup_arr = jnp.asarray(lookup_arr)
     #face if once, 
@@ -314,47 +342,19 @@ def get_xi_surface_nodes(self, xi_dim, bound_val):
     return valid_elements, np.unique(ele_nodes[np.ix_(valid_elements, on_face)])
 
 
-def get_faces(self, rounding_res = 5) -> list[tuple[int]]:
+def get_faces(self) -> list[tuple[int]]:
     """
     Returns all external faces of the current mesh.
     Faces are indicated as tuples (elem_id, dim, {0,1}).
-    By definition, A manifold is a face, indicated as (elem_id, -1, -1).
-    Faces are determined by spatial hashing of the face center i.e (0.5,0.5, {0,1})
 
-    :param rounding_res:
-        Decimal places the face centres are rounded to before hashing, so two
-        faces that meet are recognised as the same point.  Only used on the
-        first call; afterwards the cached :attr:`faces` is returned.
+    A face is external when no second element is shaped by the parameters that
+    shape it -- :func:`_explore_topology` works them out when the mesh is
+    generated, and this hands that list over.  A 2-D mesh is all surface and
+    has none.
 
     :returns:
         One tuple per external face.
     """
-    if self.faces is not None:
-        return self.faces
-
-    hash_space = {}
-
-    elem_eval = np.array([
-        [0, 0.5, 0.5], [1, 0.5, 0.5],
-        [0.5, 0, 0.5], [0.5, 1, 0.5],
-        [0.5, 0.5, 0], [0.5, 0.5, 1],
-    ])
-    tzip = ((0,0), (0,1), (1, 0), (1,1), (2, 0), (2, 1))
-    faces = []
-    for ide, element in enumerate(self.elements):
-        if element.ndim == 2:
-            faces.append((ide, -1, -1))
-            continue
-
-        pts = self.evaluate_embeddings(np.array([ide]), xis=elem_eval)
-        for pt, tested in zip(pts, tzip):
-            tp = tuple(np.round(np.asarray(pt), rounding_res).tolist())
-            space = hash_space.setdefault(tp, [])
-            space.append((ide,) + tested)
-
-    calc_face = faces + [k[0] for k in hash_space.values() if len(k) == 1]
-    # self.shared_boundaries = [k[0] for k in hash_space.values() if len(k) > 1]
-    self.faces = calc_face
     return self.faces
 
 
