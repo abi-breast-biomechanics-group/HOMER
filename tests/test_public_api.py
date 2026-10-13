@@ -18,18 +18,18 @@ from HOMER.mesh.mesh import Mesh
 #every method MeshField gets from a sibling module, by the module it comes from
 BOUND = {
     'plotting': ['get_surface', 'get_hex_surface', 'get_triangle_surface',
-                 'get_lines', 'plot', 'plot_strains'],
+                 'get_lines', 'hanging_points', 'plot', 'plot_strains'],
     'evaluation': ['evaluate_embeddings', 'evaluate_deriv_embeddings',
                    'evaluate_element_embeddings', 'evaluate_normals',
                    'eval_numeric_jac', 'evaluate_jacobians', 'xi_grid',
                    'gauss_grid', 'eval_surface', 'embed_points',
                    'evaluate_sobolev', 'get_volume', 'evaluate_strain'],
-    'parameters': ['get_element_params', 'update_from_params', 'unfix_mesh',
+    'parameters': ['assemble_param_maps', 'get_element_params', 'update_from_params', 'unfix_mesh',
                    'get_xi_weight_mat', 'get_xi_weight_blocks', 'linear_fit'],
     'topology': ['associated_node_index', '_explore_topology',
                  'get_xi_surface_nodes', 'get_faces', 'topo_chain_check',
                  '_update_id_mappings', '_clean_pts', 'get_colouring_dict'],
-    'refinement': ['refine', 'rebase'],
+    'refinement': ['refine', 'refine_elements', 'rebase'],
 }
 
 

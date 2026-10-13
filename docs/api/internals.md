@@ -4,6 +4,10 @@ Machinery the public classes are built from.  Documented because the
 library's own docstrings refer to it, not because it is a stable
 interface: these modules may change without notice.
 
+::: HOMER.mesh.hierarchy
+
+---
+
 ::: HOMER.mesh_decorators
 
 ---

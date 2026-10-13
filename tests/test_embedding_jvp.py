@@ -157,7 +157,8 @@ def test_a_per_element_jvp_reproduces_the_full_jacobian(registration_problem):
     node_jacobian = jax.jacfwd(moved_params)(probe)
     (elements, _) = mesh.embed_points(target, fit_params=moved_params(probe).ravel(),
                                       **embed_kwargs)[0]
-    gather = ele_map[elements].astype(int)
+    #every slot of this mesh is one whole DOF, so the gather is of its components
+    gather = (ele_map[elements][..., 0, None] * mesh.fdim + jnp.arange(mesh.fdim)).reshape(len(elements), -1)
     assembled = jax.vmap(one_point_jvp)(
         target,
         moved_params(probe).ravel()[gather],

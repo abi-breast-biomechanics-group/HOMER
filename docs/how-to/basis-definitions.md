@@ -136,11 +136,11 @@ print(MeshElement(node_indexes=list(range(8)), basis_functions=H3**3).used_node_
 !!! note "Derivatives are with respect to xi, not arclength"
     The notes take one further step (§1.6, eq. 1.15): each nodal derivative is
     scaled by an element scale factor, so that it is the *arclength*
-    derivative that is shared between elements.  HOMER keeps the
-    $\xi$-derivative itself and leaves `MeshElement.scale_factors` unset —
-    the same interpolation with every scale factor taken as 1.  A model
-    exported with scale factors therefore needs them folded into its nodal
-    derivatives before it is read in.
+    derivative that is shared between elements.  By default HOMER keeps the
+    $\xi$-derivative itself — the same interpolation with every scale factor
+    taken as 1.  A scale factor is a single weighted term of an element's
+    [parameter map](../architecture.md#parameter-maps), so a model exported
+    with scale factors can be read in with them as they are.
 
 ---
 

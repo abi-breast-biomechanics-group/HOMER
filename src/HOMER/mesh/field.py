@@ -90,8 +90,12 @@ class MeshField:
         Boolean mask selecting optimisable parameters from
         *true_param_array*.
     :ivar ele_map: numpy.ndarray
-        ``(n_elements, n_params_per_element)`` index array mapping element
-        slots to positions in *true_param_array*.
+        ``(n_elements, n_slots, K)`` DOF indices: each element slot is the
+        weighted sum of up to *K* DOFs, see :meth:`assemble_param_maps`.
+    :ivar ele_weights: numpy.ndarray
+        ``(n_elements, n_slots, K)`` the weights of those sums.
+    :ivar dof_node: numpy.ndarray
+        ``(n_dofs,)`` the node each DOF belongs to.
     """
 
     #--- methods defined in sibling modules
@@ -99,6 +103,7 @@ class MeshField:
     get_hex_surface = plotting.get_hex_surface
     get_triangle_surface = plotting.get_triangle_surface
     get_lines = plotting.get_lines
+    hanging_points = plotting.hanging_points
     plot = plotting.plot
     plot_strains = plotting.plot_strains
     evaluate_embeddings = evaluation.evaluate_embeddings
@@ -114,6 +119,7 @@ class MeshField:
     evaluate_sobolev = evaluation.evaluate_sobolev
     get_volume = evaluation.get_volume
     evaluate_strain = evaluation.evaluate_strain
+    assemble_param_maps = parameters.assemble_param_maps
     get_element_params = parameters.get_element_params
     update_from_params = parameters.update_from_params
     unfix_mesh = parameters.unfix_mesh
@@ -129,6 +135,7 @@ class MeshField:
     _clean_pts = topology._clean_pts
     get_colouring_dict = topology.get_colouring_dict
     refine = refinement.refine
+    refine_elements = refinement.refine_elements
     rebase = refinement.rebase
 
     def __init__(self, nodes:Optional[list[MeshNode]] = None, elements: Optional[list[MeshElement]|MeshElement]=None, jax_compile:bool = False, skip_generate=False) -> None:
@@ -158,6 +165,7 @@ class MeshField:
         self.generate_weight_matrix_T: Optional[Callable] = None
 
         self.faces = None
+        self.hanging = {}
 
         ######### optimisation
         self.true_param_array: Optional[np.ndarray] = None
@@ -165,12 +173,11 @@ class MeshField:
         self.optimisable_param_bool: Optional[np.ndarray] = None
         self.optimisable_param_indices: Optional[np.ndarray] = None
         self.ele_map: Optional[np.ndarray] = None
-        
+        self.ele_weights: Optional[np.ndarray] = None
+        self.dof_node: Optional[np.ndarray] = None
+
         ######### field stuff
         self.fdim = None
-
-        ######### support for element scales
-        self.ele_scales = None
 
         ######### Compilation flags
         self.compile = jax_compile
@@ -222,32 +229,7 @@ class MeshField:
             self.element_id_to_ind[el.id] = e 
 
 
-        self.update_from_params(np.arange(self.true_param_array.shape[-1]), generate=False)
-
-        ele_maps = []
-        for ide, element in enumerate(self.elements):
-            param_ids = []
-            
-            if element.used_index:
-                nodes_to_iter = [self.nodes[e] for e in element.nodes]
-            else:
-                nodes_to_iter = [self.get_node(e) for e in element.nodes]
-
-            for idn, node in enumerate(nodes_to_iter):
-                param_ids.append(node.loc)
-                for field in element.used_node_fields: 
-                    try:
-                        param_ids.append(node[field].flatten())
-                    except KeyError:
-                        raise ValueError(f"Node {idn} of element: {ide} did not have the required field '{field}'")
-            ele_maps.append(np.concatenate(param_ids))
-        self.ele_map = np.array(ele_maps)
-        self.update_from_params(self.true_param_array, generate=False)
-
-        self.ele_scales = None #get this done so it's captured in the closure
-        if self.elements[0].scale_factors is not None:
-            self.ele_scales = np.array([e.scale_factors for e in self.elements])
-
+        self.assemble_param_maps()
 
         self._generate_elem_functions()
         self._generate_elem_deriv_functions()
@@ -481,26 +463,28 @@ class MeshField:
         return param_data.at[indices].set(fit_params)
 
     def _element_params(self, element_ids, fit_params, arrays=None):
-        """Gather the parameters of *element_ids*, scaled, shape ``(n_e, n_p)``.
+        """The parameters of *element_ids*, their maps applied, shape ``(n_e, n_p)``.
 
-        *arrays* stands in for the field's own ``(ele_map, ele_scales,
+        Every element's map is applied, then the rows asked for are gathered:
+        the maps are padded to the mesh's longest, so applying them per point
+        would make one hanging node cost every point that many terms.
+
+        *arrays* stands in for the field's own ``(ele_map, ele_weights,
         true_param_array, optimisable indices)``.  All four are read here as
-        data -- a gather, a multiply and a scatter -- so a caller holding
+        data -- a scatter, a weighted gather and a row gather -- so a caller holding
         traced copies can evaluate without this closure touching any concrete
         state of its own, which is what lets one compiled evaluation serve
         every field sharing a basis.
         """
         if arrays is None:
-            arrays = (self.ele_map, self.ele_scales,
+            arrays = (self.ele_map, self.ele_weights,
                       self.true_param_array, self.optimisable_param_indices)
-        ele_map, ele_scales, param_data, indices = arrays
+        ele_map, ele_weights, param_data, indices = arrays
 
-        fit_params = self.expand_fit_params(fit_params, param_data, indices)
+        dofs = self.expand_fit_params(fit_params, param_data, indices).reshape(-1, self.fdim)
+        every = (dofs[jnp.asarray(ele_map)] * jnp.asarray(ele_weights)[..., None]).sum(-2)
         eles = jnp.asarray(element_ids).astype(int)
-        params = fit_params[jnp.asarray(ele_map)[eles].astype(int)]
-        if ele_scales is not None:
-            params = params * jnp.asarray(ele_scales)[eles]
-        return params
+        return every.reshape(every.shape[0], -1)[eles]
 
     def _generate_value_jac_function(self):
         """

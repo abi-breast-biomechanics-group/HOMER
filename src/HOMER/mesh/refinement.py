@@ -1,7 +1,7 @@
 """
 refinement.py - subdividing a mesh, and moving it to a different basis.
 
-:func:`refine` and :func:`rebase` are methods of
+:func:`refine`, :func:`refine_elements` and :func:`rebase` are methods of
 :class:`~HOMER.mesh.field.MeshField` that live in this module; the first
 argument is the field itself, and :mod:`HOMER.mesh.field` binds them into the
 class.  The private helpers around them work out which node of the refined
@@ -9,6 +9,7 @@ mesh came from which node of the original, which is what lets a pinned
 parameter survive the operation.
 """
 
+import itertools
 import logging
 from copy import deepcopy
 from fractions import Fraction
@@ -19,7 +20,9 @@ import numpy as np
 from HOMER.basis_definitions import Basis, BasisGroup
 from HOMER.mesh.node import MeshNode
 from HOMER.mesh.element import MeshElement
-from HOMER.mesh.reordering import reorder_nodes as _reorder_nodes, resolve_strategy
+from HOMER.mesh.hierarchy import Hierarchy, prolongation
+from HOMER.mesh.reordering import (reorder_nodes as _reorder_nodes, resolve_strategy,
+                                   _element_node_lists, element_lattice_coords)
 from HOMER.topomap_operations import global_nodes_from_ele_localnodes, refine_connectivity
 from HOMER.utils import all_pairings
 
@@ -82,16 +85,48 @@ def _basis_slot_correspondence(old_bases, new_bases, xi_breaks, refinement) -> l
     return maps
 
 
-def _element_node_indices(field: 'MeshField') -> np.ndarray:
-    """``(n_elements, n_nodes_per_element)`` array of global node indices."""
-    field._update_id_mappings()
-    rows = []
-    for element in field.elements:
-        if element.used_index:
-            rows.append(list(element.nodes))
-        else:
-            rows.append([field.node_id_to_ind[node_id] for node_id in element.nodes])
-    return np.array(rows, dtype=int)
+def _require_conforming(field: 'MeshField', operation: str) -> None:
+    """Refuse *operation* on a mesh with hanging nodes, which it reads as a lattice."""
+    if getattr(field, 'hanging', None):
+        raise NotImplementedError(f"{operation} reads the mesh as a lattice of elements, which a "
+                                  f"mesh with {len(field.hanging)} hanging faces is not")
+
+
+def _element_widths(element: MeshElement) -> np.ndarray:
+    """The width each direction of *element* scales its derivatives by.
+
+    A node derivative is taken along a parametrisation shared by every element
+    it serves; an element of width *w* in that parametrisation sees it scaled
+    by *w*, which is what its map records on any slot that is a plain scaling of
+    its node's field.  ``1`` along a direction with no derivatives.
+
+    :raises NotImplementedError:
+        If a direction has derivatives but no slot that plainly scales one.
+    """
+    widths = np.ones(element.ndim)
+    if element.param_map is None:
+        return widths
+    orders = element.derivative_orders
+    for d, first in enumerate(np.eye(element.ndim, dtype=int)):
+        along = [element.param_map[element.slots[s]] for s in np.flatnonzero((orders == first).all(1))]
+        plain = [terms[0][2] for terms in along if len(terms) == 1]
+        if along and not plain:
+            raise NotImplementedError(f"no slot of this element plainly scales a derivative along "
+                                      f"direction {d}, so its width cannot be read off its map")
+        if plain:
+            widths[d] = plain[0]
+    return widths
+
+
+def _width_map(element: MeshElement, widths: np.ndarray) -> Optional[dict]:
+    """The map scaling each derivative slot by the widths of its directions.
+
+    ``None`` -- the identity -- when every scale is 1.
+    """
+    scale = np.prod(np.where(element.derivative_orders, widths, 1.0), axis=1)
+    if np.all(scale == 1):
+        return None
+    return {slot: [(slot[0], slot[1], float(w))] for slot, w in zip(element.slots, scale)}
 
 
 def _parent_node_map(old_field: 'MeshField', old_bases, new_bases, new_ele_nodes: np.ndarray,
@@ -133,7 +168,7 @@ def _parent_node_map(old_field: 'MeshField', old_bases, new_bases, new_ele_nodes
 
     parent_of_new = np.full(n_new_nodes, -1, dtype=int)
     if valid.any():
-        old_node_of = _element_node_indices(old_field)
+        old_node_of = _element_node_lists(old_field)
         rows = np.repeat(parent_ele[:, None], n_new_local, axis=1)[valid]
         parent_of_new[new_ele_nodes[valid]] = old_node_of[rows, old_local[valid]]
     return parent_of_new
@@ -264,6 +299,7 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
         if *refinement_factor* < 2.
     """
     assert not(refinement_factor is not None and by_xi_refinement is not None), "Refinement factor and refining by defined xi are mutually exclusive."
+    _require_conforming(self, 'refine')
 
     #input handling, map both refinement factors and values to the same array. 
     if refinement_factor is not None:
@@ -287,11 +323,25 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
     eval_pts = np.array(all_pairings(*[b.node_locs for b in basis]))
     unique_nodes, ele_indexes = global_nodes_from_ele_localnodes(local_points=eval_pts, connectivity=new_topo_lookup)
 
+    S = np.column_stack([x[p] for x, p in zip(xi_locs, parent_connectivity.T)])
+    D = np.column_stack([x[p] for x, p in zip(scales, parent_connectivity.T)])
+    parent = np.arange(ele_indexes.shape[0]) // np.prod(refinement_factor)
+
+    #a child is its parent's width times its share of it.  Measured against the
+    #mean, an even refinement leaves every element at width 1 and so writes no
+    #maps at all; an uneven one scales the derivatives each child sees, which is
+    #what lets one node derivative serve two children of different widths
+    widths = np.array([_element_widths(e) for e in self.elements])[parent] * D
+    widths = widths / widths.mean(axis=0)
+    widths[np.isclose(widths, 1, rtol=1e-9, atol=0)] = 1.0
+
     new_pts = [MeshNode(loc=np.zeros(self.fdim), **{uf:np.zeros(self.fdim) for uf in used_fields}) for _ in unique_nodes]
-    new_elements = [MeshElement(node_indexes=ele_pts, basis_functions=basis) for ele_pts in ele_indexes]
+    template = MeshElement(node_indexes=ele_indexes[0], basis_functions=basis)
+    new_elements = [MeshElement(node_indexes=ele_pts, basis_functions=basis,
+                                param_map=_width_map(template, w))
+                    for ele_pts, w in zip(ele_indexes, widths)]
     from HOMER.mesh.field import MeshField  #deferred: field.py imports this module
     new_mesh = MeshField(nodes=new_pts, elements=new_elements)
-    new_mesh.generate_mesh()
 
     #Sample each child over the whole of its own [0, 1], not an interior
     #window: the sample count is fixed at order+2 per direction, so pulling
@@ -305,9 +355,7 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
 
     new_eles = np.repeat(np.arange(ele_indexes.shape[0]), xi_grid.shape[0])
     new_xi = np.tile(xi_grid, (ele_indexes.shape[0], 1))
-    old_eles = new_eles // np.prod(refinement_factor)
-    S = np.column_stack([x[p] for x, p in zip(xi_locs, parent_connectivity.T)])
-    D = np.column_stack([x[p] for x, p in zip(scales, parent_connectivity.T)])
+    old_eles = parent[new_eles]
 
     offsets = S[:, None] + xi_grid[None] * D[:, None]
     old_xis = offsets.reshape(-1, self.ndim)
@@ -349,6 +397,210 @@ def refine(self, refinement_factor: Optional[int|list[int]]=None, by_xi_refineme
                    parent_of_new=parent_of_new, n_old=n_old)
     self.generate_mesh()
     return
+
+
+def _element_boxes(field: 'MeshField') -> list[tuple]:
+    """Every element's ``(component, origin, size)``, reading a conforming mesh's lattice when unset."""
+    if all(e.box is not None for e in field.elements):
+        return [e.box for e in field.elements]
+    _require_conforming(field, 'refine_elements on elements without a box')
+    component, coords = element_lattice_coords(field._topo_lookup)
+    return [(int(c), tuple(Fraction(int(x)) for x in xs), Fraction(1))
+            for c, xs in zip(component, coords)]
+
+
+def _box_arrays(boxes: list[tuple]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(components, origins, sizes)`` of *boxes*, as float arrays.
+
+    Every box is dyadic -- a lattice cell halved some number of times -- so
+    these are exact, and so is comparing them.
+    """
+    return (np.array([b[0] for b in boxes]),
+            np.array([[float(x) for x in b[1]] for b in boxes]),
+            np.array([float(b[2]) for b in boxes]))
+
+
+def _overlapping(arrays, box: tuple, reach: int) -> np.ndarray:
+    """The elements overlapping *box* grown by *reach* of its own widths on every side."""
+    components, origins, sizes = arrays
+    c, origin, size = box
+    lo = np.array([float(x) for x in origin]) - reach * float(size)
+    hi = lo + (2 * reach + 1) * float(size)
+    overlaps = (origins < hi).all(1) & (origins + sizes[:, None] > lo).all(1)
+    return np.flatnonzero(overlaps & (components == c))
+
+
+def _reach(element: MeshElement) -> int:
+    """How many cells either side the functions non-zero on a cell reach."""
+    return max(int(np.ceil(max(b.node_locs) - min(b.node_locs))) for b in element.basis_functions)
+
+
+def _balanced(boxes: list[tuple], chosen: set, reach: int) -> set:
+    """*chosen*, grown until the mesh refined from it is admissible.
+
+    Refining an element first refines every coarser element overlapping its
+    support extension -- the cells the functions non-zero on it reach -- so at
+    most two consecutive levels act on any element.  For a basis whose
+    functions reach one cell, that is every coarser element touching it,
+    across a face, an edge or a corner.
+    """
+    arrays = _box_arrays(boxes)
+    chosen, frontier = set(chosen), set(chosen)
+    while frontier:
+        grown = {int(n) for e in frontier for n in _overlapping(arrays, boxes[e], reach)
+                 if n not in chosen and boxes[n][2] > boxes[e][2]}
+        chosen |= grown
+        frontier = grown
+    return chosen
+
+
+def refine_elements(self, element_ids) -> np.ndarray:
+    """Halve the chosen elements in every direction, leaving the rest as they are.
+
+    The refined mesh carries the truncated hierarchical (THB) space of its
+    basis -- see :mod:`HOMER.mesh.hierarchy`.  A function of some level is a
+    DOF where its support is refined to that level and no further, and a coarse
+    one gives way to the finer ones wherever they take over, so the functions
+    still sum to one.  For a nodal basis that leaves the points a child would
+    put on a face shared with a coarser element *hanging*: no node, and values
+    drawn from the coarser element.  Either way the field is continuous across
+    every face, as smooth as its basis, and the children reproduce their
+    parents exactly, so there is no fit.
+
+    Refinement is kept admissible: an element is refined together with every
+    coarser one its functions reach, so at most two levels act on any element.
+    For a basis reaching one cell that is a 2:1 balance across faces, edges
+    and corners; ``B3`` reaches three.  Refining again goes another level deep.
+
+    A node of a nodal basis is a value at a point, so it stays: new nodes are
+    appended, and every index into the node list survives.  A ``B3`` node is
+    the coefficient of one function, which goes once refinement covers its
+    whole support, and the node goes with it.  Node derivatives keep their
+    parametrisation; a child sees them scaled by its width, as an unevenly
+    refined element does.
+
+    :param element_ids:
+        Indices of the elements to refine; an empty list only gives every
+        element its :attr:`~HOMER.mesh.element.MeshElement.box`.
+
+    :returns:
+        The indices of the elements refined, the chosen ones and those the
+        balance added, in increasing order.
+    """
+    template = self.elements[0]
+    bases = template.basis_functions
+    boxes = _element_boxes(self)
+    reach = _reach(template)
+    chosen = _balanced(boxes, {int(e) for e in np.atleast_1d(element_ids)}, reach)
+    offsets = [o[::-1] for o in itertools.product((0, 1), repeat=template.ndim)]
+    bp_inds = tuple(map(tuple, template.BasisProductInds))
+
+    #the refined mesh, an element at a time: kept, or replaced by its children
+    new_boxes, sources = [], []
+    for ide, (c, origin, size) in enumerate(boxes):
+        if ide not in chosen:
+            new_boxes.append(boxes[ide])
+            sources.append((ide, None))
+            continue
+        for offset in offsets:
+            new_boxes.append((c, tuple(x + size * o / 2 for x, o in zip(origin, offset)), size / 2))
+            sources.append((ide, offset))
+
+    #what can change: the children, and every element a function they touch reaches
+    old_arrays = _box_arrays(boxes)
+    near = {int(n) for e in chosen for n in _overlapping(old_arrays, boxes[e], reach)}
+    rebuild = [i for i, (src, offset) in enumerate(sources) if offset is not None or src in near]
+
+    widths = {}
+    for box, element in zip(boxes, self.elements):
+        c, level, index = Hierarchy.cell(box)
+        widths[(c, tuple(i >> level for i in index))] = _element_widths(element) * 2 ** level
+    hierarchy = Hierarchy(template, new_boxes, widths)
+
+    #the nodes there are: each is the function its value slot is, alone, in the
+    #coarsest element it is so in
+    node_of = {}
+    by_place = {}
+    ele_nodes = _element_node_lists(self)
+    for ide in sorted(range(len(boxes)), key=lambda e: -boxes[e][2]):
+        c, level, index = Hierarchy.cell(boxes[ide])
+        for j, n in enumerate(ele_nodes[ide]):
+            if n >= 0:
+                place = tuple(Fraction(i) + x for i, x in
+                              zip(index, hierarchy.slot_offset[j * len(template.slot_fields)]))
+                node_of.setdefault((c, level, place), int(n))
+                by_place.setdefault((c, tuple(p / 2 ** level for p in place)), int(n))
+
+    def node_for(key):
+        """An existing node for this function, by function, or by place for a nodal basis."""
+        c, level, place = key
+        if key in node_of:
+            return node_of[key]
+        if bases.interpolatory:
+            return by_place.get((c, tuple(p / 2 ** level for p in place)))
+        return None
+
+    #every rebuilt element's slots as THB functions, and the field's own
+    #coefficients there, from which each function's value is read where it
+    #stands alone
+    values, tables = {}, {}
+    for i in rebuild:
+        src, offset = sources[i]
+        local = self.get_element_params(src).reshape(-1, self.fdim)
+        if offset is not None:
+            local = prolongation(bases, bp_inds, offset) @ local
+        table, functions = hierarchy.extraction(Hierarchy.cell(new_boxes[i]))
+        tables[i] = (table, functions)
+        alone = (table != 0).sum(1) == 1
+        for s in np.flatnonzero(alone):
+            t = int(np.flatnonzero(table[s])[0])
+            values.setdefault(functions[t], local[s] / table[s, t])
+
+    created = {}
+    def index_of(key):
+        node = node_for(key)
+        if node is not None:
+            return node
+        if key not in created:
+            created[key] = len(self.nodes) + len(created)
+        return created[key]
+
+    elements = [self.elements[src] for src, _ in sources]
+    for i in rebuild:
+        table, functions = tables[i]
+        pool, param_map = [], {}
+        for s, (j, f) in enumerate(template.slots):
+            terms = []
+            for t in np.flatnonzero(table[s]):
+                node = index_of(functions[t][0])
+                if node not in pool:
+                    pool.append(node)
+                terms.append((pool.index(node), functions[t][1], float(table[s, t])))
+            param_map[(j, f)] = terms
+        identity = all(terms == [(j, f, 1.0)] for (j, f), terms in param_map.items())
+        old = self.elements[sources[i][0]]
+        elements[i] = MeshElement(node_indexes=pool, basis_functions=bases,
+                                  param_map=None if identity else param_map, box=new_boxes[i],
+                                  id=old.id if sources[i][1] is None else None)
+
+    #every function's value, on the node that is its own
+    nodes = list(self.nodes) + [None] * len(created)
+    for key, n in created.items():
+        nodes[n] = MeshNode(**{f: values[(key, f)] for f in template.slot_fields})
+    for (key, f), value in values.items():
+        node = node_for(key)
+        if node is not None:
+            if f == 'loc':
+                nodes[node].loc = np.asarray(value, dtype=np.asarray(nodes[node].loc).dtype)
+            else:
+                nodes[node][f] = np.asarray(value, dtype=np.asarray(nodes[node][f]).dtype)
+
+    for element, box in zip(elements, new_boxes):
+        element.box = box
+    self.nodes, self.elements = nodes, elements
+    #a coefficient whose function refinement retired has no element left
+    self._clean_pts()
+    return np.array(sorted(chosen), dtype=int)
 
 
 def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True,
@@ -408,6 +660,7 @@ def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_p
     new_mesh = deepcopy(self)
     if new_basis == self.elements[0].basis_functions:
         return new_mesh
+    _require_conforming(self, 'rebase')
 
     s_hash = {}
     list_locs = [b.node_locs for b in new_basis]

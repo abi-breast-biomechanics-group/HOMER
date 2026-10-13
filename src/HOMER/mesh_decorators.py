@@ -166,7 +166,7 @@ def _wide_eval_key(obj, variant, name, chunk_size, remat):
     """What makes two wide evaluations the same computation.
 
     Only what JAX cannot see for itself belongs here.  Everything the
-    evaluation reads as *data* -- the element map, the scale factors, the
+    evaluation reads as *data* -- the element map and its weights, the
     parameters and which of them are free -- reaches the jit as an argument,
     and every shape is dispatched on by ``jax.jit`` internally, so neither
     needs a key of its own.  What is left is read through the closure and so
@@ -181,12 +181,11 @@ def _wide_eval_key(obj, variant, name, chunk_size, remat):
     basis = (tuple(b.name for b in element.basis_functions),
              tuple(b.order for b in element.basis_functions),
              np.asarray(element.BasisProductInds).tobytes())
-    return (variant, name, basis, obj.fdim, obj.ndim, chunk_size, bool(remat),
-            getattr(obj, "ele_scales", None) is None)
+    return (variant, name, basis, obj.fdim, obj.ndim, chunk_size, bool(remat))
 
 
 def _wide_eval_arrays(obj):
-    return (obj.ele_map, obj.ele_scales,
+    return (obj.ele_map, obj.ele_weights,
             obj.true_param_array, obj.optimisable_param_indices)
 
 

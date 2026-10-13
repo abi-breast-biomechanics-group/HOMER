@@ -3,7 +3,8 @@ element.py - :class:`MeshElement`, the tensor-product connectivity of a mesh.
 
 An element links a set of :class:`~HOMER.mesh.node.MeshNode` objects through a
 product of 1-D bases, one per parametric direction, and works out the ordering
-of the weights that the evaluation functions expect.
+of the weights that the evaluation functions expect.  Its parameter map says
+how each of those weights is drawn from the nodes.
 """
 
 from typing import Optional
@@ -41,13 +42,35 @@ class MeshElement:
     :param BP_inds:
         Pre-computed basis-product index pairs.  Computed automatically
         when ``None``; supply a cached value to skip recomputation.
+    :param param_map:
+        How each element parameter is drawn from the nodes; see
+        :attr:`param_map`.
     :param id:
         Optional element identifier.
 
     :ivar ndim: int
         Parametric dimensionality (2 or 3).
     :ivar nodes: list
-        The ordered node references (indexes or ids).
+        The element's local node pool, as indexes or ids.  Without a
+        :attr:`param_map` it is the basis node lattice, direction 0 fastest.
+    :ivar param_map: dict | None
+        The general linear map from the element's parameters to its nodes'
+        parameters.  An element parameter -- a *slot* -- is a ``(j, field)``
+        pair: lattice position *j* and a field of :attr:`slot_fields`.  Each
+        slot maps to a list of ``(k, field, weight)`` terms, and takes the
+        weighted sum of those fields of the nodes at pool positions *k*.  A
+        weight scales every component of the field alike.  ``None`` is the
+        identity, ``(j, field) -> [(j, field, 1.0)]``; otherwise every slot
+        must be given.
+    :ivar slot_fields: list[str]
+        ``'loc'`` followed by :attr:`used_node_fields`, the fields a lattice
+        position holds a slot for.
+    :ivar box: tuple | None
+        ``(component, origin, size)``, where the element sits in the lattice of
+        the mesh it was locally refined from: the connected component, the
+        rational coordinate of its ``xi = 0`` corner and its rational width,
+        the same in every direction.  Set by
+        :func:`~HOMER.mesh.refinement.refine_elements`; ``None`` until then.
     :ivar basis_functions: BasisGroup
         The 1-D bases, one per parametric direction.
     :ivar used_node_fields: list[str]
@@ -60,8 +83,9 @@ class MeshElement:
         Total number of nodes in this element.
     """
 
-    def __init__(self, basis_functions: BasisGroup, node_indexes: Optional[list[int]] = None, 
-                 node_ids: Optional[list] = None, BP_inds: Optional = None, id=None):
+    def __init__(self, basis_functions: BasisGroup, node_indexes: Optional[list[int]] = None,
+                 node_ids: Optional[list] = None, BP_inds: Optional = None,
+                 param_map: Optional[dict] = None, box: Optional[tuple] = None, id=None):
         """Initialise a :class:`MeshElement`.
 
         :param basis_functions:
@@ -75,11 +99,16 @@ class MeshElement:
             User-supplied node identifiers.
         :param BP_inds:
             Pre-computed basis-product index pairs (optional optimisation).
+        :param param_map:
+            The element's parameter map, or ``None`` for the identity.
+        :param box:
+            Where the element sits in the lattice it was refined from.
         :param id:
             Optional element identifier.
 
         :raises ValueError: If neither *node_indexes* nor *node_ids* is provided, or if
-            both are provided.
+            both are provided, or if *param_map* does not give exactly the
+            element's slots.
         """
         if node_ids is None and node_indexes is None:
             raise ValueError("An element must be associated with a list of nodes, either by index or node id")
@@ -102,8 +131,49 @@ class MeshElement:
         self.BasisProductInds = self._calc_basis_product_inds() if BP_inds is None else BP_inds
         self.id = id
         self.num_nodes = int(np.prod([len(b.node_locs) for b in self.basis_functions]))
+        self.slot_fields = ['loc'] + list(self.used_node_fields)
 
-        self.scale_factors = None #classic H3 representation. 
+        if param_map is not None and set(param_map) != set(self.slots):
+            raise ValueError("A param_map gives terms for every slot of the element and no "
+                             f"others; expected the slots {self.slots}")
+        self.param_map = param_map
+        self.box = box
+
+    @property
+    def slots(self) -> list[tuple[int, str]]:
+        """Every ``(j, field)`` slot, in the order the evaluators take parameters."""
+        return [(j, f) for j in range(self.num_nodes) for f in self.slot_fields]
+
+    def terms(self, slot: tuple[int, str]) -> list[tuple[int, str, float]]:
+        """The ``(k, field, weight)`` terms *slot* is the weighted sum of."""
+        if self.param_map is None:
+            return [(slot[0], slot[1], 1.0)]
+        return self.param_map[slot]
+
+    @property
+    def derivative_orders(self) -> np.ndarray:
+        """``(n_slots, ndim)``, 1 where a slot is a derivative along that direction.
+
+        Read off the 1-D weight each slot takes in each direction, so it holds for
+        any mix of bases without decoding field names.
+        """
+        return np.array([[b.weights[i].startswith('d') for b, i in zip(self.basis_functions, inds)]
+                         for inds in self.BasisProductInds], dtype=int)
+
+    @property
+    def lattice_nodes(self) -> list[Optional[int]]:
+        """The pool position of the node at each lattice position, or ``None``.
+
+        A node sits at lattice position *j* when the value there is that node's
+        value and nothing else.  A position whose value is a combination -- a
+        hanging node -- has no node of its own.
+        """
+        nodes = []
+        for j in range(self.num_nodes):
+            terms = self.terms((j, 'loc'))
+            whole = len(terms) == 1 and terms[0][1] == 'loc' and terms[0][2] == 1
+            nodes.append(terms[0][0] if whole else None)
+        return nodes
 
     def get_used_fields(self):
         """

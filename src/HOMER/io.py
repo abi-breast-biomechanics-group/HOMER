@@ -26,6 +26,7 @@ Example round-trip::
     mesh2 = Mesh.load('my_mesh.json')
 """
 
+from fractions import Fraction
 from os import PathLike
 from HOMER.mesh import Mesh, MeshNode, MeshElement, MeshField
 from HOMER.basis_definitions import BASIS_REGISTRY, BasisGroup, basis_by_name
@@ -48,7 +49,10 @@ def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
       for nodes carrying fixed (non-optimisable) parameters.
     * ``'elements'`` – ordered dict of element definitions, each with
       ``'nodes'`` (list of node indexes/ids), ``'basis'`` (list of basis
-      class name strings), and ``'used_index'`` (bool).
+      class name strings), ``'used_index'`` (bool), and ``'param_map'`` as
+      ``[j, field, [[k, field, weight], …]]`` rows for an element that has
+      one, and ``'box'`` as ``[component, origin, size]`` for one that was
+      locally refined.
 
     :param obj_field:
         The field to serialise.
@@ -80,6 +84,13 @@ def dump_meshfield_to_dict(obj_field: MeshField) -> dict:
         ele_def['used_index'] = element.used_index
         if element.id is not None:
             ele_def['id'] = element.id
+        if element.box is not None:
+            component, origin, size = element.box
+            #dyadic, so exact as floats
+            ele_def['box'] = [int(component), [float(x) for x in origin], float(size)]
+        if element.param_map is not None:
+            ele_def['param_map'] = [[int(j), f, [[int(k), g, float(w)] for k, g, w in terms]]
+                                    for (j, f), terms in element.param_map.items()]
         elements[ide] = ele_def
     dict_rep["elements"] = elements
     return dict_rep
@@ -138,18 +149,22 @@ def _parse_field_from_dict(dict_rep: dict, field_cls: type[MeshField]) -> MeshFi
         elem_def = dict(elem_def)
         basis_functions = BasisGroup(basis_by_name(k) for k in elem_def['basis'])
         elem_id = _rehash_id(elem_def.get('id', None))
-        if elem_def.get('used_index', True):
-            obj_field.add_element(MeshElement(
-                node_indexes=elem_def['nodes'],
-                basis_functions=basis_functions,
-                id=elem_id,
-            ), generate_mesh=False)
-        else:
-            obj_field.add_element(MeshElement(
-                node_ids=[_rehash_id(n) for n in elem_def['nodes']],
-                basis_functions=basis_functions,
-                id=elem_id,
-            ), generate_mesh=False)
+        param_map = elem_def.get('param_map')
+        if param_map is not None:
+            param_map = {(j, f): [(k, g, w) for k, g, w in terms] for j, f, terms in param_map}
+        box = elem_def.get('box')
+        if box is not None:
+            box = (box[0], tuple(Fraction(x) for x in box[1]), Fraction(box[2]))
+        nodes = elem_def['nodes']
+        by_index = elem_def.get('used_index', True)
+        obj_field.add_element(MeshElement(
+            node_indexes=nodes if by_index else None,
+            node_ids=None if by_index else [_rehash_id(n) for n in nodes],
+            basis_functions=basis_functions,
+            param_map=param_map,
+            box=box,
+            id=elem_id,
+        ), generate_mesh=False)
     if obj_field.nodes and obj_field.elements:
         obj_field.generate_mesh()
     return obj_field

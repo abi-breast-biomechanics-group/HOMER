@@ -151,6 +151,63 @@ def test_collapsed_element_maps_several_corners_onto_one_node():
     assert mesh.get_volume() > 0
 
 
+############################################### parameter maps
+
+def scaled_dw_map(element, scale):
+    """The identity map, with every ``dw`` slot scaled: a single-term map with w != 1."""
+    return {(j, f): [(j, f, scale if f == 'dw' else 1.0)] for j, f in element.slots}
+
+
+def test_an_explicit_identity_map_is_the_default_map():
+    mesh = hermite_cube()
+    element = mesh.elements[0]
+    xis = np.random.default_rng(0).random((20, 3))
+    before = arr(mesh.evaluate_embeddings([0] * 20, xis))
+
+    element.param_map = scaled_dw_map(element, 1.0)
+    mesh.generate_mesh()
+
+    np.testing.assert_array_equal(arr(mesh.evaluate_embeddings([0] * 20, xis)), before)
+
+
+def test_a_param_map_must_give_every_slot():
+    element = MeshElement(node_indexes=list(range(8)), basis_functions=(L1,) * 3)
+    incomplete = {slot: [(slot[0], 'loc', 1.0)] for slot in element.slots[1:]}
+
+    with pytest.raises(ValueError, match="every slot"):
+        MeshElement(node_indexes=list(range(8)), basis_functions=(L1,) * 3, param_map=incomplete)
+
+
+def test_a_slot_is_the_weighted_sum_of_its_terms():
+    """Corner 0 of a unit square drawn a third of the way from node 4 to node 5."""
+    locs = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [-1, -1, 0], [2, -1, 0]]
+    nodes = [MeshNode(loc=np.array(l, dtype=float)) for l in locs]
+    param_map = {(j, 'loc'): [(j, 'loc', 1.0)] for j in range(4)}
+    param_map[(0, 'loc')] = [(4, 'loc', 2 / 3), (5, 'loc', 1 / 3)]
+    element = MeshElement(node_indexes=list(range(6)), basis_functions=(L1, L1),
+                          param_map=param_map)
+
+    mesh = Mesh(nodes=nodes, elements=element)
+
+    corner = arr(mesh.evaluate_embeddings(0, [[0.0, 0.0]]))[0]
+    np.testing.assert_allclose(corner, [0, -1, 0], atol=EXACT)
+    assert element.lattice_nodes == [None, 1, 2, 3]
+
+
+def test_the_fitting_weights_follow_the_map():
+    """W @ DOFs reproduces the evaluation once the map scales some slots."""
+    mesh = hermite_cube()
+    mesh.elements[0].param_map = scaled_dw_map(mesh.elements[0], 0.5)
+    mesh.generate_mesh()
+    xis = np.random.default_rng(1).random((30, 3))
+    eles = np.zeros(30, dtype=int)
+
+    weights = arr(mesh.get_xi_weight_mat(eles, xis))
+    dofs = arr(mesh.true_param_array).reshape(-1, mesh.fdim)
+
+    np.testing.assert_allclose(weights @ dofs, arr(mesh.evaluate_embeddings_ele_xi_pair(eles, xis)), atol=1e-5)
+
+
 ############################################### quadrature
 
 @pytest.mark.parametrize("ng", [[2, 2, 2], [3, 3, 3], [4, 4, 4], [6, 4, 3]])

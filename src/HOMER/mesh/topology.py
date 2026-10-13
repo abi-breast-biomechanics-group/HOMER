@@ -18,7 +18,6 @@ import jax
 import jax.numpy as jnp
 
 from HOMER.utils import build_full_lookup 
-from HOMER.mesh.reordering import _element_node_lists
 
 
 def associated_node_index(self, index_list:list, nodes_to_gather: Optional[list] = None, node_by_id = False):
@@ -97,20 +96,102 @@ def _face_support(self) -> dict[tuple[int, int, int], frozenset]:
     Read off the bases like this the support holds for all of them: H3 and L1-L4
     leave the parameters of the face's own nodes, B3 reaches a control point into
     the element, and two elements that conform reach the same parameters from
-    either side in either case.
+    either side in either case.  The parameters are DOFs, reached through each
+    element's parameter map.
     """
     support = {}
     for ide, element in enumerate(self.elements):
-        #ele_map holds a weight's field components together, in the order
-        #BasisProductInds holds the weights, so the first component names the weight
-        params = np.asarray(self.ele_map[ide]).reshape(-1, self.fdim)[:, 0].astype(int)
+        #a slot's DOFs are the terms of its map that carry any weight; slots are
+        #in the order BasisProductInds holds the weights
+        dofs, drawn = np.asarray(self.ele_map[ide]), np.asarray(self.ele_weights[ide]) != 0
         factors = np.asarray(element.BasisProductInds)
         for dim, basis in enumerate(element.basis_functions):
             for side in (0, 1):
                 weights = np.abs(np.asarray(basis.fn(np.array([float(side)]))).ravel())
                 on_face = weights > _SUPPORT_TOL * weights.max()
-                support[(ide, dim, side)] = frozenset(params[on_face[factors[:, dim]]].tolist())
+                slots = on_face[factors[:, dim]]
+                support[(ide, dim, side)] = frozenset(dofs[slots][drawn[slots]].tolist())
     return support
+
+
+def _box_pairs(self) -> tuple[list, dict]:
+    """``(conforming, hanging)``: the faces that meet, read off the elements' boxes.
+
+    Two faces meet when they lie in the same plane, face each other and
+    overlap.  Of the same size they conform; otherwise the smaller hangs on the
+    larger, which refinement keeps exactly twice its size, on the lattice of its
+    own size -- so either partner is one lookup away.  A mesh with no boxes has
+    neither.
+    """
+    boxes = [e.box for e in self.elements]
+    if any(b is None for b in boxes):
+        return [], {}
+
+    def key(c, d, side, origin, size):
+        return c, d, side, origin[d] + side * size, size, tuple(x for t, x in enumerate(origin) if t != d)
+
+    faces = {key(c, d, side, origin, size): (e, d, side)
+             for e, (c, origin, size) in enumerate(boxes)
+             for d, side in itertools.product(range(self.ndim), (0, 1))}
+    conforming, hanging = [], {}
+    for e, (c, origin, size) in enumerate(boxes):
+        coarse = tuple((x // (2 * size)) * 2 * size for x in origin)
+        for d, side in itertools.product(range(self.ndim), (0, 1)):
+            plane = origin[d] + side * size
+            across = list(origin)
+            across[d] = plane - (1 - side) * size
+            twin = faces.get(key(c, d, 1 - side, tuple(across), size))
+            if twin is not None and side == 1:
+                conforming.append([(e, d, side), twin])
+            #the coarse element on the far side has its opposite face in this plane
+            across = list(coarse)
+            across[d] = plane - (1 - side) * 2 * size
+            big = faces.get(key(c, d, 1 - side, tuple(across), 2 * size))
+            if big is not None:
+                hanging[(e, d, side)] = big
+    return conforming, hanging
+
+
+def _hanging_affine(self, small, big) -> tuple[np.ndarray, np.ndarray]:
+    """``(A, b)`` with ``xi_big = A * xi_small + b``, across one hanging face, from the boxes."""
+    (_, o_small, s_small), (_, o_big, s_big) = self.elements[small[0]].box, self.elements[big[0]].box
+    A = np.full(self.ndim, float(s_small / s_big))
+    b = np.array([float((x - y) / s_big) for x, y in zip(o_small, o_big)])
+    return A, b
+
+
+def _hanging_crossings(self):
+    """The per-face table :func:`topomap` crosses hanging faces with.
+
+    ``(target, A, b, lo, hi)``, each indexed ``[element, direction, side, m]``
+    over the *m* elements across that face: a small face has its coarse face
+    alone, a coarse face every small face against it.  Crossing to candidate *m*
+    maps ``xi -> A * xi + b``, and the candidate holds the point when its
+    tangential coordinates lie in ``[lo, hi]``; the crossing direction is left
+    unbounded.  ``None`` when the mesh has no hanging faces.
+    """
+    if not self.hanging:
+        return None
+    across = {}
+    for small, big in self.hanging.items():
+        A, b = _hanging_affine(self, small, big)
+        across.setdefault(small, []).append((big[0], A, b))
+        across.setdefault(big, []).append((small[0], 1 / A, -b / A))
+
+    n_cand = max(len(c) for c in across.values())
+    shape = (len(self.elements), self.ndim, 2, n_cand)
+    target = np.full(shape, -1, dtype=np.int32)
+    A_all, b_all = np.ones(shape + (self.ndim,)), np.zeros(shape + (self.ndim,))
+    lo, hi = np.full(shape + (self.ndim,), -np.inf), np.full(shape + (self.ndim,), np.inf)
+    for (e, d, side), candidates in across.items():
+        for m, (to, A, b) in enumerate(candidates):
+            target[e, d, side, m], A_all[e, d, side, m], b_all[e, d, side, m] = to, A, b
+            #the source xi the candidate covers is where its own [0, 1] maps back to
+            ends = np.sort(np.stack([-b / A, (1 - b) / A]), axis=0)
+            tangential = np.arange(self.ndim) != d
+            lo[e, d, side, m, tangential] = ends[0, tangential]
+            hi[e, d, side, m, tangential] = ends[1, tangential]
+    return tuple(jnp.asarray(x) for x in (target, A_all, b_all, lo, hi))
 
 
 def _explore_topology(self):
@@ -133,28 +214,44 @@ def _explore_topology(self):
     """
     signature = (self.true_param_array.tobytes(),
                  np.asarray(self.ele_map).tobytes(),
+                 np.asarray(self.ele_weights).tobytes(),
+                 tuple(e.box for e in self.elements),
                  self.ndim, len(self.elements))
     if (getattr(self, "_topo_signature", None) == signature
             and getattr(self, "topomap", None) is not None):
         return
 
+    #faces the boxes place are paired by them, exactly; the rest -- every face of
+    #a mesh never refined locally, and a seam the lattice does not close -- by
+    #the parameters that shape them
+    conforming, self.hanging = _box_pairs(self)
+    placed = ({f for pair in conforming for f in pair}
+              | self.hanging.keys() | set(self.hanging.values()))
+    support = _face_support(self)
     groups = {}
-    for face, key in _face_support(self).items():
-        groups.setdefault(key, []).append(face)
+    for face in support.keys() - placed:
+        groups.setdefault(support[face], []).append(face)
 
     #a face no other element is shaped by is exposed; one that two elements share
     #is a boundary between them.  A 2-D mesh is all surface: it has boundaries,
     #but no exposed faces, whatever a face would even mean for one
+    #On a mesh with boxes the faces left are exposed or a seam the lattice does
+    #not close, and a seam joins two faces looking at each other; truncated
+    #control-net functions can shape several exposed faces alike, so anything
+    #else there is exposed.
+    boxed = all(e.box is not None for e in self.elements)
     faces = []
-    boundaries = []
+    boundaries = list(conforming)
     for group in groups.values():
-        if len(group) == 1:
-            faces += [group[0]] if self.ndim == 3 else []
-        elif len(group) == 2:
-            boundaries.append(group)
+        facing = len(group) == 2 and group[0][1] == group[1][1] and group[0][2] != group[1][2]
+        if len(group) == 2 and (facing or not boxed):
+            boundaries.append(sorted(group))
+        elif len(group) == 1 or boxed:
+            faces += group if self.ndim == 3 else []
         else:
             raise ValueError(f"{len(group)} element faces are shaped by the same "
                              f"parameters, so this is not a manifold mesh: {group}")
+    faces.sort()
 
     bmap = {}
     lookup_arr = np.ones((len(self.elements), self.ndim, 2), dtype=int) * -1
@@ -294,7 +391,54 @@ def _explore_topology(self):
         out_xi = jnp.where(final_valid[..., None], xi_mapped, jnp.clip(xi, 0.0, 1.0))
 
         return out_ele.squeeze(), out_xi.squeeze(), final_valid.squeeze()
-    self.topomap = topomap_fast_subset
+    crossings = _hanging_crossings(self)
+    if crossings is None:
+        self.topomap = topomap_fast_subset
+        self._topo_signature = signature
+        return
+    target, A_all, b_all, lo, hi = crossings
+    axes = jnp.arange(self.ndim)
+
+    @jax.jit
+    def topomap_hanging(ele, xi):
+        """:func:`topomap_fast_subset`, then across a hanging face where it found nothing.
+
+        A point the conforming lookup cannot place, standing outside a face that
+        hangs, crosses to the element across it whose part of the face holds the
+        point -- the first such face and element -- and any other direction it
+        is outside along is clipped, as the conforming lookup degrades.
+        """
+        xi = jnp.asarray(xi)
+        ele = jnp.asarray(ele, dtype=jnp.int32)
+        out_ele, out_xi, valid = topomap_fast_subset(ele, xi)
+        out_ele, out_xi, valid = (out_ele.reshape(ele.shape), out_xi.reshape(xi.shape),
+                                  valid.reshape(ele.shape))
+
+        #every (direction, element across) candidate of the point, flattened
+        batch, n_cand = ele.shape, target.shape[-1]
+        clipped = jnp.clip(xi, 0.0, 1.0)
+        side = (xi > 1.0).astype(jnp.int32)
+        face = (ele[..., None], axes, side)
+        point = jnp.where(jnp.eye(self.ndim, dtype=bool), xi[..., None, :], clipped[..., None, :])
+        point = jnp.repeat(point, n_cand, axis=-2)
+        cand_target = target[face].reshape(batch + (-1,))
+        cand_A, cand_b, cand_lo, cand_hi = (x[face].reshape(batch + (-1, self.ndim))
+                                            for x in (A_all, b_all, lo, hi))
+        outside = jnp.repeat((xi < 0.0) | (xi > 1.0), n_cand, axis=-1)
+        usable = (outside & (cand_target >= 0)
+                  & jnp.all((point >= cand_lo) & (point <= cand_hi), axis=-1))
+
+        first = jnp.argmax(usable, axis=-1)
+        take = lambda x: jnp.take_along_axis(x, first[..., None, None], axis=-2)[..., 0, :]
+        hanging_ele = jnp.take_along_axis(cand_target, first[..., None], axis=-1)[..., 0]
+        hanging_xi = take(cand_A) * take(point) + take(cand_b)
+
+        use = ~valid & jnp.any(usable, axis=-1)
+        return (jnp.where(use, hanging_ele, out_ele).squeeze(),
+                jnp.where(use[..., None], hanging_xi, out_xi).squeeze(),
+                (valid | use).squeeze())
+
+    self.topomap = topomap_hanging
     self._topo_signature = signature
 
 
@@ -304,14 +448,12 @@ def get_xi_surface_nodes(self, xi_dim, bound_val):
     elements which have no neighbouring element at that boundary, and the nodes whose
     basis functions have support on the face those elements expose.
 
-    The bases are a tensor product, so a local node contributes to the
-    ``xi_dim = bound_val`` face exactly when its own 1-D basis function is non-zero
-    there - the other directions sweep the whole face and drop out.  The face is
-    therefore a property of one 1-D basis and the element's node ordering, and needs
-    no mesh evaluation.  For an interpolatory basis this is the single layer of nodes
-    sitting on the face; for a control-net basis such as
-    :data:`~HOMER.basis_definitions.B3` it is every layer with support there,
-    which is the set that actually controls the surface.
+    A node is on the face when one of its DOFs shapes it, which is the
+    question :func:`_face_support` answers for the topology.  Read off the
+    bases, it holds for every one of them: an interpolatory basis gives the
+    single layer of nodes sitting on the face, and a control-net basis such as
+    :data:`~HOMER.basis_definitions.B3` every layer with support there, which is
+    the set that actually controls the surface.  It needs no mesh evaluation.
 
     :param xi_dim:
         Parametric direction whose boundary to look at, 0-based.
@@ -323,23 +465,12 @@ def get_xi_surface_nodes(self, xi_dim, bound_val):
         neighbour on that boundary, and the indices of the nodes their bases give
         support on it.
     """
-    valid_elements = np.where(self._topo_lookup[:, xi_dim, bound_val] == -1)[0]
-
-    bases = self.elements[0].basis_functions
-    basis = bases[xi_dim]
-    #the weights of a direction are grouped by node, so a Hermite node's value and
-    #derivative weights collapse back onto the one node
-    supported = np.asarray(basis.fn(jnp.array([float(bound_val)]))).ravel() != 0
-    supported = supported.reshape(len(basis.node_locs), -1).any(axis=1)
-
-    #local nodes are the Fortran-ordered lattice of the 1-D bases, direction 0 fastest
-    nodes_per_dim = [len(b.node_locs) for b in bases]
-    stride = int(np.prod(nodes_per_dim[:xi_dim]))
-    local = np.arange(int(np.prod(nodes_per_dim)))
-    on_face = np.where(supported[(local // stride) % nodes_per_dim[xi_dim]])[0]
-
-    ele_nodes = _element_node_lists(self)
-    return valid_elements, np.unique(ele_nodes[np.ix_(valid_elements, on_face)])
+    joined = set(self.hanging) | set(self.hanging.values())
+    valid_elements = np.array([e for e in np.flatnonzero(self._topo_lookup[:, xi_dim, bound_val] == -1)
+                               if (e, xi_dim, bound_val) not in joined], dtype=int)
+    support = _face_support(self)
+    dofs = [d for e in valid_elements for d in support[(int(e), xi_dim, bound_val)]]
+    return valid_elements, np.unique(self.dof_node[np.array(dofs, dtype=int)])
 
 
 def get_faces(self) -> list[tuple[int]]:
@@ -520,18 +651,23 @@ def get_colouring_dict(self, fields_seperable=False, seed_matrix=False):
     sf = self.fdim if fields_seperable else 1
 
     # One row per element, or per field component of an element when separable,
-    # holding the optimisable parameters that row can reach.  Fixed parameters
-    # map to -1 and drop out.
-    ele_map = np.asarray(self.ele_map).astype(int)
-    n_rows = ele_map.shape[0] * sf
-    slots = ele_map.reshape(ele_map.shape[0], -1, sf).transpose(0, 2, 1).reshape(n_rows, -1)
+    # holding the optimisable parameters that row can reach: every component
+    # of every DOF its map draws on, or only that row's component.  Fixed
+    # parameters map to -1 and drop out.
+    n_e = len(self.elements)
+    element, dof = np.nonzero(np.asarray(self.ele_weights).reshape(n_e, -1))
+    dof = np.asarray(self.ele_map).reshape(n_e, -1)[element, dof]
+    component = np.arange(self.fdim)
+    rows = element[:, None] * sf + component % sf
+    params = dof[:, None] * self.fdim + component
 
     optimisable = np.asarray(self.optimisable_param_bool)
     position = np.full(len(self.true_param_array), -1)
     position[optimisable] = np.arange(optimisable.sum())
 
-    columns = position[slots].ravel()
-    rows = np.repeat(np.arange(n_rows), slots.shape[1])[columns >= 0]
+    n_rows = n_e * sf
+    columns = position[params].ravel()
+    rows = rows.ravel()[columns >= 0]
     columns = columns[columns >= 0]
 
     incidence = scipy.sparse.csr_array(

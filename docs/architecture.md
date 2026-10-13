@@ -108,6 +108,29 @@ elem3d = MeshElement(node_indexes=[0, 1, 2, 3, 4, 5, 6, 7],
 The element computes the **tensor-product weight matrix** at construction time
 (`BasisProductInds`) which drives all subsequent evaluations.
 
+### Parameter maps
+
+Each parameter an element's basis contracts against is a *slot*: a lattice
+position `j` and a field (`'loc'`, then the element's `used_node_fields`).  By
+default a slot is that field of the node at that position.  `param_map`
+generalises this to a weighted sum of node fields, so a slot can be scaled, or
+interpolated from several nodes:
+
+```python exec="true" source="above" session="architecture"
+param_map = {slot: [(slot[0], slot[1], 1.0)] for slot in elem2d.slots}  # the identity
+param_map[(0, 'du')] = [(0, 'du', 0.5)]                                 # one scaled slot
+scaled = MeshElement(node_indexes=[0, 1, 2, 3], basis_functions=H3**2, param_map=param_map)
+print(scaled.terms((0, 'du')))
+```
+
+Terms point at positions in the element's `nodes` list, which is the element's
+local node pool, so renumbering the mesh's nodes never touches a map.
+`generate_mesh` assembles every element's map into `ele_map` and `ele_weights`,
+both `(n_elements, n_slots, K)`.  A slot is the weighted sum of up to `K`
+DOFs, where a DOF is one node field, `fdim` parameters long.  An evaluation
+applies every element's map once and then gathers the elements it needs, so a
+point costs the same however many terms the longest map has.
+
 ---
 
 ## `MeshField` – evaluatable field

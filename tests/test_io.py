@@ -142,6 +142,20 @@ def test_an_element_referencing_nodes_by_id_reloads_the_same_way(tmp_path):
 
 ############################################### secondary fields
 
+def test_a_param_map_survives_a_round_trip(tmp_path):
+    mesh = hermite_cube()
+    element = mesh.elements[0]
+    element.param_map = {(j, f): [(j, f, 0.5 if f == 'dw' else 1.0)] for j, f in element.slots}
+    mesh.generate_mesh()
+    xis = np.random.default_rng(0).random((10, 3))
+
+    loaded = roundtrip(mesh, tmp_path)
+
+    assert loaded.elements[0].param_map == element.param_map
+    np.testing.assert_allclose(arr(loaded.evaluate_embeddings([0] * 10, xis)),
+                               arr(mesh.evaluate_embeddings([0] * 10, xis)), atol=EXACT)
+
+
 def test_secondary_fields_survive_a_round_trip():
     mesh = unit_cube_field()
     field_nodes = [MeshNode(loc=node.loc * 2.0) for node in mesh.nodes]

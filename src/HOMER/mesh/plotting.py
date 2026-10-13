@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 import pyvista as pv
 
-from HOMER.utils import spheres_to_polydata, jax_aknn
+from HOMER.utils import spheres_to_polydata, jax_aknn, all_pairings
 
 pv.global_theme.allow_empty_mesh = True
 
@@ -195,8 +195,31 @@ def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=
     return mesh
 
 
+def hanging_points(self, fit_params=None) -> np.ndarray:
+    """Where the hanging positions sit: the lattice points with no node of their own.
+
+    Each is evaluated in an element that has it in its lattice, so one shared
+    by several elements appears once per element.  Only a nodal basis has
+    them: a control net's lattice points are not on the field.
+
+    :param fit_params: Evaluate under these parameters instead of the field's own.
+
+    :returns: ``(n, fdim)`` positions; empty when nothing hangs.
+    """
+    if not self.elements[0].basis_functions.interpolatory:
+        return np.zeros((0, self.fdim))     #a control net has no points to hang
+    hanging = np.array([(e, j) for e, element in enumerate(self.elements)
+                        for j, k in enumerate(element.lattice_nodes) if k is None], dtype=int)
+    if not len(hanging):
+        return np.zeros((0, self.fdim))
+    lattice = np.array(all_pairings(*[b.node_locs for b in self.elements[0].basis_functions]))
+    return np.asarray(self.evaluate_embeddings_ele_xi_pair(hanging[:, 0], lattice[hanging[:, 1]],
+                                                           fit_params=fit_params))
+
+
 def plot(self, scene:Optional[pv.Plotter] = None,
          node_colour: str | np.ndarray ='r', node_col_scalar_name='Field', node_cmap='tab10', node_size=10,
+         hanging_colour: str = 'b',
          labels = False, tiling=(10, 6), 
          mesh_colour: str | np.ndarray ='gray', mesh_opacity=0.1, mesh_width = 2, mesh_col_scalar_name="Field", mesh_cmap=None,
          line_colour: str | np.ndarray ='black', line_opacity=1, line_width=2, line_col_scalar_name="Field", line_cmap=None,
@@ -214,6 +237,10 @@ def plot(self, scene:Optional[pv.Plotter] = None,
         an array.
     :param node_cmap: Colour map used when *node_colour* is an array.
     :param node_size: The size of the node points.
+    :param hanging_colour: The colour of the hanging positions -- lattice
+        points with no node of their own, see
+        :func:`~HOMER.mesh.refinement.refine_elements` -- drawn at
+        *node_size*.
     :param labels: Whether to label the node numbers.
     :param tiling: Repetitions of the hexagonal unit surface used to draw each
         element; a 5/3 ratio looks good.
@@ -247,6 +274,7 @@ def plot(self, scene:Optional[pv.Plotter] = None,
     render_name = "" if render_name is None else render_name
     l_tag = render_name + "_lines" if is_tag else None 
     n_tag = render_name + "_nodes" if is_tag else None 
+    g_tag = render_name + "_hanging" if is_tag else None
     h_tag = render_name + "_hexes" if is_tag else None 
     v_tag = render_name + "_nnums" if is_tag else None 
     e_tag = render_name + "_enums" if is_tag else None 
@@ -283,6 +311,13 @@ def plot(self, scene:Optional[pv.Plotter] = None,
         node_dots_m[node_col_scalar_name] = node_colour
 
     s.add_mesh(node_dots_m, render_points_as_spheres=True, color=node_colour if not isinstance(node_colour, np.ndarray) else None, point_size=node_size, name=n_tag, cmap=node_cmap)
+
+    hanging = hanging_points(self, fit_params)
+    if len(hanging):
+        s.add_mesh(pv.PolyData(hanging), render_points_as_spheres=True, color=hanging_colour,
+                   point_size=node_size, name=g_tag)
+    elif is_tag:
+        s.remove_actor(g_tag)
 
     # tri_surf, tris = self.get_triangle_surface(res=res)
     hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling, fit_params=fit_params)
@@ -384,7 +419,7 @@ def plot_strains(self, eles, xis, strains, scene:Optional[pv.Plotter]=None, cmap
         scene.show()
 
 
-def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_cmap='tab10', node_size=10, labels=False, tiling=(10, 6), 
+def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_cmap='tab10', node_size=10, hanging_colour: str = 'b', labels=False, tiling=(10, 6), 
          mesh_colour: str | np.ndarray = 'gray', mesh_opacity=0.1, mesh_width=2, mesh_col_scalar_name="Field", mesh_cmap=None, 
          line_colour: str | np.ndarray = 'black', line_opacity=1, line_width=2, line_col_scalar_name="Field", line_cmap=None,
          elem_labels=False, render_name: Optional[str] = None, 
@@ -403,6 +438,8 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         Colour map used when *node_colour* is an array.
     :param node_size:
         Node sphere size.
+    :param hanging_colour:
+        Colour of the hanging positions, drawn at *node_size*.
     :param labels:
         When ``True``, add node index labels (forces *node_size* = 0).
     :param tiling:
@@ -462,7 +499,7 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         #`MeshField.plot` *is* this module's `plot`; a zero-arg super() would need
         #the __class__ cell that only exists for a def inside a class body.
         plot(self, scene, node_colour=node_colour, node_col_scalar_name=node_col_scalar_name, node_cmap=node_cmap,
-             node_size=node_size, labels=labels, tiling=tiling,
+             node_size=node_size, hanging_colour=hanging_colour, labels=labels, tiling=tiling,
              mesh_colour=mesh_colour, mesh_opacity=mesh_opacity, mesh_width=mesh_width,
              mesh_col_scalar_name=mesh_col_scalar_name, mesh_cmap=mesh_cmap,
              line_colour=line_colour, line_opacity=line_opacity, line_width=line_width,

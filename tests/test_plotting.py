@@ -71,6 +71,25 @@ def test_each_colour_array_uses_its_own_colour_map(block, plotter):
     assert (lut('m_nodes'), lut('m_hexes'), lut('m_lines')) == ('plasma', 'coolwarm', 'viridis')
 
 
+def test_hanging_positions_are_drawn_blue_at_the_node_size(plotter):
+    mesh = cube(basis=[L1] * 3)
+    mesh.refine(2)
+    mesh.refine_elements([0])
+
+    mesh.plot(plotter, render_name='m', node_size=7)
+
+    hanging = plotter.actors['m_hanging']
+    assert hanging.mapper.dataset.n_points == len(mesh.hanging_points()) > 0
+    assert hanging.prop.point_size == plotter.actors['m_nodes'].prop.point_size == 7
+    assert hanging.prop.color == pv.Color('b')
+
+
+def test_a_mesh_with_nothing_hanging_draws_no_hanging_positions(block, plotter):
+    block.plot(plotter, render_name='m')
+
+    assert 'm_hanging' not in plotter.actors
+
+
 def test_a_surface_mesh_draws(plotter):
     mesh = basic_surface(basis=[L2] * 2)
     mesh.refine(2)

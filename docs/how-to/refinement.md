@@ -44,10 +44,12 @@ graded.plot()
 For boundaries that are not evenly spaced, pass `by_xi_refinement` instead: one
 array of xi breakpoints per direction, each running from 0 to 1.
 
-!!! warning
-    Hermite meshes, without the introduction of "scale factors" cannot nicely represent 
-    arbitrary surface. You can see that the very nonuniform refinement performed below
-    results in imperfect surface reconstructions.
+A Hermite node between two children of different widths carries one
+derivative, but each child needs it scaled by its own width.  Each child's
+[parameter map](../architecture.md#parameter-maps) does that scaling, so an
+uneven refinement of `H3` is as exact as an even one, and an even one writes no
+maps at all.  `B3` is the exception: an uneven split makes its knot vector
+non-uniform, which no scaling recovers.
 
 ```python exec="true" source="above" session="refinement"
 # thin layers at both ends of w, and a coarse split in u
@@ -58,11 +60,75 @@ graded.refine(by_xi_refinement=(
     np.array([0, 0.1, 0.9, 1.0]),
 ))
 graded.plot()
+print(graded.elements[0].terms((0, 'dw')))   # the shared w derivative, scaled by this child's width
 ```
 
 !!! warning
     The two parameters `refinement_factor` and `by_xi_refinement` are
     mutually exclusive.  Providing both raises an `AssertionError`.
+
+---
+
+## Refining only some elements
+
+`refine_elements` halves the chosen elements in every direction and leaves the
+rest alone.  Refining a child again takes the mesh another level deeper:
+
+```python exec="true" source="above" session="refinement"
+local = hermite_cube()
+local.refine(2)
+local.refine_elements([0])
+corner = min(range(len(local.elements)), key=lambda i: sum(local.elements[i].box[1]))
+refined = local.refine_elements([corner])
+print(f"{len(local.elements)} elements, {len(local.hanging)} hanging faces, "
+      f"sizes {sorted({float(e.box[2]) for e in local.elements})}")
+local.plot()
+```
+
+The refined mesh carries the *truncated hierarchical* (THB) space of its
+basis.  Each level of refinement has its own functions; a function is a DOF
+where its support is refined to its level and no further, and a coarse function
+gives way exactly where the finer ones take over, so the functions still sum to
+one.  The children reproduce their parents exactly, so there is no fit, and the
+field is as smooth across a change of level as anywhere else.
+
+For a nodal basis that leaves the points a child would put on a face shared
+with a coarser element *hanging*: they get no node, and their
+[parameter map](../architecture.md#parameter-maps) draws their values from the
+coarse element's field there.  New nodes are appended to the node list, so an
+index into the existing nodes stays valid, and refining the coarse element later
+gives those hanging points nodes again.
+
+`B3` is refined the same way.  Its nodes are control points, the coefficients of
+functions rather than values at points, so one can go: once refinement covers
+a coarse function's whole support it is retired, and its node with it.  The
+control points keep their meaning -- the net still moves the surface rigidly.
+
+```python exec="true" source="above" session="refinement"
+from HOMER import B3
+
+net = hermite_cube().rebase(B3**3)
+net.refine(2)
+net.refine_elements([0])
+print(f"{len(net.elements)} elements, {len(net.nodes)} control points")
+net.plot()
+```
+
+Refinement is kept admissible: an element is refined together with every
+coarser element its functions reach, so at most two levels act on any element.
+For a basis whose functions reach one cell -- every nodal one -- that is a 2:1
+balance across faces, edges and corners; `B3` reaches three cells, so its
+refinement spreads further.  `refine_elements` returns the indices of every
+element it refined, the balance's included.  Each element's `box` records where
+it sits in the lattice the mesh was refined from, as
+`(component, origin, size)`.
+
+`mesh.hanging` maps each face lying against a larger one to that face, as
+`(element, direction, side)` pairs.  Neither side counts as an exposed face.
+
+!!! warning
+    `refine` and `rebase` read the mesh as a lattice of equal elements, and
+    raise on a locally refined one.
 
 ---
 

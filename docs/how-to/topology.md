@@ -27,6 +27,7 @@ After `generate_mesh()`, the following topology attributes are available:
 |---|---|---|
 | `mesh.faces` | `list[tuple]` | External faces: `(elem_id, dim, side)` |
 | `mesh.bmap` | `dict` | `(elem, dim, side) → [(neighbor, dim, side), rel_dirs]` |
+| `mesh.hanging` | `dict` | Hanging faces: `(elem, dim, side) → (coarse elem, dim, side)` |
 | `mesh.topomap` | `Callable` | JAX-JIT function `(elem, xi) → (elem', xi', valid)` |
 
 ---
@@ -127,17 +128,38 @@ directions of the two faces are aligned (``True``) or anti-aligned (``False``).
 
 ---
 
+## Hanging faces
+
+After [`refine_elements`](refinement.md#refining-only-some-elements), a child
+can meet an unrefined element across a face the two do not share node for
+node.  `mesh.hanging` pairs each such child face with the coarse face it lies
+against.  `topomap` crosses them both ways, so `embed_points` follows a point
+from a coarse element into the children beside it and back:
+
+```python exec="true" source="above" session="topology"
+local = cube(scale=1, centre=np.zeros(3), basis=L1**3)
+local.refine(2)
+local.refine_elements([0])
+
+(child, dim, side), (coarse, _, _) = next(iter(local.hanging.items()))
+xi = np.full(3, 0.5)
+xi[dim] = 1.05 if side == 1 else -0.05      # just outside the child's face
+across, xi_across, valid = local.topomap(child, jnp.asarray(xi))
+print(f"child {child} -> element {int(across)} (the coarse one is {coarse}), valid={bool(valid)}")
+```
+
+The crossing is read off the elements' parameter maps rather than the
+geometry: the child's corners are drawn from the coarse face's parameters,
+which places them on that face exactly.
+
+---
+
 ## Notes
 
-- The topology exploration uses spatial hashing: two faces are considered
-  connected if their midpoint coordinates are equal to 5 decimal places
-  (`rounding_res`, on both `_explore_topology` and `get_faces`).
-  As the same parameters define this midpoint, they are definitionally equal.
-  This rounding factor can be changed for very small meshes, but maybe just consider a change of scale and make your computer happier.
+- Two faces are connected when the same parameters shape them both, read off
+  the bases and the elements' parameter maps, so it is exact and independent
+  of the geometry.
 - Multi-element junctions (more than 2 elements meeting at a face) are not
-  supported, and are *not* detected.  A shared region matched by more than two
-  elements falls through both branches of the face search, so it is recorded
-  neither in `mesh.faces` nor in `mesh.bmap` and those elements are left
-  unconnected.
+  supported, and raise a `ValueError` when the mesh is generated.
 - For 2-D manifold meshes, each element is its own "face" and `topomap` still
   handles cross-element boundary embedding.

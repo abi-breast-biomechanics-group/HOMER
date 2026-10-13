@@ -22,9 +22,8 @@ def build_hand_written_eval(mesh):
 
     @jax.jit
     def fast_eval(ele, xi, params):
-        full = jnp.asarray(mesh.true_param_array).at[mesh.optimisable_param_bool].set(params)
-        per_element = jnp.asarray(
-            full[mesh.ele_map.astype(int)].reshape((mesh.ele_map.shape[0], -1, 3)))
+        per_element = mesh._element_params(jnp.arange(len(mesh.elements)), params).reshape(
+            (len(mesh.elements), -1, 3))
 
         def one(e, xi_single):
             weights = mesh.generate_weight_matrix(xi_single[None])

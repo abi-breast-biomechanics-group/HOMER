@@ -5,6 +5,20 @@ Notable changes to HOMER.
 ## Unreleased
 
 ### Added
+- General linear parameter maps.  Each element parameter is a weighted sum of
+  node fields, given by `MeshElement.param_map` and the identity when that is
+  `None`; `generate_mesh` assembles them into `ele_map` and `ele_weights`.  A
+  scale factor is a single weighted term and a hanging node a weighted sum.
+- `refine_elements` refines chosen elements, to any depth, keeping the mesh
+  admissible, and leaves the nodes they share with coarser neighbours
+  hanging, drawn from the coarse element.  The children reproduce their
+  parents exactly and the field stays continuous across the hanging face.
+  `MeshElement.box` places each element in the lattice it was refined from;
+  `mesh.hanging` pairs each hanging face with its coarse face, and `topomap`
+  and `embed_points` cross them.  The refined space is the truncated
+  hierarchical (THB) one, which for a nodal basis is the hanging-node space and
+  for `B3` gives THB-splines: control points that still sum to one, with
+  refinement kept admissible for the basis's reach.
 - `HOMER.examples`, the example meshes the documentation and the test suite
   share: `bulged_patch`, `hermite_cube`, `unit_hex`, and `wordmark`, the
   library's own name written as a mesh.  The first three were private to the
@@ -16,6 +30,15 @@ Notable changes to HOMER.
   `mkdocs build --strict`, which makes the docs a second test suite.
 
 ### Changed
+- `refine` by uneven `by_xi_refinement` is exact for `H3`: each child's map
+  scales the node derivatives by its width.  An even refinement writes no maps
+  and its result is unchanged.
+- `MeshElement.scale_factors` and `MeshField.ele_scales` are removed; a scale
+  factor is a term of `param_map`.  `ele_map` holds DOF indices,
+  `(n_elements, n_slots, K)`, rather than parameter indices.
+- Evaluation applies every element's map once and then gathers, which is
+  faster than the per-point gather it replaces (0.40 to 0.30 s per 5M points
+  in `bench_evaluation.py`).
 - `linear_fit` respects fixed parameters.  Parameters pinned with
   `MeshNode.fix_parameter` are held at their current values and moved to the
   right-hand side, so the solve runs over the free columns only and returns
