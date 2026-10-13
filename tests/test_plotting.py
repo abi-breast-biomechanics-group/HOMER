@@ -59,6 +59,18 @@ def test_an_array_of_node_colours_is_accepted(block, plotter):
     assert len(plotter.actors) >= 3
 
 
+def test_each_colour_array_uses_its_own_colour_map(block, plotter):
+    lines = block.get_lines()
+    hex_pts, _ = block.get_hex_surface(list(range(len(block.elements))))
+    block.plot(plotter, render_name='m',
+               node_colour=np.arange(len(block.nodes), dtype=float), node_cmap='plasma',
+               mesh_colour=hex_pts[:, 2], mesh_cmap='coolwarm',
+               line_colour=lines.points[:, 0], line_cmap='viridis')
+
+    lut = lambda name: plotter.actors[name].mapper.lookup_table.cmap.name
+    assert (lut('m_nodes'), lut('m_hexes'), lut('m_lines')) == ('plasma', 'coolwarm', 'viridis')
+
+
 def test_a_surface_mesh_draws(plotter):
     mesh = basic_surface(basis=[L2] * 2)
     mesh.refine(2)

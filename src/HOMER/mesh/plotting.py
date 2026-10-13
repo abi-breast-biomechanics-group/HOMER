@@ -196,10 +196,10 @@ def get_lines(self, element_ids: Optional[list[int]|int|np.ndarray] = None, res=
 
 
 def plot(self, scene:Optional[pv.Plotter] = None,
-         node_colour: str | np.ndarray ='r', node_col_scalar_name='Field', node_size=10,
+         node_colour: str | np.ndarray ='r', node_col_scalar_name='Field', node_cmap='tab10', node_size=10,
          labels = False, tiling=(10, 6), 
-         mesh_colour: str | np.ndarray ='gray', mesh_opacity=0.1, mesh_width = 2, mesh_col_scalar_name="Field",
-         line_colour: str | np.ndarray ='black', line_opacity=1, line_width=2, line_col_scalar_name="Field",
+         mesh_colour: str | np.ndarray ='gray', mesh_opacity=0.1, mesh_width = 2, mesh_col_scalar_name="Field", mesh_cmap=None,
+         line_colour: str | np.ndarray ='black', line_opacity=1, line_width=2, line_col_scalar_name="Field", line_cmap=None,
          elem_labels=False,
          render_name:Optional[str] = None,
          fit_params=None,
@@ -212,6 +212,7 @@ def plot(self, scene:Optional[pv.Plotter] = None,
         colour-maps them.
     :param node_col_scalar_name: Scalar array name used when *node_colour* is
         an array.
+    :param node_cmap: Colour map used when *node_colour* is an array.
     :param node_size: The size of the node points.
     :param labels: Whether to label the node numbers.
     :param tiling: Repetitions of the hexagonal unit surface used to draw each
@@ -221,12 +222,14 @@ def plot(self, scene:Optional[pv.Plotter] = None,
     :param mesh_width: Line width of the surface wireframe.
     :param mesh_col_scalar_name: Scalar array name used when *mesh_colour* is
         an array.
+    :param mesh_cmap: Colour map used when *mesh_colour* is an array.
     :param line_colour: Colour of the structural edge lines.  An array
         colour-maps them.
     :param line_opacity: Edge line opacity.
     :param line_width: Edge line width.
     :param line_col_scalar_name: Scalar array name used when *line_colour* is
         an array.
+    :param line_cmap: Colour map used when *line_colour* is an array.
     :param elem_labels: Whether to label the mesh elements.
     :param render_name: Prefix for the actors this call creates, so a later
         call with the same name replaces them rather than stacking a second
@@ -274,12 +277,12 @@ def plot(self, scene:Optional[pv.Plotter] = None,
     if isinstance(line_colour, np.ndarray):
         lines[line_col_scalar_name] = line_colour
 
-    s.add_mesh(lines, line_width=line_width, color=line_colour if not isinstance(line_colour, np.ndarray) else None, name=l_tag, opacity=line_opacity)
+    s.add_mesh(lines, line_width=line_width, color=line_colour if not isinstance(line_colour, np.ndarray) else None, name=l_tag, opacity=line_opacity, cmap=line_cmap)
     node_dots_m = pv.PolyData(node_dots)
     if isinstance(node_colour, np.ndarray):
         node_dots_m[node_col_scalar_name] = node_colour
 
-    s.add_mesh(node_dots_m, render_points_as_spheres=True, color=node_colour if not isinstance(node_colour, np.ndarray) else None, point_size=node_size, name=n_tag, cmap='tab10')
+    s.add_mesh(node_dots_m, render_points_as_spheres=True, color=node_colour if not isinstance(node_colour, np.ndarray) else None, point_size=node_size, name=n_tag, cmap=node_cmap)
 
     # tri_surf, tris = self.get_triangle_surface(res=res)
     hex_surf, lines = self.get_hex_surface(list(range(len(self.elements))), tiling, fit_params=fit_params)
@@ -292,7 +295,7 @@ def plot(self, scene:Optional[pv.Plotter] = None,
     # surf_mesh.faces = np.concatenate((3 * np.ones((tris.shape[0], 1)), tris), axis=1).astype(int)
     s.add_mesh(surf_mesh, 
                # style='wireframe', 
-               color=None if isinstance(mesh_colour, np.ndarray) else mesh_colour, opacity=mesh_opacity, name=h_tag, line_width=mesh_width, render_lines_as_tubes=True)
+               color=None if isinstance(mesh_colour, np.ndarray) else mesh_colour, opacity=mesh_opacity, name=h_tag, line_width=mesh_width, render_lines_as_tubes=True, cmap=mesh_cmap)
     if labels:
         s.add_point_labels(points = node_dots, labels=[str(i) for i in range(node_dots.shape[0])], name=v_tag)
     if elem_labels:
@@ -381,9 +384,9 @@ def plot_strains(self, eles, xis, strains, scene:Optional[pv.Plotter]=None, cmap
         scene.show()
 
 
-def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_size=10, labels=False, tiling=(10, 6), 
-         mesh_colour: str | np.ndarray = 'gray', mesh_opacity=0.1, mesh_width=2, mesh_col_scalar_name="Field", 
-         line_colour: str | np.ndarray = 'black', line_opacity=1, line_width=2, line_col_scalar_name="Field",
+def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_cmap='tab10', node_size=10, labels=False, tiling=(10, 6), 
+         mesh_colour: str | np.ndarray = 'gray', mesh_opacity=0.1, mesh_width=2, mesh_col_scalar_name="Field", mesh_cmap=None, 
+         line_colour: str | np.ndarray = 'black', line_opacity=1, line_width=2, line_col_scalar_name="Field", line_cmap=None,
          elem_labels=False, render_name: Optional[str] = None, 
          field_to_draw = None, field_xi = None, draw_xyz_field = True, field_artist: Optional[Callable[[pv.Plotter, np.ndarray, np.ndarray], None]] = None,
          default_field_point_size=25, default_xi_res=4, fit_params=None):
@@ -396,6 +399,8 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         Colour for node spheres.  An array colour-maps them.
     :param node_col_scalar_name:
         Scalar array name used when *node_colour* is an array.
+    :param node_cmap:
+        Colour map used when *node_colour* is an array.
     :param node_size:
         Node sphere size.
     :param labels:
@@ -411,6 +416,8 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         Line width for the hex wireframe.
     :param mesh_col_scalar_name:
         Scalar array name used when *mesh_colour* is an array.
+    :param mesh_cmap:
+        Colour map used when *mesh_colour* is an array.
     :param line_colour:
         Colour for the structural edge lines.
     :param line_opacity:
@@ -419,6 +426,8 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         Edge line width.
     :param line_col_scalar_name:
         Scalar name for colour-mapped edges.
+    :param line_cmap:
+        Colour map used when *line_colour* is an array.
     :param elem_labels:
         When ``True``, label element centres.
     :param render_name:
@@ -452,10 +461,13 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
     if draw_xyz_field:
         #`MeshField.plot` *is* this module's `plot`; a zero-arg super() would need
         #the __class__ cell that only exists for a def inside a class body.
-        plot(self, scene, node_colour, node_col_scalar_name, node_size, labels, tiling,
-             mesh_colour, mesh_opacity, mesh_width, mesh_col_scalar_name,
-             line_colour, line_opacity, line_width, line_col_scalar_name,
-             elem_labels, render_name, fit_params)
+        plot(self, scene, node_colour=node_colour, node_col_scalar_name=node_col_scalar_name, node_cmap=node_cmap,
+             node_size=node_size, labels=labels, tiling=tiling,
+             mesh_colour=mesh_colour, mesh_opacity=mesh_opacity, mesh_width=mesh_width,
+             mesh_col_scalar_name=mesh_col_scalar_name, mesh_cmap=mesh_cmap,
+             line_colour=line_colour, line_opacity=line_opacity, line_width=line_width,
+             line_col_scalar_name=line_col_scalar_name, line_cmap=line_cmap,
+             elem_labels=elem_labels, render_name=render_name, fit_params=fit_params)
 
     if field_to_draw == None:
         if s_flag:
