@@ -345,7 +345,7 @@ class MeshField:
         redundant XLA retracing.
         """
         self._mesh_embed_points = build_embedding_fn(self)
-        # Variants for non-default approx_jac / robust_init_est, cached by
+        # Variants for a non-default derivative / robust_init_est, cached by
         # embed_points.  They close over this mesh's topology and parameter
         # layout, so regenerating invalidates them.
         self._embed_fn_variants = {}

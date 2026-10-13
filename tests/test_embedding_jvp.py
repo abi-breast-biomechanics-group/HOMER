@@ -298,3 +298,105 @@ def test_the_returned_jacobian_is_taken_at_the_converged_point():
         #dr_i/dx_i = I - W_i dxi_i/dx_i
         predicted = np.eye(3) - W[i] @ d_xi[i, :, i, :]
         np.testing.assert_allclose(d_res[i, :, i, :], predicted, atol=1e-4)
+
+
+############################################### the cheaper derivatives
+
+@pytest.fixture(scope="module")
+def off_surface():
+    """A curved patch and points just off it, where the derivatives part ways.
+
+    On the surface the residual is zero and every term weighted by it
+    vanishes; off it, the exact derivative carries the surface's curvature.
+    """
+    from HOMER.examples import bulged_patch
+    mesh = bulged_patch()
+    mesh.refine(3)
+    rng = np.random.default_rng(9)
+    eles = rng.integers(len(mesh.elements), size=60)
+    xis = 0.1 + 0.8 * rng.random((60, 2))
+    normals = np.array(mesh.evaluate_normals_ele_xi_pair(eles, xis))
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    points = np.asarray(mesh.evaluate_embeddings_ele_xi_pair(eles, xis)) \
+        + 0.02 * rng.standard_normal((60, 1)) * normals
+    return mesh, jnp.asarray(points), jnp.asarray(mesh.optimisable_param_array)
+
+
+def residual_jacobian(mesh, points, params, derivative):
+    def residual(p):
+        return mesh.embed_points(points, fit_params=p, return_residual=True,
+                                 iterations=50, derivative=derivative)[1].ravel()
+    return np.asarray(jax.jacfwd(residual)(params)), np.asarray(residual(params))
+
+
+def test_gauss_newton_has_the_exact_gradient(off_surface):
+    """Only the curvature model is left out: J^T r, what a fit descends, is exact.
+
+    Exact as far as ``W^T r`` vanishes, which is as far as the embedding has
+    converged -- float32 round-off of the closest point, so the two agree to
+    1e-3 of the gradient rather than to its last bit.
+    """
+    mesh, points, params = off_surface
+    exact, r = residual_jacobian(mesh, points, params, 'exact')
+    gauss_newton, _ = residual_jacobian(mesh, points, params, 'gauss_newton')
+
+    assert np.abs(gauss_newton - exact).max() > 1e-2 * np.abs(exact).max()
+    np.testing.assert_allclose(gauss_newton.T @ r, exact.T @ r,
+                               atol=1e-3 * np.abs(exact.T @ r).max())
+
+
+def test_gauss_newton_is_the_fixed_derivative_projected_off_the_surface(off_surface):
+    """r_dot = P w_dot: eliminating xi from the joint Gauss-Newton problem."""
+    mesh, points, params = off_surface
+    gauss_newton, _ = residual_jacobian(mesh, points, params, 'gauss_newton')
+    fixed, _ = residual_jacobian(mesh, points, params, 'fixed')
+
+    (eles, xis), _ = mesh.embed_points(points, fit_params=params, return_residual=True,
+                                       iterations=50)
+    J = np.asarray(mesh.evaluate_jacobians_ele_xi_pair(eles, xis, fit_params=params))
+    P = np.eye(3) - J @ np.linalg.solve(np.swapaxes(J, 1, 2) @ J, np.swapaxes(J, 1, 2))
+    projected = np.einsum('nij,njk->nik', P, fixed.reshape(len(points), 3, -1)).reshape(fixed.shape)
+
+    np.testing.assert_allclose(gauss_newton, projected, atol=1e-4 * np.abs(projected).max())
+
+
+def test_a_coloured_gauss_newton_jacobian_keeps_its_small_entries():
+    """The tangent along a seed is mostly tangential, its normal part small.
+
+    Taken as ``v - W xi_dot``, float32 kept too little of that part for the
+    coloured decode to place the small entries, and dropped them.
+    """
+    from HOMER import make_jac_for_mesh_func
+    from HOMER.examples import bulged_patch
+    mesh = bulged_patch()
+    mesh.refine(4)
+    rng = np.random.default_rng(0)
+    on = np.asarray(mesh.evaluate_embeddings_ele_xi_pair(
+        rng.integers(len(mesh.elements), size=20000), rng.random((20000, 2))))
+    points = jnp.asarray(on * [1.05, 0.95, 1.1] + rng.normal(scale=0.01, size=on.shape))
+
+    fun, jac = make_jac_for_mesh_func(mesh, lambda p: mesh.embed_points(
+        points, fit_params=p, return_residual=True, derivative='gauss_newton')[1].ravel())
+    params = jnp.asarray(mesh.optimisable_param_array)
+    dense = np.asarray(jax.jacfwd(fun)(params))
+    coloured = jac(params).toarray()
+
+    assert not ((np.abs(dense) > 1e-5) & (coloured == 0)).any()
+    np.testing.assert_allclose(coloured, dense, atol=1e-5)
+
+
+def test_fixed_is_the_evaluation_at_the_embedded_point(off_surface):
+    mesh, points, params = off_surface
+    fixed, _ = residual_jacobian(mesh, points, params, 'fixed')
+    (eles, xis), _ = mesh.embed_points(points, fit_params=params, return_residual=True,
+                                       iterations=50)
+    held = jax.jacfwd(lambda p: (points - mesh.evaluate_embeddings_ele_xi_pair(
+        eles, xis, fit_params=p)).ravel())(params)
+
+    np.testing.assert_allclose(fixed, np.asarray(held), atol=1e-5)
+
+
+def test_an_unknown_derivative_is_refused(off_surface):
+    mesh, points, _ = off_surface
+    with pytest.raises(ValueError, match="derivative"):
+        mesh.embed_points(points, derivative='approximate')

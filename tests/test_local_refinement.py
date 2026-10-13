@@ -210,7 +210,7 @@ def test_the_coloured_jacobian_matches_the_dense_one():
         return mesh.evaluate_embeddings(eles, grid, fit_params=params).ravel()
 
     params = jnp.asarray(mesh.optimisable_param_array)
-    coloured = make_jac_for_mesh_func(mesh, residual, False)(params).toarray()
+    coloured = make_jac_for_mesh_func(mesh, residual, False)[1](params).toarray()
 
     np.testing.assert_allclose(coloured, np.asarray(jax.jacfwd(residual)(params)), atol=EXACT)
 

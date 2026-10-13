@@ -19,7 +19,7 @@ import numpy as np
 import jax.numpy as jnp
 import pyvista as pv
 
-from HOMER.embedding import build_embedding_fn
+from HOMER.embedding import build_embedding_fn, DERIVATIVES
 from HOMER.mesh.element_eval import GAUSS, quadrature_order
 from HOMER.mesh_decorators import wide_eval
 from HOMER.utils import make_tiling
@@ -212,19 +212,10 @@ def evaluate_jacobians(self, element_ids, xis, fit_params=None, arrays=None):
     """
     if fit_params is None:
         fit_params = self.optimisable_param_array
-
-    if self.ndim == 2:
-        du = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
-        dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
-        jmats = jnp.concatenate((du, dv), axis=1)
-    if self.ndim == 3:
-
-        du = self.evaluate_deriv_embeddings(element_ids, xis, [1, 0, 0], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
-        dv = self.evaluate_deriv_embeddings(element_ids, xis, [0, 1, 0], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
-        dw = self.evaluate_deriv_embeddings(element_ids, xis, [0, 0, 1], fit_params=fit_params, arrays=arrays).reshape(-1, 1, self.fdim)
-        jmats = jnp.concatenate((du, dv, dw), axis=1)
-    # return jmats
-    return jnp.swapaxes(jmats, -1,-2) #differing jacobin implementation.
+    #the value comes with it: the tensor-product contraction is shared, which is
+    #cheaper than contracting once per derivative direction
+    return self.evaluate_embeddings_and_jacobians(element_ids, xis, fit_params=fit_params,
+                                                  arrays=arrays)[1]
 
 
 #reads every piece of field state it needs through *arrays*, so one compiled
@@ -390,7 +381,7 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
                  surface_embed=False, iterations=15, max_c=None, grid_res=10,
                  vis_max_norm=None, scene: Optional[pv.Plotter]=None,
                  dim_mask=None, robust_init_est=False,
-                 approx_jac=False,
+                 derivative='exact',
                  chunk_size=None, window_size=16, tol=None,
                  ):
     """Find the parametric coordinates (element, xi) for a set of physical-space points.
@@ -464,10 +455,16 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
         the analytic one, which helps a seed that lands somewhere the
         analytic Jacobian is near-singular.  The Jacobian carried by the
         loop and handed to the JVP is the analytic one either way.
-    :param approx_jac:
-        drops the calculation of the sliding term from the residual gradient estimation for embedding.
-        Is less accurate, but recovers seperable derivatives by dimension, allowing further compression of the Jacobian.
-        The jac estimate will^* have the right sign.
+    :param derivative:
+        What differentiating the embedding returns, as the points follow the
+        mesh.  ``'exact'`` (default) is the true derivative, curvature and
+        all.  ``'gauss_newton'`` leaves out the terms weighted by the
+        residual: the reduced Jacobian of fitting the points' positions and
+        the mesh together, with the exact gradient, at a fraction of the
+        cost per column -- the one to fit with.  ``'fixed'`` holds each point
+        at the ``(element, xi)`` it embedded to; cheapest, and separable in
+        the field components, but a slow model to fit with.  See
+        :func:`~HOMER.embedding._make_jvp_helpers`.
     :param chunk_size:
         When set, query points are processed in batches of at most
         this size.  Bounds peak memory to ``O(chunk_size)`` instead
@@ -480,11 +477,13 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
         *dim_mask* masks anything off, since that case uses an exact
         search instead (see below).
     :param tol:
-        Residual norm at which the refinement stops, making
-        *iterations* an upper bound rather than a fixed count.
-        ``None`` (the default) uses
+        Distance at which the refinement stops, making *iterations* an
+        upper bound rather than a fixed count: a residual that short, or a
+        next step that would move the embedded point less than that.  The
+        second is what stops a point off the mesh, whose residual at the
+        closest point is not zero.  ``None`` (the default) uses
         :data:`~HOMER.embedding.DEFAULT_EMBED_TOL` times the mesh's
-        extent — float32 round-off, which the residual reaches within
+        extent — float32 round-off, which the refinement reaches within
         two or three iterations and then never leaves, so the remaining
         iterations were recomputing the same bits.  Pass ``0`` to
         iterate unconditionally.
@@ -510,7 +509,7 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
 
     points = jnp.atleast_2d(points)
 
-    # Rebuild the compiled embedding function when approx_jac or
+    # Rebuild the compiled embedding function when derivative or
     # robust_init_est differ from the defaults baked into the
     # cached function.  This is rare — most callers leave them
     # False and reuse the function built in generate_mesh().  The
@@ -519,12 +518,14 @@ def embed_points(self, points, verbose=0, init_elexi=None, fit_params=None, retu
     # wants it on every call (a fitting loop embedding the same points
     # against moving parameters), which used to retrace every time.
     embed_fn = self._mesh_embed_points
-    if approx_jac or robust_init_est:
-        key = (bool(approx_jac), bool(robust_init_est))
+    if derivative not in DERIVATIVES:
+        raise ValueError(f"derivative must be one of {DERIVATIVES}, not {derivative!r}")
+    if derivative != 'exact' or robust_init_est:
+        key = (derivative, bool(robust_init_est))
         cache = self.__dict__.setdefault("_embed_fn_variants", {})
         embed_fn = cache.get(key)
         if embed_fn is None:
-            embed_fn = build_embedding_fn(self, approx_jac=approx_jac,
+            embed_fn = build_embedding_fn(self, derivative=derivative,
                                           robust_init_est=robust_init_est)
             cache[key] = embed_fn
 

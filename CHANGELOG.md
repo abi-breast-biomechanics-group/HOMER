@@ -5,6 +5,29 @@ Notable changes to HOMER.
 ## Unreleased
 
 ### Added
+- `make_jac_for_mesh_func` takes parameters as a pytree -- a shape model's
+  offset and mode weights, several meshes, a pose -- with a mesh at each leaf
+  to colour and `None` at each to take one jvp per entry, and returns a column
+  block per leaf in `ravel_pytree` order.  A leaf may also be an integer
+  array giving each parameter's colour, for parameters that are not a mesh's
+  own, such as a reparameterisation.
+- `make_jac_for_mesh_func` returns `(residual, jacobian)`: the compiled
+  residual, ravelled -- and batched -- exactly as the Jacobian's rows are.
+  Both take the parameters ravelled, as a solver holds them, and unravel them
+  for the function, a tree or a batch by the structure of `init_estimate`, so
+  the pair goes to `least_squares` as it is.
+- `make_jac_for_mesh_func` takes a residual returned as a pytree, each leaf a
+  block of rows with its own colouring and its own kept pattern, in
+  `ravel_pytree` order; a colour-array leaf may offer candidate colourings as
+  a 2-D array.  On the breast cohort fit -- a coupled distance term beside a
+  separable embedding term and a Sobolev prior -- a 30-evaluation solve takes
+  21 s against 29 s with one block.
+- `make_jac_for_mesh_func(..., batched=True)` differentiates a cohort on one
+  template -- subjects, frames -- as a batch: the function describes one item,
+  parameters and keyword arguments carry a leading batch axis, and the
+  Jacobian is block diagonal.  The items share their tangents, so work that
+  does not depend on an item's values is done once; on an eight-subject breast
+  cohort that is 0.38 s against 1.04 s differentiating the stacked function.
 - General linear parameter maps.  Each element parameter is a weighted sum of
   node fields, given by `MeshElement.param_map` and the identity when that is
   `None`; `generate_mesh` assembles them into `ele_map` and `ele_weights`.  A
@@ -30,6 +53,36 @@ Notable changes to HOMER.
   `mkdocs build --strict`, which makes the docs a second test suite.
 
 ### Changed
+- `make_jac_for_mesh_func` keeps the columns it decoded between calls and
+  checks them every call against one jvp along a random direction, decoding
+  again only when the pattern has moved.  `fields_seperable` defaults to
+  `None`, found the same way, and a residual no colouring can carry raises
+  instead of returning a wrong Jacobian.  `make_static_jac_for_mesh_func` is
+  removed: the kept pattern is as cheap and stays right when the pattern moves.
+  At 100k points just off the surface of a 512-element tricubic mesh, a
+  residual on `embed_points` takes 3.9 s with `derivative='gauss_newton'`,
+  0.9 s with `'fixed'` and 15 s exact.
+  A pattern that keeps moving is decoded alongside the values, in the same
+  pass, until a decode adds nothing to the pattern held: entries whose values
+  cross the decode's threshold come and go at fixed columns, so the held
+  pattern is the union of the decodes, and only a column that moves starts it
+  afresh.  It returns a `csr_array`
+  rather than a `coo_array`, laid out on the device: only the nonzeros and
+  their columns leave it, where every colour's entry for every residual used
+  to be copied out and filtered on the host.
+- `embed_points(derivative=...)` replaces `approx_jac`: `'exact'` (default),
+  `'gauss_newton'` -- the reduced Jacobian of fitting the points and the mesh
+  together, with the exact gradient, 3-4x cheaper per column -- or `'fixed'`,
+  which is what `approx_jac=True` was.
+- Embedding stops a point once its Newton step falls inside the tolerance, so
+  points off the mesh no longer run every iteration (2-3x on such data), and
+  refines the slow few in a second pass instead of holding the batch to them.
+- Embedding no longer freezes points on collapsed element faces: the held
+  directions are re-decided as the point moves, and a direction the Jacobian
+  has collapsed in is probed off the face.  On the curved example block,
+  points failing to embed fell from 7% to 0.01%.
+- `evaluate_jacobians` shares the tensor-product contraction across its
+  columns, 3x faster.
 - `refine` by uneven `by_xi_refinement` is exact for `H3`: each child's map
   scales the node derivatives by its width.  An even refinement writes no maps
   and its result is unchanged.
@@ -58,6 +111,10 @@ Notable changes to HOMER.
   and `loc` on a control net) still take the value the fit gives them.
 
 ### Fixed
+- Points just off a flat surface were seeded half the mesh away and lost --
+  29% of them, settling outside every element.  The coarse search scaled each
+  axis to the reference points' own box, which has no depth across a flat
+  surface; one of its two trees now codes against a cube instead.
 - The hexagonal surface lattice is built as line cells rather than as
   two-point polygons.  VTK drew the degenerate polygons as edges anyway, so
   desktop rendering is unchanged, but any exporter stricter than VTK -- vtk.js

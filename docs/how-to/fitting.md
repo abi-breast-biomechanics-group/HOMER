@@ -254,94 +254,155 @@ what keeps the quotient sharp enough to round correctly in float32.
 `make_jac_for_mesh_func` is that loop, wrapped:
 
 ```python exec="true" source="above" session="fitting"
-from HOMER import make_jac_for_mesh_func, make_static_jac_for_mesh_func
+from HOMER import make_jac_for_mesh_func
 
 params = np.asarray(mesh.optimisable_param_array)
 
 def residual(params):
     return cost(params)
 
-jac_fn = make_jac_for_mesh_func(mesh, residual, fields_seperable=True)
-jac = jac_fn(params)          # coo_array, (n_residuals, n_parameters)
-print(jac.shape, jac.nnz, "non-zeros")
+fun, jac_fn = make_jac_for_mesh_func(mesh, residual)
+jac = jac_fn(params)          # csr_array, (n_residuals, n_parameters)
+print(fun(params).shape, jac.shape, jac.nnz, "non-zeros")
 ```
 
-Because the indices are decoded on every call, the *pattern* is free to move
-between them -- which is what a data-to-model term needs.  A residual built on
-`embed_points` re-embeds its data as the mesh deforms, so a point can land in a
-different element from one iteration to the next.
-Despite the changing location, the colouring stays valid, as each point only embeds 
-into one element at a time.
+It returns the compiled residual and its Jacobian, the pair
+`scipy.optimize.least_squares` takes.  The Jacobian is a
+`scipy.sparse.csr_array`, which goes straight to the solver with no
+conversion.
 
-Pass `approx_jac=True` to `embed_points` for this.  It holds each point at the
-`(element, xi)` it embedded to instead of letting it slide, which is what keeps
-each residual component dependent on only the matching field component --
-i.e. what makes `fields_seperable=True` true:
+### Keeping the pattern between calls
+
+The second pass -- the one that says which column each value belongs to -- is
+only needed when the pattern moves, so the decoded columns are kept between
+calls.  They are trusted only while they agree with one more `jvp`, taken along
+a fixed random direction on every call: a moved pattern misses it by the size
+of whatever it misplaced, and is decoded afresh.  A pattern that holds still
+costs one pass a call; one that moves stays right.
+
+That is what a data-to-model term needs.  A residual built on `embed_points`
+re-embeds its data as the mesh deforms, so a point can land in a different
+element from one iteration to the next; the colouring stays valid, as each
+point draws on one element at a time, and the probe notices the move.
+
+Differentiate such a residual with `derivative='gauss_newton'`.  It is the
+derivative a least-squares solver wants -- the exact gradient, without the
+curvature terms only a sensitivity needs -- and its Jacobian costs a quarter of
+the exact one: 3.9 s for 100k points just off the surface of a 512-element
+tricubic mesh, against 15 s exact and 0.9 s with the points held
+(`derivative='fixed'`).
 
 ```python exec="true" source="above" session="fitting"
 points = np.asarray(target_pts)
 
 def residual(params):
     return mesh.embed_points(points, fit_params=params, return_residual=True,
-                             approx_jac=True)[1].flatten()
+                             derivative='gauss_newton')[1].flatten()
+
+_, jac_fn = make_jac_for_mesh_func(mesh, residual)
+print(jac_fn(params).shape)
 ```
 
-!!! warning "`fields_seperable` has to match how the residual couples"
-    A mismatch is silent.  Entries the index decode cannot resolve are dropped,
-    so the Jacobian comes back sparse, plausible and wrong rather than raising.
-    The exact embedding Jacobian (`approx_jac=False`, the default) slides the
-    point as the mesh deforms, which makes every residual component depend on
-    every component of the element's parameters: separable in elements, not in
-    fields, so it needs `fields_seperable=False`.
-
-### Freezing the pattern
-
-Most fits are not data-to-model.  Anything evaluated at fixed `(element, xi)`
-pairs -- a grid fit, a Sobolev term, a field residual -- has a pattern that
-never moves, so repeatedly decoding it is uneccessary.
-`make_static_jac_for_mesh_func` decodes once at a starting estimate, keeps the
-indices, and leaves one `jvp` per colour to do per call:
-
-```python exec="true" source="above" session="fitting"
-p_start = np.asarray(mesh.optimisable_param_array)
-
-jac_fn = make_static_jac_for_mesh_func(mesh, cost, p_start,
-                                       fields_seperable=True)
-```
-
-It costs about half as much per call as the dynamic version.  The caveats are
-the two that go with any frozen pattern: an entry that happens to vanish at
-`p_start` is recorded as absent and stays absent, so start somewhere
-representative; and if the residual *does* re-embed its data, the indices are
-wrong the moment a point changes element -- that case wants the dynamic
-version.
-
-Both return a `scipy.sparse.coo_array`, which is what
-`scipy.optimize.least_squares` wants, so they go straight to it with no
-conversion.  The static one holds its indices on the host, so only the values
-come back from the device on each call.
+The same check settles `fields_seperable`, which by default the maker works
+out for itself: it tries the separable colouring first, keeps it if the probe
+agrees, and otherwise takes the coupled one.  An evaluation at fixed points is
+separable; a residual on `embed_points` is not, unless its points are held with
+`derivative='fixed'`.  A residual that no colouring can carry -- an entry
+drawing on more than one element -- is refused with a `ValueError` rather than
+returned wrong.
 
 A residual whose data changes between solves -- a tracker stepping through
 frames, a correspondence refound each iteration -- takes that data as keyword
-arguments, and both makers forward them to it behind the parameter vector.
-That is the route `least_squares(..., kwargs=...)` already uses, so one dict
-feeds the residual and its Jacobian alike:
+arguments, and the maker forwards them to it behind the parameter vector.  That
+is the route `least_squares(..., kwargs=...)` already uses, so one dict feeds
+the residual and its Jacobian alike:
 
 ```python
-jac_fn = make_static_jac_for_mesh_func(
-    mesh, residual, p_start, fields_seperable=True,
-    further_args={'weights': np.ones(n_obs)})
+fun, jac_fn = make_jac_for_mesh_func(mesh, residual)
 
-result = least_squares(residual, p_start, jac=jac_fn,
+result = least_squares(fun, p_start, jac=jac_fn,
                        kwargs={'weights': visibility[frame]})
 ```
 
-`further_args` is deliberately not the data later calls pass.  An entry the
-probe masks to zero is recorded as absent for good, so read the pattern with
-data that leaves every entry live -- unit weights rather than a visibility
-mask -- and pass the real thing per call.
+Data that zeroes some entries on one call costs them nothing later: when they
+come back, the probe sees them and the pattern is decoded again.
 
----
+### Several blocks of parameters
+
+The parameters need not be one vector.  A statistical shape model fits a mesh's
+parameters as a mean, an offset and a weighting of its modes; a fit can span
+several meshes, or carry a pose beside the shape.  Pass the parameters as a
+pytree, and `initial_mesh` as the same tree with a mesh at each leaf to colour
+and `None` at each leaf small enough to take one `jvp` per entry:
+
+```python exec="true" source="above" session="fitting"
+from jax.flatten_util import ravel_pytree
+
+mean = jnp.asarray(mesh.optimisable_param_array)
+modes = jnp.asarray(np.random.default_rng(0).normal(scale=0.01, size=(mean.size, 5)))
+
+def shape_residual(params):
+    offset, weights = params
+    return cost(mean + offset + modes @ weights)
+
+start = (jnp.zeros_like(mean), jnp.zeros(5))
+fun, jac_fn = make_jac_for_mesh_func((mesh, None), shape_residual, init_estimate=start)
+x0, unravel = ravel_pytree(start)
+print(jac_fn(x0).shape)        # (n_residuals, n_parameters + 5)
+```
+
+A solver works on one flat vector, so the residual and Jacobian take the
+parameters ravelled -- `x0` above -- and unravel them for the function;
+`init_estimate` gives them the tree's structure, and `unravel(result.x)` reads
+the solution back.  Each leaf is a block of columns in that ravelled order, and
+each mesh settles its own colouring, separable or not.
+
+A cohort fitted on one template -- subjects, or time frames -- is a batch.  With
+`batched=True` the function describes one item, the parameters and keyword
+arguments carry a leading batch axis, and the Jacobian comes back block
+diagonal.  The items are differentiated side by side with the same tangents, so
+whatever does not depend on an item's own values is done once for the batch:
+
+```python exec="true" source="above" session="fitting"
+def subject_residual(params, offset):
+    return cost(params) + offset
+
+cohort = jnp.stack([params, params])
+offsets = jnp.stack([jnp.zeros(1), jnp.ones(1)])
+fun, jac_fn = make_jac_for_mesh_func(mesh, subject_residual, batched=True, init_estimate=cohort)
+print(fun(cohort.ravel(), offset=offsets).shape, jac_fn(cohort.ravel(), offset=offsets).shape)
+```
+
+A leaf whose parameters are not a mesh's own -- a reparameterisation that ties
+some parameters together, say -- takes its colouring as an integer array, one
+colour per parameter.  Two parameters may share a colour if no residual entry
+ever reaches both.  The probe checks a given colouring as it checks a mesh's,
+and a colouring too coarse for the function raises.
+
+### Several blocks of rows
+
+A fit's residual is usually several terms side by side -- a data term, an
+embedding term, a smoothness prior -- and they need not behave alike.  One
+couples a mesh's field components and another does not; one's pattern moves as
+data changes element and another's is fixed.  Return the terms as a pytree and
+each leaf becomes a block of rows, differentiated on its own: its own colouring
+is tried, and its own pattern kept, so a term that couples the components does
+not force the coupled colouring on the rest, and a moving pattern does not
+unsettle a fixed one.
+
+```python exec="true" source="above" session="fitting"
+def terms(params):
+    offsets = mesh.evaluate_embeddings_ele_xi_pair(elements, xis, fit_params=params) - target_pts
+    return {'along': offsets.sum(-1), 'offsets': offsets.ravel()}
+
+fun, jac_fn = make_jac_for_mesh_func(mesh, terms)
+print(fun(params).shape, jac_fn(params).shape)
+```
+
+The residual comes back ravelled -- `ravel_pytree` of the output, batched or
+not -- which is the order the Jacobian's rows are in, so the pair goes to the
+solver as it is.  A colour-array leaf can offer a choice the same way a mesh does: a 2-D
+array, one candidate colouring per row, tried in order for each block.
 
 ### Fits too large to hold a Jacobian
 

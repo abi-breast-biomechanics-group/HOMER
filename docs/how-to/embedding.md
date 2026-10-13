@@ -210,11 +210,18 @@ grad = jax.grad(loss)(mesh.optimisable_param_array)
 print(f"gradient of {grad.shape} over the mesh parameters")
 ```
 
-`approx_jac=True` drops the sliding term from the residual gradient.  It is
-less accurate but keeps the derivative separable by dimension.
-This approximation increases the sparsity of the jacobian by a factor of the mesh field dimension.
-As the estimate keeps the right sign, the worse convergence per step is often worth the speed up,
-or only possible because of the reduced memory usage.
+`derivative` chooses what differentiating the embedding returns as the points
+follow the mesh:
+
+| `derivative` | what it is | use it for |
+| --- | --- | --- |
+| `'exact'` (default) | the true derivative, the surface's curvature included | sensitivities, where the derivative itself is the answer |
+| `'gauss_newton'` | the terms weighted by the residual left out: the reduced Jacobian of fitting the points' positions and the mesh together | fitting -- the gradient is exact and each column costs a value evaluation rather than a value, Jacobian and Hessian, 3-4x cheaper |
+| `'fixed'` | each point held at the `(element, xi)` it embedded to | the cheapest, and separable in the field components, so a coloured Jacobian needs a third of the colours; but the points lag the surface, so a fit converges slowly |
+
+All three give the same gradient of a sum of squared residuals, `J^T r`, since
+at a closest point the residual is normal to the surface; they differ in the
+curvature model a least-squares solver builds from `J`.
 
 ---
 
@@ -234,9 +241,9 @@ off the mesh, say — keeps the whole batch going to `iterations`.  That costs
 only the saving; a converged point's state is frozen, so its answer is
 identical to the one it would get on its own.
 
-Changing `approx_jac` or `robust_init_est` away from their defaults builds a
-second compiled variant, cached per flag pair, so a fitting loop that passes
-the same flags every call pays the retrace once.
+Changing `derivative` or `robust_init_est` away from their defaults builds a
+second compiled variant, cached per pair, so a fitting loop that passes the
+same ones every call pays the retrace once.
 
 ---
 

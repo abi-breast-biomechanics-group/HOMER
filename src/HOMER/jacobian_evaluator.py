@@ -31,6 +31,7 @@ import sparsejac
 import numpy as np
 import scipy
 from scipy.sparse.linalg import LinearOperator
+from jax.flatten_util import ravel_pytree
 
 from HOMER.mesh import Mesh, MeshField
 from HOMER.mesh.topology import _colour_ranks
@@ -301,8 +302,16 @@ def matrix_free_jacobian(cost_function, init_estimate, probes=16, seed=0,
     return fitting_function, jacobian_operator, scale
 
 
-def _colouring_seeds(mesh: Mesh | MeshField, fields_seperable: bool):
-    """The mesh colouring as two tangent bases, shape ``(n_colours, n_par)``.
+def _mesh_colours(mesh: Mesh | MeshField, fields_seperable: bool) -> np.ndarray:
+    """The colour of each optimisable parameter of *mesh*, from its topology."""
+    colouring = mesh.get_colouring_dict(fields_seperable=fields_seperable)
+    colour_of = np.empty(len(colouring), dtype=int)
+    colour_of[list(colouring)] = list(colouring.values())
+    return colour_of
+
+
+def _colouring_seeds(colour_of):
+    """The colouring *colour_of* as two tangent bases, shape ``(n_colours, n_par)``.
 
     Row *c* of the first carries a 1 in every parameter coloured *c*, and the
     second carries that parameter's rank within the colour.  A jvp against the
@@ -315,14 +324,15 @@ def _colouring_seeds(mesh: Mesh | MeshField, fields_seperable: bool):
         ``(n_colours, widest colour)`` table turning a decoded rank back into
         a parameter.
     """
-    colouring, seed_values, seed_ranks = mesh.get_colouring_dict(
-        fields_seperable=fields_seperable, seed_matrix=True)
+    colour_of = np.asarray(colour_of, dtype=int)
+    n_colours = int(colour_of.max()) + 1
+    rank, members = _colour_ranks(colour_of, n_colours)
 
-    colour_of = np.empty(len(colouring), dtype=int)
-    colour_of[list(colouring)] = list(colouring.values())
-    _, members = _colour_ranks(colour_of, int(colour_of.max()) + 1)
-
-    return seed_values.todense().T, seed_ranks.todense().T, jnp.asarray(members)
+    seed_values = np.zeros((n_colours, colour_of.size), dtype=np.float32)
+    seed_ranks = np.zeros((n_colours, colour_of.size), dtype=np.float32)
+    seed_values[colour_of, np.arange(colour_of.size)] = 1.0
+    seed_ranks[colour_of, np.arange(colour_of.size)] = rank
+    return jnp.asarray(seed_values), jnp.asarray(seed_ranks), jnp.asarray(members)
 
 
 @jax.jit
@@ -360,152 +370,361 @@ def _decode_compressed_columns(weighted, values, members, eps=1e-6, int_tol=1e-2
     return jnp.where(valid, columns, 0).astype(jnp.int32), valid
 
 
-def make_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Callable,
-                           fields_seperable: bool) -> Callable:
-    """A sparse Jacobian that re-reads its own sparsity on every call.
+#: How closely the cached Jacobian has to reproduce the probe jvp, relative to
+#: the probe's own size, before it is trusted.  A moved pattern misses by the
+#: size of the entries it misplaces; float32 round-off by five orders less.
+_PROBE_TOL = 1e-3
+
+
+def _along(values, columns, valid, direction):
+    """``J @ direction`` for a Jacobian held compressed: ``values[..., c, r]`` at
+    column ``columns[..., c, r]`` where ``valid``."""
+    return jnp.sum(jnp.where(valid, values * direction[columns], 0.0), axis=-2)
+
+
+def _agrees(values, columns, valid, direction, expected):
+    """Whether the compressed Jacobian reproduces *expected*, the jvp along *direction*."""
+    miss = jnp.abs(_along(values, columns, valid, direction) - expected).max()
+    return bool(miss <= _PROBE_TOL * (jnp.abs(expected).max() + 1e-12))
+
+
+@jax.jit
+def _merge_patterns(columns, valid, held_columns, held_valid):
+    """A fresh decode folded into the pattern held, and whether either moved.
+
+    An entry is held at the column it was decoded at.  A value can fall under
+    the decode's threshold on one call and rise over it on the next while its
+    column stays put, so the held pattern is the union of the decodes:
+
+    :returns:
+        ``(columns, valid, conflict, grown)``.  *conflict* is an entry decoded
+        at a column other than the one held -- the pattern has moved, and the
+        union means nothing; *grown* an entry the held pattern lacked.
+    """
+    both = valid & held_valid
+    conflict = jnp.any(both & (columns != held_columns))
+    grown = jnp.any(valid & ~held_valid)
+    return jnp.where(valid, columns, held_columns), valid | held_valid, conflict, grown
+
+
+def _bucket(n):
+    """*n* rounded up to within a sixteenth, so a layout of similar size reuses its compile."""
+    step = 1 << max(n.bit_length() - 4, 0)
+    return -(-n // step) * step
+
+
+@partial(jax.jit, static_argnames='size')
+def _csr_layout(valid, columns, size):
+    """The kept entries of a ``(n_items, n_jvps, n_res)`` block in CSR order.
+
+    Item *b*'s residual *r* is row ``b * n_res + r``.
+
+    :returns:
+        ``(order, indices, indptr)``: each entry's position in the block
+        ravelled, its column, and the row pointer.  *order* and *indices* are
+        padded to *size*; ``indptr[-1]`` entries are real.
+    """
+    n_items, n_jvps, n_res = valid.shape
+    row_major = jnp.nonzero(jnp.swapaxes(valid, 1, 2).ravel(), size=size, fill_value=0)[0]
+    row, jvp = row_major // n_jvps, row_major % n_jvps
+    order = (row // n_res * n_jvps + jvp) * n_res + row % n_res
+    indptr = jnp.concatenate([jnp.zeros(1, jnp.int32),
+                              jnp.cumsum(valid.sum(1).ravel(), dtype=jnp.int32)])
+    return order, columns.ravel()[order], indptr
+
+
+def _is_leaf(x):
+    return x is None or isinstance(x, (MeshField, np.ndarray, jax.Array))
+
+
+def make_jac_for_mesh_func(initial_mesh, function: Callable,
+                           fields_seperable: Optional[bool] = None,
+                           batched: bool = False, init_estimate=None) -> tuple[Callable, Callable]:
+    """A sparse Jacobian of a function of mesh parameters, from the meshes' colourings.
 
     A mesh already knows which parameters can never touch the same output --
     that is its element map -- so the pattern needs no probing:
     :meth:`~HOMER.mesh.Mesh.get_colouring_dict` turns the topology into a
     colouring, and one jvp per colour then carries every nonzero of the
-    Jacobian.  A second jvp, against the same seeds weighted by parameter
-    index, says which column each of those nonzeros belongs in.
+    Jacobian.  Which column each nonzero belongs to is decoded from a second
+    set of jvps, against the same seeds weighted by each parameter's rank in
+    its colour.
 
-    Paying for that second pass buys a Jacobian whose *pattern* may move
-    between calls, which is what a data-to-model term needs: a residual built
-    on :meth:`~HOMER.mesh.Mesh.embed_points` re-embeds its data as the mesh
-    deforms, so a point can land in a different element from one iteration to
-    the next.  The colouring stays valid throughout -- every residual entry
-    still draws on a single element's parameters -- while the decoded indices
-    follow the data.  When the pattern does hold still, take
-    :func:`make_static_jac_for_mesh_func` instead and halve the work.
+    That decoding is paid only while the pattern moves.  Every call also takes
+    one jvp along a fixed random direction and checks the Jacobian it holds
+    against it: a pattern that has moved -- a residual on
+    :meth:`~HOMER.mesh.Mesh.embed_points` whose data lands in a new element,
+    an entry masked to zero when it was decoded -- misses that jvp by the size
+    of what it misplaced, and is decoded afresh.  A pattern is decoded
+    alongside the values on every call until a decode adds nothing to the
+    entries already held -- values that cross the decode's threshold come and
+    go while their columns stay put -- and from then on trusted while the
+    probe agrees.  So a fixed
+    pattern costs one set of jvps a call, and a moving one stays right.
+
+    The parameters may be a pytree -- a mesh's and a statistical shape model's
+    mode weights, several meshes, a pose -- with *initial_mesh* the same tree
+    holding a mesh at each leaf to colour and ``None`` at each leaf small
+    enough to take one jvp per entry.  Each leaf is a block of columns, in the
+    order :func:`jax.flatten_util.ravel_pytree` lays them out.  The residual
+    and Jacobian returned take that ravelled vector -- what a solver works on
+    -- and unravel it for *function*, so ``x0, unravel = ravel_pytree(params)``
+    gives the starting vector and reads the solution back.
+
+    A leaf whose parameters are not a mesh's own -- a reparameterisation, say
+    -- takes its colouring as an integer array instead, the colour of each of
+    its parameters, flattened.  Any two parameters sharing a colour must never
+    reach the same residual entry; the probe checks it as it checks a mesh's.
+    A 2-D array holds candidate colourings, one per row, tried in order as a
+    mesh's separable and coupled colourings are.
+
+    The residual may be a pytree too: each of its leaves is a block of rows,
+    differentiated on its own -- its own colouring tried, its own pattern
+    kept -- so a term that couples a mesh's field components does not force
+    the coupled colouring on one that does not, and a block whose data moves
+    between elements does not unsettle one whose pattern is fixed.  Rows
+    follow :func:`jax.flatten_util.ravel_pytree` of the output -- the order
+    of the residual returned beside the Jacobian.  Work the blocks share is
+    done once per block.
+
+    With *batched*, *function* describes one item of a batch -- one subject of
+    a cohort fitted on a shared template -- and every leaf of the parameters,
+    and of the keyword arguments, carries a leading batch axis.  The items are
+    differentiated side by side with the same tangents, so whatever does not
+    depend on an item's own values is done once for the batch, and the
+    Jacobian comes back block diagonal within each block of rows: rows follow
+    ``ravel_pytree`` of the batched output, a block's rows item by item.
 
     :param initial_mesh:
-        The mesh whose colouring is used.  Only its topology and its
-        optimisable-parameter mask are read, so the mesh may deform afterwards;
-        fixing or freeing parameters invalidates it.
+        The mesh whose colouring is used, or a tree matching the parameters
+        holding a mesh, a colour array (or a 2-D array of candidates), or
+        ``None`` at each leaf.  With
+        *batched*, the tree describes one item.  Only the topology and
+        optimisable-parameter mask of a mesh are read, so the meshes may deform
+        afterwards; fixing or freeing parameters invalidates them.
     :param function:
-        A JAX-compatible ``(params, **kwargs) -> residuals``, both 1-D, taking
-        the mesh's :attr:`optimisable_param_array` and differentiated with
-        respect to it alone.
+        A JAX-compatible ``(params, **kwargs) -> residuals``, the residuals an
+        array or a pytree of them, differentiated with respect to *params*
+        alone.  For a mesh leaf, every residual entry must draw on one
+        element's parameters at a time.
     :param fields_seperable:
-        Treat each field component as its own output, which holds for
-        embedding evaluation but not for a coupled quantity such as a local
-        Jacobian determinant.  ``True`` needs markedly fewer colours, and so
-        fewer jvps.
+        Whether each residual component draws on only the matching field
+        component of a mesh, which needs a third as many colours.  ``None``
+        finds out, mesh by mesh and block by block: the separable colouring is
+        tried first and kept if the probe confirms it.  An evaluation at fixed points is
+        separable; a residual on :meth:`~HOMER.mesh.Mesh.embed_points` is not,
+        unless its points are held with ``derivative='fixed'``.
+    :param batched:
+        Whether *function* is applied item by item over a leading batch axis.
+    :param init_estimate:
+        Parameters with the structure *function* takes -- a tree, a batch --
+        from which the ravelled vector is unravelled.  Needed unless the
+        parameters are one vector: a single, unbatched mesh or colour-array
+        leaf.
 
     :returns:
-        ``(params, **kwargs) -> coo_array`` of shape
-        ``(n_residuals, n_parameters)``, ready for
-        ``scipy.optimize.least_squares``.  Keyword arguments are forwarded to
-        *function* behind its parameter vector, which is how
+        ``(residual, jacobian)``, both ``(x, **kwargs)`` for *x* the ravelled
+        parameters: the compiled residual, ravelled to 1-D, and its Jacobian as a ``csr_array`` of
+        shape ``(n_residuals, n_parameters)`` with the rows in the same order
+        -- the pair ``scipy.optimize.least_squares`` takes.  Keyword arguments
+        are forwarded to *function* behind its parameters, which is how
         ``least_squares(..., kwargs=...)`` threads per-solve data through.
 
-    .. warning::
-        *fields_seperable* has to match how the residual actually couples, and
-        a mismatch is quiet: entries the decode cannot resolve are dropped, so
-        the Jacobian comes back sparse, plausible and wrong rather than raising.
-        A residual differentiated through :meth:`~HOMER.mesh.Mesh.embed_points`
-        is separable only with ``approx_jac=True``, which drops the sliding
-        term and leaves the point at fixed ``(element, xi)``.  The exact
-        embedding jvp moves the point as the mesh deforms, which makes every
-        residual component depend on every component of the element's
-        parameters -- separable in elements, not in fields, so it needs
-        ``fields_seperable=False``.
+    :raises ValueError:
+        If the parameters are a tree or a batch and *init_estimate* is not
+        given, or if no colouring of a leaf reproduces the probe for some block of rows:
+        a residual entry there draws on two parameters of one colour, which a
+        colouring cannot carry.
     """
-    seed_values, seed_ranks, members = _colouring_seeds(initial_mesh, fields_seperable)
-    n_par = seed_values.shape[1]
+    meshes, treedef = jax.tree_util.tree_flatten(initial_mesh, is_leaf=_is_leaf)
+    modes = [True, False] if fields_seperable is None else [bool(fields_seperable)]
+    if init_estimate is not None:
+        unravel = ravel_pytree(init_estimate)[1]
+    elif len(meshes) == 1 and meshes[0] is not None and not batched:
+        unravel = lambda x: treedef.unflatten([x])
+    else:
+        raise ValueError("the parameters are a tree or a batch, so init_estimate must give "
+                         "their structure for the ravelled vector to be unravelled")
+
+    def leaf_seeds(leaf):
+        """Each colouring the leaf may take, in the order they are tried."""
+        if isinstance(leaf, MeshField):
+            return {mode: _colouring_seeds(_mesh_colours(leaf, mode)) for mode in modes}
+        candidates = np.atleast_2d(np.asarray(leaf))
+        return {k: _colouring_seeds(colours) for k, colours in enumerate(candidates)}
+
+    seeds = [None if m is None else leaf_seeds(m) for m in meshes]
+    rng = np.random.default_rng(0)
+    probes = [None if s is None else jnp.asarray(rng.standard_normal(next(iter(s.values()))[0].shape[1]))
+              for s in seeds]
+    decode_items = jax.vmap(_decode_compressed_columns, in_axes=(0, 0, None))
+
+    def n_items(params):
+        return jax.tree_util.tree_leaves(params)[0].shape[0]
+
+    def row_block(index, name):
+        """The Jacobian of output leaf *index* of *function*, with state of its own."""
+        state = [None if s is None else {'mode': next(iter(s)), 'columns': None, 'valid': None,
+                                         'settled': False}
+                 for s in seeds]
+        layout = {}
+
+        @jax.jit
+        def jvps(params, rows, kwargs):
+            """One jvp per row for every item, *rows* holding each leaf's own tangent rows."""
+            counts = [r.shape[0] for r in rows]
+
+            def item(p, kw):
+                leaves = treedef.flatten_up_to(p)
+                tangents = [jnp.concatenate([r if i == j else jnp.zeros((k, jnp.size(leaf)), r.dtype)
+                                             for i, (r, k) in enumerate(zip(rows, counts))])
+                            .reshape((-1,) + jnp.shape(leaf))
+                            for j, leaf in enumerate(leaves)]
+                block = lambda q: jnp.ravel(jax.tree_util.tree_leaves(function(q, **kw))[index])
+                linear = jax.linearize(block, p)[1]
+                return jax.vmap(lambda *t: linear(treedef.unflatten(t)))(*tangents)
+
+            return jax.vmap(item)(params, kwargs)
+
+        def run(params, decoding, kwargs):
+            """Each leaf's block of jvps for every item, all from one linearisation.
+
+            A coloured leaf takes its colour seeds and the probe, and -- if it is
+            in *decoding* -- the rank seeds too; any other leaf, one per entry.
+            One pass, so values and ranks come from the same solve of anything
+            inside *function*: an embedding re-run in a separate pass can put a
+            point on an element boundary into the neighbouring element, and the
+            decoded columns would belong to other values.
+            """
+            sizes = [int(np.size(leaf)) // n_items(params) for leaf in treedef.flatten_up_to(params)]
+            rows = []
+            for i, (m, s, st, probe, n) in enumerate(zip(meshes, seeds, state, probes, sizes)):
+                if m is None:
+                    rows.append(jnp.eye(n))
+                    continue
+                seed_values, seed_ranks, _ = s[st['mode']]
+                rows.append(jnp.vstack([seed_values, probe[None]]
+                                       + ([seed_ranks] if i in decoding else [])))
+            out = jvps(params, rows, kwargs)                    #(n_items, n_jvps, n_res)
+            bounds = np.cumsum([0] + [r.shape[0] for r in rows])
+            blocks = []
+            for i, (m, s, st, a, b) in enumerate(zip(meshes, seeds, state, bounds[:-1], bounds[1:])):
+                block = out[:, a:b]
+                if m is None:
+                    blocks.append(block)
+                    continue
+                k = s[st['mode']][0].shape[0]
+                blocks.append((block[:, :k], block[:, k], block[:, k + 1:] if i in decoding else None))
+            return blocks, sizes
+
+        def assemble(blocks, sizes):
+            """The CSR matrix, its layout kept until some leaf's pattern changes.
+
+            The layout -- where each kept entry sits among the jvps, in CSR order
+            -- is found on the device, so only the nonzeros and their columns
+            cross to the host.  A leaf taking one jvp per entry keeps every
+            entry.  Leaf *j* of item *b* takes columns from ``n_items * offset_j
+            + b * size_j``, the order :func:`jax.flatten_util.ravel_pytree` gives
+            a batched tree.
+            """
+            n_b = (blocks[0] if meshes[0] is None else blocks[0][0]).shape[0]
+            offsets = np.cumsum([0] + sizes)
+            item = jnp.arange(n_b)[:, None, None]
+            values, columns, valid = [], [], []
+            for i, (m, st, b) in enumerate(zip(meshes, state, blocks)):
+                first = n_b * offsets[i] + item * sizes[i]
+                if m is None:
+                    values.append(b)
+                    columns.append(jnp.arange(b.shape[1])[None, :, None] + first + jnp.zeros(b.shape, int))
+                    valid.append(jnp.ones(b.shape, bool))
+                else:
+                    values.append(b[0])
+                    columns.append(st['columns'] + first)
+                    valid.append(st['valid'])
+            values = jnp.concatenate(values, axis=1)
+            n_res = values.shape[2]
+            if layout.get('n_res') != n_res:
+                valid = jnp.concatenate(valid, axis=1)
+                order, indices, indptr = _csr_layout(valid, jnp.concatenate(columns, axis=1),
+                                                     _bucket(int(valid.sum())))
+                nnz = int(indptr[-1])
+                layout.update(n_res=n_res, order=order[:nnz],
+                              indices=np.asarray(indices[:nnz]), indptr=np.asarray(indptr))
+            data = np.asarray(jnp.take(values.ravel(), layout['order']))
+            return scipy.sparse.csr_array((data, layout['indices'], layout['indptr']),
+                                          shape=(n_b * n_res, n_b * offsets[-1]))
+
+        def decode(i, blocks, params, kwargs):
+            """Decode leaf *i*'s columns, trying its colourings in turn from the current one.
+
+            A decode that agrees with the pattern held, column for column
+            wherever both have an entry, is folded into it
+            (:func:`_merge_patterns`).  The leaf is *settled* once a decode adds
+            nothing: from then on it is trusted while the probe agrees, and
+            until then each call decodes it in its first pass.  A decode that
+            disagrees replaces the pattern.
+            """
+            st, tried = state[i], list(seeds[i])
+            for mode in tried[tried.index(st['mode']):]:
+                if mode != st['mode'] or blocks[i][2] is None:
+                    st['mode'] = mode
+                    blocks, _ = run(params, {i}, kwargs)
+                values, along, ranked = blocks[i]
+                columns, valid = decode_items(ranked, values, seeds[i][mode][2])
+                if _agrees(values, columns, valid, probes[i], along):
+                    break
+            else:
+                raise ValueError(f"no colouring reproduces the derivative of {name}: some residual "
+                                 "entry draws on two parameters of one colour")
+            settled = False
+            if st['columns'] is not None and st['columns'].shape == columns.shape:
+                merged_columns, merged_valid, conflict, grown = _merge_patterns(
+                    columns, valid, st['columns'], st['valid'])
+                if not conflict:
+                    columns, valid, settled = merged_columns, merged_valid, not bool(grown)
+            st.update(columns=columns, valid=valid, settled=settled)
+            if not settled:
+                layout.clear()
+            return blocks
+
+        def jac(params, kwargs):
+            decoding = {i for i, st in enumerate(state) if st is not None and not st['settled']}
+            blocks, sizes = run(params, decoding, kwargs)
+            for i, st in enumerate(state):
+                if st is None:
+                    continue
+                if i not in decoding:
+                    values, along, _ = blocks[i]
+                    if (st['columns'].shape == values.shape
+                            and _agrees(values, st['columns'], st['valid'], probes[i], along)):
+                        continue
+                    st['settled'] = False
+                    blocks, _ = run(params, {i}, kwargs)
+                blocks = decode(i, blocks, params, kwargs)
+            return assemble(blocks, sizes)
+
+        return jac
+
+    row_blocks = []
+
+    def jac(x, **kwargs):
+        params = unravel(jnp.asarray(x))
+        if not batched:
+            params, kwargs = jax.tree_util.tree_map(lambda x: jnp.asarray(x)[None], (params, kwargs))
+        if not row_blocks:
+            shapes = jax.eval_shape(lambda p, kw: function(p, **kw),
+                                    *jax.tree_util.tree_map(lambda x: x[0], (params, kwargs)))
+            paths = [jax.tree_util.keystr(path) for path, _ in jax.tree_util.tree_leaves_with_path(shapes)]
+            row_blocks.extend(row_block(i, f"the output {path}" if path else "the residual")
+                              for i, path in enumerate(paths))
+        parts = [block(params, kwargs) for block in row_blocks]
+        return parts[0] if len(parts) == 1 else scipy.sparse.vstack(parts, format='csr')
 
     @jax.jit
-    def compressed(params, **kwargs):
-        jvp = jax.vmap(jax.linearize(lambda p: function(p, **kwargs), params)[1])
-        values = jvp(seed_values)
-        return (values,) + _decode_compressed_columns(jvp(seed_ranks), values, members)
+    def residual(x, **kwargs):
+        params = unravel(x)
+        if not batched:
+            return ravel_pytree(function(params, **kwargs))[0]
+        return ravel_pytree(jax.vmap(lambda p, kw: function(p, **kw))(params, kwargs))[0]
 
-    def dynamic_jac(params, **kwargs):
-        values, columns, valid = compressed(params, **kwargs)
-        n_res = values.shape[1]
-
-        kept = np.flatnonzero(np.asarray(valid).ravel())
-        rows = np.broadcast_to(np.arange(n_res)[None, :], values.shape).ravel()[kept]
-        return scipy.sparse.coo_array(
-            (np.asarray(values).ravel()[kept], (rows, np.asarray(columns).ravel()[kept])),
-            shape=(n_res, n_par))
-
-    return dynamic_jac
-
-
-def make_static_jac_for_mesh_func(initial_mesh: Mesh | MeshField, function: Callable,
-                                  init_estimate: jax.typing.ArrayLike,
-                                  fields_seperable: bool,
-                                  further_args: Optional[dict] = None) -> Callable:
-    """The same coloured Jacobian, with the sparsity decoded once and frozen.
-
-    :func:`make_jac_for_mesh_func` spends two jvps per colour on every call,
-    one for the values and one to find out where they go.  When the pattern
-    does not move -- anything evaluated at fixed ``(element, xi)`` pairs, which
-    is most model-to-data fits -- the second pass returns the same answer every
-    time.  This runs it once at *init_estimate*, keeps the indices, and leaves
-    one jvp per colour to do per call, so it costs about half as much.
-
-    :param initial_mesh:
-        The mesh whose colouring is used.
-    :param function:
-        A JAX-compatible ``(params, **kwargs) -> residuals``, both 1-D, taking
-        the mesh's :attr:`optimisable_param_array` and differentiated with
-        respect to it alone.
-    :param init_estimate:
-        Where the pattern is read.  An entry that happens to vanish here is
-        recorded as absent and stays absent, so pass parameters representative
-        of where the optimiser will work -- the same care
-        :func:`estimate_sparsity` needs, for the same reason.
-    :param fields_seperable:
-        As in :func:`make_jac_for_mesh_func`.
-    :param further_args:
-        Keyword arguments for *function* while the pattern is read.  They need
-        not be the ones later calls pass, and often should not be: an entry the
-        probe data masks to zero is recorded as absent for good, so probe with
-        data that leaves every entry live -- unit weights rather than a
-        visibility mask, say -- and pass the real data per call.
-
-    :returns:
-        ``(params, **kwargs) -> coo_array`` of shape
-        ``(n_residuals, n_parameters)``, carrying the same indices every call,
-        so only the values come back from the device.  Keyword arguments are
-        forwarded as in :func:`make_jac_for_mesh_func`.
-
-    .. warning::
-        Frozen indices are wrong indices once the pattern moves.  A residual
-        that re-embeds its data will keep returning a full-looking Jacobian
-        with its entries in the columns they belonged to at *init_estimate*;
-        that case wants :func:`make_jac_for_mesh_func`.  The restriction in its
-        warning applies here too.
-    """
-    seed_values, seed_ranks, members = _colouring_seeds(initial_mesh, fields_seperable)
-    n_par = seed_values.shape[1]
-
-    def coloured_jvps(params, seeds, **kwargs):
-        return jax.vmap(jax.linearize(lambda p: function(p, **kwargs), params)[1])(seeds)
-
-    probe = {} if further_args is None else further_args
-    init_estimate = jnp.asarray(init_estimate)
-    start_values = coloured_jvps(init_estimate, seed_values, **probe)
-    columns, valid = _decode_compressed_columns(
-        coloured_jvps(init_estimate, seed_ranks, **probe), start_values, members)
-
-    n_res = start_values.shape[1]
-    kept = np.flatnonzero(np.asarray(valid).ravel())
-    rows = np.broadcast_to(np.arange(n_res)[None, :], start_values.shape).ravel()[kept]
-    cols = np.asarray(columns).ravel()[kept]
-    kept = jnp.asarray(kept)
-
-    @jax.jit
-    def entries(params, **kwargs):
-        return coloured_jvps(params, seed_values, **kwargs).ravel()[kept]
-
-    def static_jac(params, **kwargs):
-        #the pattern is frozen, so only the values cross back from the device
-        return scipy.sparse.coo_array((np.asarray(entries(params, **kwargs)), (rows, cols)),
-                                      shape=(n_res, n_par))
-
-    return static_jac
+    return residual, jac
