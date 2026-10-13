@@ -24,7 +24,7 @@ The Green-Lagrange strain tensor is then:
 
 ---
 
-## Basic Usage
+## Basic usage
 
 ```python exec="true" source="above" session="strain"
 from copy import deepcopy
@@ -47,9 +47,9 @@ ref_pts = mesh_ref.evaluate_embeddings_in_every_element(grid)
 
 # Apply a shear + quadratic deformation
 def_pts = np.stack([
-    ref_pts[:, 0],
-    ref_pts[:, 1] + ref_pts[:, 0] * 0.1,   # shear in y
-    ref_pts[:, 2] ** 2,                     # nonlinear z
+  ref_pts[:, 0],
+  ref_pts[:, 1] + ref_pts[:, 0] * 0.4,  # shear in y
+  2*ref_pts[:, 2] ** 2,         # nonlinear z
 ], axis=1)
 
 # Fit the deformed mesh
@@ -66,7 +66,7 @@ print("E_zz at xi=0.5:", strains[len(strains)//2, 2, 2])
 
 ---
 
-## Strain on a 2-D Manifold Mesh
+## Strain on a 2-D manifold mesh
 
 A 2-D surface in 3-D has a `(3, 2)` Jacobian, which has no determinant and no
 inverse, so there is no deformation gradient to form.  Calling
@@ -111,7 +111,7 @@ pass your own when you want a different frame — fibre-aligned axes, say.
 
 ---
 
-## Returning the Deformation Gradient
+## Returning the deformation gradient
 
 Pass `return_F=True` to get **F** instead of **E**:
 
@@ -123,7 +123,7 @@ F = mesh_ref.evaluate_strain_in_every_element(eval_grid, mesh_def,
 
 ---
 
-## Visualising Strain
+## Visualising strain
 
 `plot_strains` draws the tensors as strain ellipsoids, one per evaluation
 point, coloured by the length change along each direction:

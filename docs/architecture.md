@@ -5,7 +5,7 @@ other.
 
 ---
 
-## Class Hierarchy
+## Class hierarchy
 
 ```
 Basis  (basis_definitions.py)      – one frozen instance per 1-D basis
@@ -39,7 +39,7 @@ body by `mesh/field.py`:
 HOMER/mesh/
     node.py  element.py  field.py  mesh.py     the classes
     evaluation.py    evaluating the field, its derivatives, embedded points
-    parameters.py    the parameter vector, and least-squares fitting it
+    parameters.py    the parameter vector, and methods for fast linear parameter fits
     topology.py      shared nodes, faces, surfaces, colouring
     refinement.py    refine and rebase, and the fixed-parameter transfer
     plotting.py      drawing; the only module that touches PyVista
@@ -64,7 +64,7 @@ Mesh` keeps working.
 
 ---
 
-## `MeshNode` – Physical Coordinates and Derivatives
+## `MeshNode` – physical coordinates and derivatives
 
 A `MeshNode` subclasses `dict` so it can carry *named* derivative arrays
 alongside the spatial location `loc`.
@@ -88,7 +88,7 @@ optimisation) via `node.fix_parameter(...)`.
 
 ---
 
-## `MeshElement` – Tensor-Product Element
+## `MeshElement` – tensor-product element
 
 An element connects nodes through a **product of 1-D basis functions**, one
 per parametric direction:
@@ -110,7 +110,7 @@ The element computes the **tensor-product weight matrix** at construction time
 
 ---
 
-## `MeshField` – Evaluatable Field
+## `MeshField` – evaluatable field
 
 `MeshField` holds a list of nodes and elements, and provides all evaluation
 and fitting methods.  When `generate_mesh()` is called (automatically in the
@@ -123,7 +123,8 @@ constructor), it:
    and `topomap` for cross-element point embedding.
 
 The `@expand_wide_evals` decorator automatically adds two convenience
-variants for every `@wide_eval` method `foo`:
+variants for every `@wide_eval`. For an example function `foo`, the following 
+additional variants are defined:
 
 | Variant | Signature | Purpose |
 |---|---|---|
@@ -133,7 +134,7 @@ variants for every `@wide_eval` method `foo`:
 
 ---
 
-## `Mesh(MeshField)` – Primary Coordinate Mesh
+## `Mesh(MeshField)` – primary coordinate mesh
 
 `Mesh` extends `MeshField` by adding a `fields` dictionary of secondary
 `MeshField` objects:
@@ -147,7 +148,9 @@ mesh.fields = {
 
 Secondary fields are created with `mesh.new_field(...)` and accessed via
 `mesh['field_name']`.  They share the same parametric topology as the primary
-mesh but can use different basis functions.
+mesh but can use different basis functions; the
+[worked example](how-to/secondary-fields.md#worked-example-normal-vector-scalar-height-fields)
+fits an `H3` vector field on an `L1` mesh.
 
 ---
 
@@ -180,7 +183,7 @@ through `HOMER.io` without touching the reader.
 
 ---
 
-## JAX Integration
+## JAX integration
 
 All evaluation functions are JAX-compatible.  The key integration points are:
 

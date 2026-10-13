@@ -6,7 +6,7 @@ geometry.
 
 ---
 
-## Uniform Refinement
+## Uniform refinement
 
 `mesh.refine(refinement_factor=n)` splits each parametric direction into
 `n` sub-intervals, creating `n ** ndim` sub-elements per original element.
@@ -28,7 +28,7 @@ mesh.plot()
 
 ---
 
-## Non-Uniform Refinement
+## Non-uniform refinement
 
 `refinement_factor` also takes one integer per parametric direction, which
 subdivides each of them uniformly but by a different amount:
@@ -66,7 +66,7 @@ graded.plot()
 
 ---
 
-## Refining a `Mesh` with Secondary Fields
+## Refining a `Mesh` with secondary fields
 
 When the mesh has secondary fields, `Mesh.refine()` automatically refines all
 fields simultaneously, so the geometry and every field stay at the same
@@ -91,7 +91,7 @@ field_mesh.refine(refinement_factor=2)
 
 ---
 
-## Node Numbering
+## Node numbering
 
 Refinement rebuilds the node list, so node *indices* do not survive one that
 adds nodes.  By default the refined nodes are renumbered along the mesh's
@@ -105,10 +105,6 @@ b = cube(basis=L1**3); b.refine(2); b.refine(2)
 # a and b now have identical node orderings
 print(np.allclose([n.loc for n in a.nodes], [n.loc for n in b.nodes]))
 ```
-
-A refinement that adds *no* nodes — a factor of one in every direction — is
-the exception: there is an old numbering to keep, so it is kept and node
-indices survive unchanged.
 
 Pass `reorder_nodes=False` to keep the raw ordering the subdivision sweep
 produces, or a strategy name (`'lattice'`, `'spatial'`, `'bandwidth'`) to pick
@@ -125,7 +121,7 @@ co-located with the geometry without the two sharing a node numbering.
 
 ---
 
-## Visualising Before and After
+## Visualising before and after
 
 Subdivision must leave the surface it passes through unmoved. The refined mesh draws its
 nodes in green, the convention these guides use for the *after* of a pair.

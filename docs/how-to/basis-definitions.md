@@ -73,14 +73,6 @@ print(np.round(np.asarray(L3.fn(np.array(L3.node_locs))), 6))
 print(L3.interpolatory)
 ```
 
-Secondly, the functions sum to 1 everywhere.  A constant field is reproduced
-exactly, and so is a rigid translation of the geometry — an element cannot
-distort simply by being moved:
-
-```python exec="true" source="above" session="basis-definitions"
-print(np.asarray(L4.fn(xi)).sum(axis=1)[:4])
-```
-
 ---
 
 

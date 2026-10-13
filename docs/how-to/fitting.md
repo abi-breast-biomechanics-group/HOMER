@@ -12,7 +12,7 @@ while still automatically defining the Jacobian.
 
 ---
 
-## Linear Fitting
+## Linear fitting
 
 Use this when you can compute (or embed) the xi coordinates in advance and
 only need to update nodal values.
@@ -70,7 +70,7 @@ s.show()
     nothing fixed already needs 16 points.  Increase `res` if you see an
     assertion error.
 
-### Fixed Parameters in a Linear Fit
+### Fixed parameters in a linear fit
 
 Parameters fixed with `MeshNode.fix_parameter()` are held at their current
 values.  They are a known contribution to the targets, so the solve moves them
@@ -97,7 +97,7 @@ points, not more.
 
 ---
 
-## Nonlinear Fitting
+## Nonlinear fitting
 
 The function `point_cloud_fit` is an example of a model-to-data based fit.
 It samples the mesh on an xi grid with `evaluate_embeddings`, measures the
@@ -150,7 +150,7 @@ against the same cloud.  Only the four corner nodes moved: what pulls the
 interior onto the curve is the Hermite tangents, which are parameters of those
 same four nodes.
 
-### Sobolev Regularisation
+### Sobolev regularisation
 
 The `sob_weight` parameter adds a Sobolev smoothness term that penalises
 high curvature in the mesh surface.  Increase it if the mesh develops
@@ -163,9 +163,13 @@ fitting_fn, jac_fn = point_cloud_fit(fit_mesh, target_cloud, sob_weight=0.1)
 The term itself is `mesh.evaluate_sobolev()`, which evaluates every non-trivial
 combination of derivative orders at the element's Gauss points.  
 
+However, note that this is a regulariser: it explicitely trades surface fit accuracy
+for a notion of 'smoothness'. If you use this term, you should perform some kind of 
+hyperparameter tuning, e.g. L curve regularisation.
+
 ---
 
-## Jacobian Calculation
+## Jacobian calculation
 
 Because the mesh evaluation is written in JAX, any residual you can express
 with it is differentiated for you: `jacobian(cost_function,
@@ -201,7 +205,7 @@ that happens not to move under a unit step at `init_estimate` is recorded as
 independent, so pass a starting estimate representative of where the optimiser
 will actually work.
 
-### Recovering the Pattern From the Topology
+### Recovering the pattern from the topology
 
 A mesh already knows its sparsity pattern -- it is the element-to-node map (see
 [Topology mapping](topology.md)).  `get_colouring_dict` turns that into a
@@ -290,7 +294,7 @@ def residual(params):
     every component of the element's parameters: separable in elements, not in
     fields, so it needs `fields_seperable=False`.
 
-### Freezing the Pattern
+### Freezing the pattern
 
 Most fits are not data-to-model.  Anything evaluated at fixed `(element, xi)`
 pairs -- a grid fit, a Sobolev term, a field residual -- has a pattern that
@@ -339,7 +343,7 @@ mask -- and pass the real thing per call.
 
 ---
 
-### Fits Too Large to Hold a Jacobian
+### Fits too large to hold a Jacobian
 
 `point_cloud_fit` and `jacobian` both build the Jacobian as a matrix, with a
 sparsity colouring to keep it affordable. That stops working on two kinds of
@@ -386,7 +390,7 @@ the bare operator.
 
 ---
 
-## Fixing Parameters During Optimisation
+## Fixing parameters during optimisation
 
 `MeshNode.fix_parameter()` excludes specific degrees of freedom from
 optimisation.  This is useful for anchoring corners or enforcing symmetry:
@@ -420,7 +424,7 @@ Both fitting pathways read that same subset: the nonlinear one optimises
 `optimisable_param_array` directly, and `linear_fit` solves for the columns it
 selects.
 
-### A Constrained Fit
+### A constrained fit
 
 Nothing else changes: pin what must not move, regenerate, and hand the same
 optimiser the shorter parameter vector.  Here the patch of the nonlinear fit

@@ -7,7 +7,7 @@ fields — everything needed to rebuild the mesh, and nothing else.
 
 ---
 
-## The Round Trip
+## The round trip
 
 ```python exec="true" source="above" session="io"
 import tempfile
@@ -36,7 +36,7 @@ the methods are there so you never need the import.  Paths may be `str` or
 
 ---
 
-## What the File Looks Like
+## What the file looks like
 
 A mesh is written as a `'main'` field plus a dict of named `'fields'`:
 
@@ -62,7 +62,7 @@ basis you defined yourself, since constructing it registers it.
 
 ---
 
-## Dictionaries Instead of Files
+## Dictionaries instead of files
 
 The same conversion is available without touching the disk, which is what you
 want for embedding a mesh in a larger document, sending one over a socket, or
@@ -81,7 +81,7 @@ of its original as a reloaded file is.
 
 ---
 
-## What Survives a Round Trip
+## What survives a round trip
 
 | Carried through | Notes |
 |---|---|
@@ -107,7 +107,7 @@ print("free parameters:", len(loaded.optimisable_param_array))
 
 ---
 
-## Fields Are Saved the Same Way
+## Fields are saved the same way
 
 A bare `MeshField` — a secondary field on its own, rather than a whole mesh —
 writes the older `{'nodes', 'elements'}` shape, and reads back with
@@ -127,7 +127,7 @@ bases (`'H3Basis'` for `'H3'`, and so on).
 
 ---
 
-## Reading Formats HOMER Does Not Write
+## Reading formats HOMER does not write
 
 `HOMER.compat_functions` brings existing models in.  Nothing imports these,
 so reach for the one you need directly:

@@ -1,3 +1,3 @@
-# API – examples
+# API – Examples
 
 ::: HOMER.examples

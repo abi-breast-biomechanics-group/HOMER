@@ -1,4 +1,4 @@
-# API – basis_definitions
+# API – Basis Definitions
 
 ::: HOMER.basis_definitions.Basis
 

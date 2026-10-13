@@ -1,4 +1,4 @@
-# API – mesh operations
+# API – Mesh Operations
 
 Every function in these modules is a method of
 [`MeshField`](mesh.md#HOMER.mesh.field.MeshField) that lives in its own

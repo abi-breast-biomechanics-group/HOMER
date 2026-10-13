@@ -7,7 +7,7 @@ meshes.
 
 ---
 
-## Index-Based Nodes (Default)
+## Index-based nodes (default)
 
 By default, `MeshElement` uses **integer indices** into the parent `Mesh`'s
 `nodes` list:
@@ -28,7 +28,7 @@ mesh = Mesh(nodes=[node0, node1, node2, node3], elements=element)
 
 ---
 
-## ID-Based Nodes
+## ID-based nodes
 
 Assign a string or integer `id` to nodes and reference them by ID in
 elements:
@@ -54,7 +54,7 @@ id_mesh = Mesh(nodes=[node0, node1, node2, node3], elements=element)
 
 ---
 
-## Shared Nodes Across Elements
+## Shared nodes across elements
 
 For multi-element meshes, neighbouring elements share boundary nodes.  Index-
 based referencing makes this straightforward because the same integer refers
@@ -84,7 +84,7 @@ mesh.plot()
 
 ---
 
-## Looking Up Nodes and Elements by ID
+## Looking up nodes and elements by ID
 
 When IDs are set, you can retrieve objects by ID:
 
@@ -100,7 +100,7 @@ print(node.id, node.loc, '|', elem.id)
 
 ---
 
-## Node Ordering Within an Element
+## Node ordering within an element
 
 The order of nodes in `node_indexes` follows **Fortran (column-major) order**
 for the tensor product: the *first* index varies fastest.
@@ -120,7 +120,7 @@ For a 3-D element, the order is ``u`` fastest, then ``v``, then ``w``.
 
 ---
 
-## Node Ordering Across the Mesh
+## Node ordering across the mesh
 
 The order *within* an element is fixed by the basis.  The order of the mesh's
 `nodes` list is not: refining, rebasing and most other manipulations rebuild it

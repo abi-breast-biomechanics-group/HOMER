@@ -30,7 +30,7 @@ algebra is the spelling used throughout these guides.
 
 ---
 
-## L2 × L2 Surface Mesh
+## L2 × L2 surface mesh
 
 A quadratic-Lagrange surface mesh requires 3 × 3 = 9 nodes per element.
 No derivative fields are needed on the nodes.
@@ -62,7 +62,7 @@ l2_mesh.plot()
 
 ---
 
-## H3 × L2 Mixed Surface Mesh
+## H3 × L2 mixed surface mesh
 
 Use `H3` in the xi_0 direction for smooth derivatives and `L2` in
 the xi_1 direction for simpler parametric variation:
@@ -80,19 +80,19 @@ are read left to right, in the order the element takes its product.
 
 ---
 
-## Choosing the Right Basis
+## Choosing the right basis
 
 | Requirement | Recommended basis |
 |---|---|
 | C¹ smooth geometry, shape optimisation | `H3` |
 | C² smooth geometry, shape optimisation | `B3` |
 | Simple coarse mesh before rebasing | `L1` |
-| Mid-order accuracy, fewer DoF than H3 | `L2` or `L3` |
-| High-accuracy Lagrange interpolation | `L4` |
+| Mid-order accuracy, fewer DoF than H3 | `L2` |
+| High-accuracy Lagrange interpolation | `L3` or `L4` |
 
 ---
 
-## Rebasing Between Bases
+## Rebasing between bases
 
 Any mesh can be converted to a different basis with `rebase()` — here the
 quadratic patch built above, taken to a cubic B-spline control net:

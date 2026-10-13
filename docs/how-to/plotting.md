@@ -91,11 +91,13 @@ build the colour bar:
 hex_pts, _ = mesh.get_hex_surface(list(range(len(mesh.elements))))
 per_point_values = hex_pts[:, 2]
 
-mesh.plot(mesh_colour=per_point_values, mesh_col_scalar_name='strain')
+mesh.plot(mesh_colour=per_point_values, mesh_col_scalar_name='strain', mesh_width=10, mesh_opacity=1)
 ```
 
 The same pairing works for `node_colour`/`node_col_scalar_name` and
-`line_colour`/`line_col_scalar_name`.
+`line_colour`/`line_col_scalar_name`.  `mesh_cmap`, `node_cmap` and
+`line_cmap` pick the colour map for each (nodes default to `tab10`, the
+others to PyVista's default).
 
 ---
 

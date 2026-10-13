@@ -6,7 +6,7 @@ embedding across element boundaries.  It is built automatically when
 
 ---
 
-## What Is the Topology Map?
+## What is the topology map?
 
 When a parametric coordinate `xi` exceeds the [0, 1] boundary of an element,
 `topomap(elem, xi)` looks up the neighbouring element and maps `xi` into the
@@ -19,7 +19,7 @@ neighbour's parametric space.  This enables:
 
 ---
 
-## Topology Structure
+## Topology structure
 
 After `generate_mesh()`, the following topology attributes are available:
 
@@ -31,7 +31,7 @@ After `generate_mesh()`, the following topology attributes are available:
 
 ---
 
-## Accessing External Faces
+## Accessing external faces
 
 ```python exec="true" source="above" session="topology"
 import numpy as np
@@ -57,7 +57,7 @@ for face in faces[:4]:
 
 ---
 
-## Selecting the Nodes on One Boundary
+## Selecting the nodes on one boundary
 
 `get_xi_surface_nodes(xi_dim, bound_val)` asks the same question the other way
 round: which elements have *no* neighbour at one end of one parametric
@@ -88,7 +88,7 @@ node of the mesh.
 
 ---
 
-## Using the Topology Map Directly
+## Using the topology map directly
 
 The `topomap` function is a JAX-JIT-compiled function:
 
@@ -107,7 +107,7 @@ print(f"elem {elem} xi {xi} -> elem {new_elem} xi {new_xi} (valid={valid})")
 
 ---
 
-## Checking Mesh Connectivity
+## Checking mesh connectivity
 
 `bmap` is a dictionary mapping element face identifiers to their neighbours:
 

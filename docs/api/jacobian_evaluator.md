@@ -1,3 +1,3 @@
-# API – jacobian_evaluator
+# API – Jacobian Evaluator
 
 ::: HOMER.jacobian_evaluator
