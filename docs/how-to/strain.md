@@ -47,9 +47,9 @@ ref_pts = mesh_ref.evaluate_embeddings_in_every_element(grid)
 
 # Apply a shear + quadratic deformation
 def_pts = np.stack([
-  ref_pts[:, 0],
-  ref_pts[:, 1] + ref_pts[:, 0] * 0.4,  # shear in y
-  2*ref_pts[:, 2] ** 2,         # nonlinear z
+  ref_pts[:, 0],
+  ref_pts[:, 1] + ref_pts[:, 0] * 0.4,  # shear in y
+  2*ref_pts[:, 2] ** 2,         # nonlinear z
 ], axis=1)
 
 # Fit the deformed mesh
