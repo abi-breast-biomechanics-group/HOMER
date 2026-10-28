@@ -1,6 +1,9 @@
 """
 hierarchy.py - truncated hierarchical (THB) spaces over locally refined elements.
 
+At it's base, a mesh is a lattice of values. This lattice can be locally refined.
+This is 
+
 A locally refined mesh is a set of leaf elements, each a cell of some level of
 the lattice the mesh was refined from (:attr:`MeshElement.box`).  Level *k* has
 its own uniform space of the element's basis, and the spaces are nested: a

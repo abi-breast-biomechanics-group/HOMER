@@ -16,6 +16,7 @@ import jax
 import jax.numpy as jnp
 import pyvista as pv
 
+from HOMER.mesh.hierarchy import Hierarchy
 from HOMER.utils import spheres_to_polydata, jax_aknn, all_pairings
 
 pv.global_theme.allow_empty_mesh = True
@@ -217,9 +218,28 @@ def hanging_points(self, fit_params=None) -> np.ndarray:
                                                            fit_params=fit_params))
 
 
+def node_levels(self) -> np.ndarray:
+    """The refinement level of each node: that of the coarsest element it acts on.
+
+    A level-*k* function lives where the mesh is refined to at least *k*, and
+    on at least one element of level *k*.  A mesh never locally refined is all
+    level 0.
+
+    :returns: ``(n_nodes,)`` integer levels.
+    """
+    levels = np.zeros(len(self.nodes), dtype=int)
+    if self.elements[0].box is None:
+        return levels
+    levels[:] = np.iinfo(int).max
+    for element in self.elements:
+        pool = [n if element.used_index else self.node_id_to_ind[n] for n in element.nodes]
+        levels[pool] = np.minimum(levels[pool], Hierarchy.cell(element.box)[1])
+    return levels
+
+
 def plot(self, scene:Optional[pv.Plotter] = None,
          node_colour: str | np.ndarray ='r', node_col_scalar_name='Field', node_cmap='tab10', node_size=10,
-         hanging_colour: str = 'b',
+         hanging_colour: str = 'b', level_shade=0.6,
          labels = False, tiling=(10, 6), 
          mesh_colour: str | np.ndarray ='gray', mesh_opacity=0.1, mesh_width = 2, mesh_col_scalar_name="Field", mesh_cmap=None,
          line_colour: str | np.ndarray ='black', line_opacity=1, line_width=2, line_col_scalar_name="Field", line_cmap=None,
@@ -241,6 +261,9 @@ def plot(self, scene:Optional[pv.Plotter] = None,
         points with no node of their own, see
         :func:`~HOMER.mesh.refinement.refine_elements` -- drawn at
         *node_size*.
+    :param level_shade: Each refinement level of a node, see
+        :func:`node_levels`, beyond the coarsest scales a single *node_colour*
+        by this, so finer nodes draw darker; ``1`` draws every level alike.
     :param labels: Whether to label the node numbers.
     :param tiling: Repetitions of the hexagonal unit surface used to draw each
         element; a 5/3 ratio looks good.
@@ -307,10 +330,15 @@ def plot(self, scene:Optional[pv.Plotter] = None,
 
     s.add_mesh(lines, line_width=line_width, color=line_colour if not isinstance(line_colour, np.ndarray) else None, name=l_tag, opacity=line_opacity, cmap=line_cmap)
     node_dots_m = pv.PolyData(node_dots)
+    levels = node_levels(self)
     if isinstance(node_colour, np.ndarray):
         node_dots_m[node_col_scalar_name] = node_colour
-
-    s.add_mesh(node_dots_m, render_points_as_spheres=True, color=node_colour if not isinstance(node_colour, np.ndarray) else None, point_size=node_size, name=n_tag, cmap=node_cmap)
+        s.add_mesh(node_dots_m, render_points_as_spheres=True, point_size=node_size, name=n_tag, cmap=node_cmap)
+    elif np.ptp(levels) and level_shade != 1:
+        node_dots_m['level colour'] = np.outer(level_shade ** (levels - levels.min()), pv.Color(node_colour).float_rgb)
+        s.add_mesh(node_dots_m, render_points_as_spheres=True, rgb=True, point_size=node_size, name=n_tag)
+    else:
+        s.add_mesh(node_dots_m, render_points_as_spheres=True, color=node_colour, point_size=node_size, name=n_tag)
 
     hanging = hanging_points(self, fit_params)
     if len(hanging):
@@ -419,7 +447,7 @@ def plot_strains(self, eles, xis, strains, scene:Optional[pv.Plotter]=None, cmap
         scene.show()
 
 
-def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_cmap='tab10', node_size=10, hanging_colour: str = 'b', labels=False, tiling=(10, 6), 
+def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.ndarray ='r', node_col_scalar_name="Field", node_cmap='tab10', node_size=10, hanging_colour: str = 'b', level_shade=0.6, labels=False, tiling=(10, 6), 
          mesh_colour: str | np.ndarray = 'gray', mesh_opacity=0.1, mesh_width=2, mesh_col_scalar_name="Field", mesh_cmap=None, 
          line_colour: str | np.ndarray = 'black', line_opacity=1, line_width=2, line_col_scalar_name="Field", line_cmap=None,
          elem_labels=False, render_name: Optional[str] = None, 
@@ -440,6 +468,9 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         Node sphere size.
     :param hanging_colour:
         Colour of the hanging positions, drawn at *node_size*.
+    :param level_shade:
+        Darkening of a single *node_colour* per refinement level; ``1`` turns
+        it off.
     :param labels:
         When ``True``, add node index labels (forces *node_size* = 0).
     :param tiling:
@@ -499,7 +530,7 @@ def plot_mesh(self, scene: Optional[pv.Plotter] = None, node_colour: str | np.nd
         #`MeshField.plot` *is* this module's `plot`; a zero-arg super() would need
         #the __class__ cell that only exists for a def inside a class body.
         plot(self, scene, node_colour=node_colour, node_col_scalar_name=node_col_scalar_name, node_cmap=node_cmap,
-             node_size=node_size, hanging_colour=hanging_colour, labels=labels, tiling=tiling,
+             node_size=node_size, hanging_colour=hanging_colour, level_shade=level_shade, labels=labels, tiling=tiling,
              mesh_colour=mesh_colour, mesh_opacity=mesh_opacity, mesh_width=mesh_width,
              mesh_col_scalar_name=mesh_col_scalar_name, mesh_cmap=mesh_cmap,
              line_colour=line_colour, line_opacity=line_opacity, line_width=line_width,

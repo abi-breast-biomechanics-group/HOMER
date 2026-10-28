@@ -12,7 +12,7 @@ import numpy as np
 import pyvista as pv
 import pytest
 
-from HOMER.basis_definitions import H3, L1, L2
+from HOMER.basis_definitions import B3, H3, L1, L2
 from HOMER.geometry import basic_surface, cube
 
 from _helpers import arr, node_locs
@@ -82,6 +82,19 @@ def test_hanging_positions_are_drawn_blue_at_the_node_size(plotter):
     assert hanging.mapper.dataset.n_points == len(mesh.hanging_points()) > 0
     assert hanging.prop.point_size == plotter.actors['m_nodes'].prop.point_size == 7
     assert hanging.prop.color == pv.Color('b')
+
+
+def test_refined_nodes_darken_by_level(plotter):
+    mesh = hermite_cube().rebase([B3] * 3)
+    mesh.refine(2)
+    mesh.refine_elements([0])
+    levels = mesh.node_levels()
+
+    mesh.plot(plotter, render_name='m', node_colour='r', level_shade=0.5)
+
+    rgb = plotter.actors['m_nodes'].mapper.dataset['level colour']
+    assert set(levels) == {0, 1}
+    np.testing.assert_allclose(rgb[:, 0], 0.5 ** levels)
 
 
 def test_a_mesh_with_nothing_hanging_draws_no_hanging_positions(block, plotter):

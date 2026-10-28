@@ -104,6 +104,7 @@ class MeshField:
     get_triangle_surface = plotting.get_triangle_surface
     get_lines = plotting.get_lines
     hanging_points = plotting.hanging_points
+    node_levels = plotting.node_levels
     plot = plotting.plot
     plot_strains = plotting.plot_strains
     evaluate_embeddings = evaluation.evaluate_embeddings
