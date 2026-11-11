@@ -91,6 +91,8 @@ def test_refined_nodes_darken_by_level(plotter):
     levels = mesh.node_levels()
 
     mesh.plot(plotter, render_name='m', node_colour='r', level_shade=0.5)
+    #pyvista >= 0.48 holds the plotted dataset weakly; read the colours the render drew
+    plotter.screenshot()
 
     rgb = plotter.actors['m_nodes'].mapper.dataset['level colour']
     assert set(levels) == {0, 1}
