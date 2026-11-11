@@ -584,6 +584,9 @@ def make_jac_for_mesh_func(initial_mesh, function: Callable,
                 linear = jax.linearize(block, p)[1]
                 return jax.vmap(lambda *t: linear(treedef.unflatten(t)))(*tangents)
 
+            if not batched:
+                #linearise the program `residual` runs: a vmap recompiles an iterative solve, whose answer moves with round-off
+                return item(*jax.tree_util.tree_map(lambda x: x[0], (params, kwargs)))[None]
             return jax.vmap(item)(params, kwargs)
 
         def run(params, decoding, kwargs):
