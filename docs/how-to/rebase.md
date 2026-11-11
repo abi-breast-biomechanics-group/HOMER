@@ -12,7 +12,7 @@ or Hermite basis.
 
 ---
 
-## Trilinear → Cubic Hermite Conversion
+## Trilinear → cubic Hermite conversion
 
 A cubic-Hermite element needs seven derivative vectors per node, and the
 obvious shortcut — write the eight corners down and leave the derivatives at
@@ -68,7 +68,7 @@ measure — does.
 
 ---
 
-## Converting a 2-D Manifold Mesh
+## Converting a 2-D manifold mesh
 
 The same workflow applies to 2-D surface meshes, and on a multi-element one it
 buys continuity as well as order: the bilinear seed is faceted, and the
@@ -99,7 +99,7 @@ s.show()
 
 ---
 
-## Rebase to Lagrange Basis
+## Rebase to Lagrange basis
 
 You can also rebase from Hermite to Lagrange (e.g. for export or
 compatibility with other solvers):
@@ -114,7 +114,7 @@ lagrange_mesh.plot()
 
 ---
 
-## Resolution Control
+## Resolution control
 
 The `res` parameter of `rebase()` controls how many xi samples are used for
 the linear fit.  Increase it for better accuracy when rebasing to a
@@ -126,7 +126,7 @@ mesh = seed.rebase(H3**3, res=20)  # default res=10
 
 ---
 
-## Node Numbering
+## Node numbering
 
 A rebase builds its node list from the new basis, so the order it comes back
 in has nothing to do with the order the mesh had.  What happens to the

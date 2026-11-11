@@ -5,7 +5,7 @@ other.
 
 ---
 
-## Class Hierarchy
+## Class hierarchy
 
 ```
 Basis  (basis_definitions.py)      – one frozen instance per 1-D basis
@@ -39,7 +39,7 @@ body by `mesh/field.py`:
 HOMER/mesh/
     node.py  element.py  field.py  mesh.py     the classes
     evaluation.py    evaluating the field, its derivatives, embedded points
-    parameters.py    the parameter vector, and least-squares fitting it
+    parameters.py    the parameter vector, and methods for fast linear parameter fits
     topology.py      shared nodes, faces, surfaces, colouring
     refinement.py    refine and rebase, and the fixed-parameter transfer
     plotting.py      drawing; the only module that touches PyVista
@@ -64,7 +64,7 @@ Mesh` keeps working.
 
 ---
 
-## `MeshNode` – Physical Coordinates and Derivatives
+## `MeshNode` – physical coordinates and derivatives
 
 A `MeshNode` subclasses `dict` so it can carry *named* derivative arrays
 alongside the spatial location `loc`.
@@ -88,7 +88,7 @@ optimisation) via `node.fix_parameter(...)`.
 
 ---
 
-## `MeshElement` – Tensor-Product Element
+## `MeshElement` – tensor-product element
 
 An element connects nodes through a **product of 1-D basis functions**, one
 per parametric direction:
@@ -108,9 +108,32 @@ elem3d = MeshElement(node_indexes=[0, 1, 2, 3, 4, 5, 6, 7],
 The element computes the **tensor-product weight matrix** at construction time
 (`BasisProductInds`) which drives all subsequent evaluations.
 
+### Parameter maps
+
+Each parameter an element's basis contracts against is a *slot*: a lattice
+position `j` and a field (`'loc'`, then the element's `used_node_fields`).  By
+default a slot is that field of the node at that position.  `param_map`
+generalises this to a weighted sum of node fields, so a slot can be scaled, or
+interpolated from several nodes:
+
+```python exec="true" source="above" session="architecture"
+param_map = {slot: [(slot[0], slot[1], 1.0)] for slot in elem2d.slots}  # the identity
+param_map[(0, 'du')] = [(0, 'du', 0.5)]                                 # one scaled slot
+scaled = MeshElement(node_indexes=[0, 1, 2, 3], basis_functions=H3**2, param_map=param_map)
+print(scaled.terms((0, 'du')))
+```
+
+Terms point at positions in the element's `nodes` list, which is the element's
+local node pool, so renumbering the mesh's nodes never touches a map.
+`generate_mesh` assembles every element's map into `ele_map` and `ele_weights`,
+both `(n_elements, n_slots, K)`.  A slot is the weighted sum of up to `K`
+DOFs, where a DOF is one node field, `fdim` parameters long.  An evaluation
+applies every element's map once and then gathers the elements it needs, so a
+point costs the same however many terms the longest map has.
+
 ---
 
-## `MeshField` – Evaluatable Field
+## `MeshField` – evaluatable field
 
 `MeshField` holds a list of nodes and elements, and provides all evaluation
 and fitting methods.  When `generate_mesh()` is called (automatically in the
@@ -123,7 +146,8 @@ constructor), it:
    and `topomap` for cross-element point embedding.
 
 The `@expand_wide_evals` decorator automatically adds two convenience
-variants for every `@wide_eval` method `foo`:
+variants for every `@wide_eval`. For an example function `foo`, the following 
+additional variants are defined:
 
 | Variant | Signature | Purpose |
 |---|---|---|
@@ -133,7 +157,7 @@ variants for every `@wide_eval` method `foo`:
 
 ---
 
-## `Mesh(MeshField)` – Primary Coordinate Mesh
+## `Mesh(MeshField)` – primary coordinate mesh
 
 `Mesh` extends `MeshField` by adding a `fields` dictionary of secondary
 `MeshField` objects:
@@ -147,7 +171,9 @@ mesh.fields = {
 
 Secondary fields are created with `mesh.new_field(...)` and accessed via
 `mesh['field_name']`.  They share the same parametric topology as the primary
-mesh but can use different basis functions.
+mesh but can use different basis functions; the
+[worked example](how-to/secondary-fields.md#worked-example-normal-vector-scalar-height-fields)
+fits an `H3` vector field on an `L1` mesh.
 
 ---
 
@@ -180,7 +206,7 @@ through `HOMER.io` without touching the reader.
 
 ---
 
-## JAX Integration
+## JAX integration
 
 All evaluation functions are JAX-compatible.  The key integration points are:
 

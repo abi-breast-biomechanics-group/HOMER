@@ -60,6 +60,19 @@ def unreachable():
     return arr(rng.random((6, 3))) * 6.0 - 2.5
 
 
+@pytest.fixture(scope="module")
+def near_mesh(block, on_mesh):
+    """Points just outside the block: a closest point to find, but no zero residual there.
+
+    A point merely nudged inside a volume mesh still embeds exactly, so these
+    are set beyond one face of it.
+    """
+    points = on_mesh.copy()
+    top = max(node.loc[0] for node in block.nodes)
+    points[:, 0] = top + 0.01 + 0.02 * np.random.default_rng(3).random(len(points))
+    return points
+
+
 def embed(mesh, points, **kw):
     (ele, xi), res = mesh.embed_points(np.atleast_2d(points),
                                        return_residual=True, **kw)
@@ -146,6 +159,74 @@ def test_a_tolerance_of_zero_runs_the_iteration_cap(block, on_mesh):
     _, many, _ = embed(block, on_mesh, tol=0, iterations=15)
 
     assert not np.array_equal(one_step, many)
+
+
+def test_a_point_off_the_mesh_stops_once_it_stops_moving(block, near_mesh):
+    """Its residual never reaches the tolerance, so it is the step that stops it.
+
+    Stopping before the cap is what makes a larger cap change nothing.  Waiting
+    for the line search to stall instead took three steps here, so a cap of two
+    tells the two apart.
+    """
+    capped = embed(block, near_mesh, iterations=2)
+    uncapped = embed(block, near_mesh, iterations=100)
+
+    for a, b in zip(capped, uncapped):
+        np.testing.assert_array_equal(a, b)
+    assert (np.linalg.norm(capped[2], axis=-1) > DEFAULT_EMBED_TOL).all()
+
+
+def test_stopping_off_the_mesh_costs_nothing_in_accuracy(block, near_mesh):
+    ele, xi, res = embed(block, near_mesh)
+    full_ele, full_xi, full_res = embed(block, near_mesh, tol=0)
+
+    np.testing.assert_array_equal(ele, full_ele)
+    np.testing.assert_allclose(xi, full_xi, atol=EXACT)
+    np.testing.assert_allclose(np.linalg.norm(res, axis=-1), np.linalg.norm(full_res, axis=-1),
+                               atol=DEFAULT_EMBED_TOL)
+
+
+def test_the_early_exits_give_up_on_no_point_full_iterations_would_embed():
+    """A degenerate element can damp the step to nothing however far a point has to go.
+
+    The example cube has zero nodal derivatives at some nodes, so its Jacobian
+    collapses on edges there; a seed on one takes a vanishing first step and
+    then creeps off as the element recovers.  A short step must not read as
+    having arrived.
+    """
+    from HOMER.examples import hermite_cube
+    mesh = hermite_cube()
+    mesh.refine(4)
+    rng = np.random.default_rng(11)
+    points = arr(mesh.evaluate_embeddings_ele_xi_pair(rng.integers(len(mesh.elements), size=4000),
+                                                      rng.random((4000, 3))))
+
+    _, _, early = embed(mesh, points)
+    _, _, full = embed(mesh, points, tol=0)
+
+    embedded_in_full = np.linalg.norm(full, axis=-1) < 1e-5
+    assert (np.linalg.norm(early, axis=-1)[embedded_in_full] < 1e-5).all()
+
+
+def test_points_inside_a_curved_block_all_embed():
+    """The example cube's zero nodal derivatives collapse some faces of its elements.
+
+    On such a face the Jacobian column across it vanishes, so a seed there gets
+    no first-order sign of the point inside, and a lock decided once at the seed
+    held it on the face: 7% of the points failed.  Locks are now re-decided as
+    the point moves, never along a direction the Jacobian has collapsed in, and
+    a blind direction is probed off the face instead.
+    """
+    from HOMER.examples import hermite_cube
+    mesh = hermite_cube()
+    mesh.refine(2)
+    rng = np.random.default_rng(12)
+    points = arr(mesh.evaluate_embeddings_ele_xi_pair(rng.integers(len(mesh.elements), size=4000),
+                                                      rng.random((4000, 3))))
+
+    _, _, res = embed(mesh, points)
+
+    assert np.mean(np.linalg.norm(res, axis=-1) > 1e-5) < 1e-3
 
 
 def test_an_unreachable_point_reports_its_residual(block, unreachable):

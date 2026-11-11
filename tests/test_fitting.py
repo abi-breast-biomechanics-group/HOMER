@@ -20,7 +20,6 @@ from HOMER.fitting import point_cloud_fit
 from HOMER.geometry import basic_surface, cube
 from HOMER.jacobian_evaluator import (estimate_column_norms, estimate_sparsity,
                                       jacobian, make_jac_for_mesh_func,
-                                      make_static_jac_for_mesh_func,
                                       matrix_free_jacobian)
 from HOMER.mesh import column_equilibrated_lstsq, sparse_equilibrated_lstsq
 
@@ -671,13 +670,13 @@ def grid_residual(mesh, res=3):
 
 
 def reembedding_residual(mesh, points):
-    """A data-to-model term.  ``approx_jac`` holds each point at the
+    """A data-to-model term.  ``derivative='fixed'`` holds each point at the
     ``(element, xi)`` it embedded to, which is what keeps the residual
     separable in fields; which element that is still moves with the mesh, so
     the sparsity pattern moves with it."""
     def residual(params):
         return mesh.embed_points(points, fit_params=params, return_residual=True,
-                                 approx_jac=True)[1].flatten()
+                                 derivative='fixed')[1].flatten()
 
     return residual
 
@@ -692,32 +691,14 @@ def test_the_coloured_jacobians_match_the_dense_one(basis):
     start = jnp.asarray(mesh.optimisable_param_array)
     reference = np.asarray(jax.jacfwd(residual)(start))
 
-    dynamic = make_jac_for_mesh_func(mesh, residual, fields_seperable=True)
-    static = make_static_jac_for_mesh_func(mesh, residual, start, fields_seperable=True)
+    jac = make_jac_for_mesh_func(mesh, residual)[1]
 
-    np.testing.assert_allclose(np.asarray(dynamic(start).todense()), reference, atol=CLOSE)
-    np.testing.assert_allclose(np.asarray(static(start).todense()), reference, atol=CLOSE)
+    np.testing.assert_allclose(np.asarray(jac(start).todense()), reference, atol=CLOSE)
 
 
-def test_a_static_pattern_holds_away_from_where_it_was_read():
-    """Fixed ``(element, xi)`` sampling: the pattern is the same everywhere, so
-    freezing it costs nothing."""
-    mesh = cube(basis=[H3] * 3)
-    mesh.refine(2)
-    residual = grid_residual(mesh)
-    start = jnp.asarray(mesh.optimisable_param_array)
-    moved = start + jnp.asarray(
-        np.random.default_rng(0).normal(scale=0.05, size=start.shape))
-
-    static = make_static_jac_for_mesh_func(mesh, residual, start, fields_seperable=True)
-
-    np.testing.assert_allclose(np.asarray(static(moved).todense()),
-                               np.asarray(jax.jacfwd(residual)(moved)), atol=CLOSE)
-
-
-def test_only_the_dynamic_jacobian_follows_a_pattern_that_moves():
-    """The reason the second pass is worth paying for: once the data re-embeds
-    into different elements, the frozen indices are the wrong indices."""
+def test_the_jacobian_follows_a_pattern_that_moves():
+    """Once the data re-embeds into different elements, the columns decoded at
+    the start are the wrong columns, and the probe has to catch it."""
     rng = np.random.default_rng(0)
     mesh = bulged_patch()
     mesh.refine(2)
@@ -725,13 +706,12 @@ def test_only_the_dynamic_jacobian_follows_a_pattern_that_moves():
 
     start = jnp.asarray(mesh.optimisable_param_array)
     moved = start + jnp.asarray(rng.normal(scale=0.25, size=start.shape))
-    reference = np.asarray(jax.jacfwd(residual)(moved))
+    jac = make_jac_for_mesh_func(mesh, residual)[1]
+    first = jac(start)
 
-    dynamic = make_jac_for_mesh_func(mesh, residual, fields_seperable=True)
-    static = make_static_jac_for_mesh_func(mesh, residual, start, fields_seperable=True)
-
-    np.testing.assert_allclose(np.asarray(dynamic(moved).todense()), reference, atol=CLOSE)
-    assert np.abs(np.asarray(static(moved).todense()) - reference).max() > 0.1
+    np.testing.assert_allclose(np.asarray(jac(moved).todense()),
+                               np.asarray(jax.jacfwd(residual)(moved)), atol=CLOSE)
+    assert np.abs(np.asarray(first.todense()) - np.asarray(jax.jacfwd(residual)(moved))).max() > 0.1
 
 
 def sparsejac_colour_count(residual, start):
@@ -776,7 +756,7 @@ def test_the_colouring_jacobian_covers_only_optimisable_parameters():
     residual = grid_residual(mesh)
     start = jnp.asarray(mesh.optimisable_param_array)
 
-    jac = make_jac_for_mesh_func(mesh, residual, fields_seperable=True)(start)
+    jac = make_jac_for_mesh_func(mesh, residual, fields_seperable=True)[1](start)
 
     assert jac.shape == (len(residual(start)), len(mesh.optimisable_param_array))
     np.testing.assert_allclose(np.asarray(jac.todense()),

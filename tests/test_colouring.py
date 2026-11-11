@@ -27,11 +27,12 @@ def element_columns(mesh, fields_separable):
     position = np.full(optimisable.shape[0], -1, dtype=int)
     position[optimisable] = np.arange(optimisable.sum())
 
-    stride = mesh.fdim if fields_separable else 1
+    components = [[c] for c in range(mesh.fdim)] if fields_separable else [list(range(mesh.fdim))]
     groups = []
-    for ele_map in np.asarray(mesh.ele_map):
-        for offset in range(stride):
-            cols = position[ele_map.astype(int)[offset::stride]]
+    for dofs, weights in zip(np.asarray(mesh.ele_map), np.asarray(mesh.ele_weights)):
+        dofs = dofs[weights != 0]
+        for comps in components:
+            cols = position[(dofs[:, None] * mesh.fdim + np.array(comps)).ravel()]
             groups.append(set(cols[cols >= 0].tolist()))
     return groups
 

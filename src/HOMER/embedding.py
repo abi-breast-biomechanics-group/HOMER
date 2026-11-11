@@ -77,6 +77,24 @@ def _solve_xi_tangent(H, b, ndim: int, partial_mask: bool):
     return _linear_solve(H + jnp.eye(ndim) * 1e-9, b, ndim)
 
 
+def _split_off_tangent(W, v):
+    """``(xi_dot, r_dot)`` with ``v = W xi_dot + r_dot`` and ``r_dot`` normal to ``W``'s columns.
+
+    Both are read off ``v``'s coordinates in the left singular vectors of
+    ``W``: those along its non-zero singular values give ``xi_dot``, the
+    rest are ``r_dot``.  ``r_dot`` is never formed as ``v - W xi_dot``, which
+    in float32 keeps little of it when ``v`` is nearly tangential.  A zeroed
+    column of ``W`` -- a masked or active direction -- gets no ``xi_dot``.
+    """
+    U, s, Vt = jnp.linalg.svd(W, full_matrices=True)
+    along = U.T @ v
+    n = s.shape[0]
+    spanned = s > s.max() * max(W.shape) * jnp.finfo(W.dtype).eps
+    xi_dot = Vt.T @ jnp.where(spanned, along[:n] / jnp.where(spanned, s, 1.0), 0.0)
+    tangential = jnp.concatenate([spanned, jnp.zeros(W.shape[0] - n, bool)])
+    return xi_dot, U @ jnp.where(tangential, 0.0, along)
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Newton–Raphson single-point solver  (vmap'd over query points)
 # ─────────────────────────────────────────────────────────────────────
@@ -105,6 +123,30 @@ _STEP_FLOOR = 1e-9
 #: iterate unconditionally instead.
 DEFAULT_EMBED_TOL = 1e-6
 
+#: The ridge each refinement step is solved with, ``J^T J + ridge * I``, which
+#: keeps a step finite where an element is degenerate.  Where it dominates the
+#: curvature the step is damped to almost nothing however far the point still
+#: has to go, so a short step only means *arrived* where it does not.
+_STEP_RIDGE = 1e-5
+
+#: Iterations every point gets before the slow ones are refined on their own.
+#: Nearly every point has stopped by then: on the mesh, Newton converges in two
+#: or three; off it, the step falls inside the tolerance as soon.
+_FIRST_PASS = 5
+
+#: The points still refining after the first pass are taken this many chunks to
+#: a batch, so a chunk is ``1 / _STRAGGLER_CHUNKS`` of it.  Usually one chunk
+#: holds them all.
+_STRAGGLER_CHUNKS = 32
+
+#: How far, in xi, the refinement probes into the element from a face along
+#: which the Jacobian has collapsed, and how near the face that applies.  There
+#: the first-order model is blind: the column vanishes on the face and grows
+#: only with the distance from it, so the gradient carries no usable sign and a
+#: Gauss-Newton step cannot tell that the point lies inside.  The line search
+#: accepts the probe only if it lowers the residual, and halves it otherwise.
+_DEGENERATE_PROBE = 1e-2
+
 
 def _reference_length(mesh: MeshField) -> float:
     """A characteristic length for *mesh*, used to scale the default tolerance.
@@ -127,6 +169,44 @@ def _reference_length(mesh: MeshField) -> float:
     return span
 
 
+def _arrived(J, delta_xi, free, tol_sq):
+    """Whether the Newton step *delta_xi* says the point is at its closest.
+
+    It would move the embedded point less than the tolerance, to first order,
+    and the Jacobian has curvature beyond the ridge in every *free* direction
+    -- the smallest eigenvalue of ``J^T J`` there exceeds it, which is the
+    Cholesky factorisation of ``J^T J - ridge * I`` succeeding.  Where it does
+    not, the element is degenerate there and the step is short because the
+    point cannot move yet, not because it has nowhere left to go.
+    """
+    move_sq = jnp.sum(jnp.square(J @ delta_xi))
+    free = free.astype(J.dtype)
+    curvature = (J.T @ J) * free[:, None] * free[None, :] + jnp.diag(1.0 - free)
+    healthy = jnp.all(jnp.isfinite(jnp.linalg.cholesky(curvature - _STEP_RIDGE * jnp.eye(J.shape[1]))))
+    return (move_sq < tol_sq) & healthy
+
+
+def _held_step(A, b, held, ndim: int):
+    """The step solving ``A dxi = b`` with the *held* directions kept at zero."""
+    free = (~held).astype(A.dtype)
+    A_free = A * free[:, None] * free[None, :] + jnp.diag(1.0 - free)
+    return _linear_solve(A_free, b * free, ndim)
+
+
+def _external_faces(mesh: MeshField) -> np.ndarray:
+    """``(n_elements, ndim, 2)``: whether each face is the edge of the mesh.
+
+    A face with no neighbour across it, and not one of a hanging pair, which
+    :func:`topomap` crosses as it crosses any other.  NumPy, not JAX: the
+    solver can be built while some caller's function is being traced, and a
+    JAX constant made then would be a tracer of that trace, kept past it.
+    """
+    external = np.asarray(mesh._topo_lookup) == -1
+    for e, d, side in list(mesh.hanging) + list(mesh.hanging.values()):
+        external[e, d, side] = False
+    return external
+
+
 def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
     """Return a single-point NR function closed over *mesh*.
 
@@ -139,8 +219,11 @@ def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
     reused regardless of their Python-level values (B2).
 
     ``iterations`` is an upper bound rather than a fixed count: the loop also
-    stops once the squared residual is within ``tol_sq`` or the line search
-    has frozen (see :data:`_STEP_FLOOR`).  Because this runs under
+    stops once the squared residual is within ``tol_sq``, once the next step
+    would move the embedded point less than that -- the point has reached the
+    closest point the mesh offers, which for a point *off* the mesh is not a
+    zero residual -- or once the line search has frozen (see
+    :data:`_STEP_FLOOR`).  Because this runs under
     :func:`jax.vmap`, the whole batch iterates until its *last* point is
     finished -- so the saving is real when the points converge together, as
     they do whenever they lie on or near the mesh, and nil (but not negative)
@@ -154,13 +237,16 @@ def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
     """
     A_size = ndim  # size of the linear system
 
+    external = _external_faces(mesh)
+    directions = np.arange(ndim)
+
     def nr_solve(elem, xi0, x_target, lbound, dim_mask, iterations, tol_sq,
-                 fit_params):
+                 fit_params, release=True):
         dim_mask = jnp.asarray(dim_mask, dtype=bool)
 
         # ── body of the refinement loop ──────────────────────────
         def body_fun(state):
-            i, elem, xi, r, r_mag_sq, delta_xi, stepsize, jac = state
+            i, elem, xi, r, r_mag_sq, delta_xi, stepsize, jac, arrived, held = state
             xi_prop = xi + stepsize * delta_xi
 
             elem_prop, xi_mapped, valid = mesh.topomap(elem, xi_prop)
@@ -192,18 +278,54 @@ def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
             J_masked = jnp.where(dim_mask[:, None], J, 0.0)
 
             Jt = J_masked.T
-            A = Jt @ J_masked + jnp.eye(A_size) * 1e-5
+            A = Jt @ J_masked + jnp.eye(A_size) * _STEP_RIDGE
+            gradient = Jt @ r_prop
 
-            mask = jnp.where(lbound, jnp.zeros_like(next_xi), jnp.ones_like(next_xi))
-            diag_mask = jnp.where(lbound, jnp.ones_like(next_xi), jnp.zeros_like(next_xi))
+            # Which directions to hold, decided afresh at every point the loop
+            # reaches: one where the point sits on the edge of the mesh and
+            # steepest descent would leave through it -- projected Newton's
+            # active set.  The descent direction, not the Newton step: on a
+            # curved element the step couples the directions, and can point
+            # out through a face from a point whose closest point lies inside.
+            # And only along a direction the Jacobian has curvature beyond the
+            # ridge in: on a collapsed face the column is zero, the descent
+            # there is second order, and the gradient's sign is noise.
+            # Decided once, at the seed, any of these froze points on the face.
+            # A surface embedding keeps the locks it was given, which are what
+            # keep it on the surface.
+            informative = jnp.sum(jnp.square(J_masked), axis=0) > _STEP_RIDGE
+            if release:
+                edge = jnp.asarray(external)[elem_prop, directions]
+                leaving = informative & (
+                    ((xi_mapped <= 0.0) & edge[:, 0] & (gradient < 0))
+                    | ((xi_mapped >= 1.0) & edge[:, 1] & (gradient > 0)))
+            else:
+                leaving = held
+            new_delta_xi = _held_step(A, gradient, leaving, ndim)
 
-            A_free = A * mask[:, None] * mask[None, :] + jnp.diag(diag_mask)
-            b_free = (Jt @ r_prop) * mask
-
-            new_delta_xi = _linear_solve(A_free, b_free, ndim)
+            # Near a collapsed face the Newton step is blind -- the column
+            # shrinks with the distance from it -- so probe away from it: always
+            # from on the face, where the step has nothing to go on, and from
+            # near it unless the step is already heading for the face, which is
+            # then where the point lies.
+            near_lo, near_hi = xi_mapped <= _DEGENERATE_PROBE, xi_mapped >= 1.0 - _DEGENERATE_PROBE
+            stuck_lo = (xi_mapped <= 0.0) | (near_lo & (new_delta_xi >= 0.0))
+            stuck_hi = (xi_mapped >= 1.0) | (near_hi & (new_delta_xi <= 0.0))
+            probe = jnp.where(stuck_lo, _DEGENERATE_PROBE, jnp.where(stuck_hi, -_DEGENERATE_PROBE, 0.0))
+            blind = ~informative & ~leaving & (probe != 0.0)
+            new_delta_xi = jnp.where(blind, probe, new_delta_xi)
 
             next_delta_xi = jnp.where(accept, new_delta_xi, delta_xi)
             next_stepsize = jnp.where(accept, 1.0, stepsize * 0.5)
+
+            # Whether the point has arrived: a full Newton step from it would
+            # move the embedded point less than the tolerance, to first order,
+            # and that step is the curvature's and not the ridge's.  Only an
+            # accepted point says either -- a rejected proposal is the line
+            # search backing off, and one that never gets anywhere is the step
+            # floor's to stop.
+            next_arrived = jnp.where(accept, _arrived(J_masked, new_delta_xi, ~leaving, tol_sq), arrived)
+            next_held = jnp.where(accept, leaving, held)
 
             # `jac` tracks (next_elem, next_xi) for the same reason `next_r`
             # does: the accepted proposal is where the loop now stands, so
@@ -211,12 +333,13 @@ def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
             next_jac = jnp.where(accept, J, jac)
 
             return (i + 1, next_elem, next_xi, next_r, next_r_mag_sq,
-                    next_delta_xi, next_stepsize, next_jac)
+                    next_delta_xi, next_stepsize, next_jac, next_arrived, next_held)
 
         def cond_fun(state):
-            i, _, _, _, r_mag_sq, _, stepsize, _ = state
+            i, _, _, _, r_mag_sq, _, stepsize, _, arrived, _ = state
             return ((i < iterations)
                     & (r_mag_sq > tol_sq)
+                    & ~arrived
                     & (stepsize > _STEP_FLOOR))
 
         # ── initial state ────────────────────────────────────────
@@ -239,23 +362,20 @@ def _make_nr_solver(mesh: MeshField, ndim: int, robust_init_est: bool):
 
         init_Jt = init_J.T
         init_A = init_Jt @ init_J + jnp.eye(A_size) * 1e-7
-
-        init_mask = jnp.where(lbound, jnp.zeros_like(xi0), jnp.ones_like(xi0))
-        init_diag_mask = jnp.where(lbound, jnp.ones_like(xi0), jnp.zeros_like(xi0))
-
-        init_A_free = (init_A * init_mask[:, None] * init_mask[None, :]) + jnp.diag(init_diag_mask)
-        init_b_free = (init_Jt @ init_r) * init_mask
-
-        init_delta_xi = _linear_solve(init_A_free, init_b_free, ndim)
+        lbound = jnp.asarray(lbound, dtype=bool)
+        init_delta_xi = _held_step(init_A, init_Jt @ init_r, lbound, ndim)
 
         # B2: iterations is a *traced* jnp.int32 → one XLA trace for
         # any iteration count, instead of recompiling per Python int.
         init_state = (jnp.int32(0), elem.astype(int), xi0, init_r,
-                      init_r_mag_sq, init_delta_xi, 1.0, analytic_J)
+                      init_r_mag_sq, init_delta_xi, 1.0, analytic_J,
+                      _arrived(init_J, init_delta_xi, ~lbound, tol_sq), lbound)
         final_state = jax.lax.while_loop(cond_fun, body_fun, init_state)
-        _, elem_f, xi_f, r_f, _, _, _, jac_f = final_state
+        _, elem_f, xi_f, r_f, r_mag_sq_f, _, stepsize_f, jac_f, arrived_f, held_f = final_state
+        #stopped by something other than the cap, so more iterations would not move it
+        done = (r_mag_sq_f <= tol_sq) | arrived_f | (stepsize_f <= _STEP_FLOOR)
 
-        return (elem_f, xi_f), r_f, jac_f
+        return (elem_f, xi_f), r_f, jac_f, (done, held_f)
 
     return nr_solve
 
@@ -528,7 +648,12 @@ def _mask_is_partial(dim_mask) -> bool:
 # JVP helpers (for differentiable embedding)
 # ─────────────────────────────────────────────────────────────────────
 
-def _make_jvp_helpers(mesh: MeshField, approx_jac: bool, partial_mask: bool):
+#: The tangents :meth:`~HOMER.mesh.field.MeshField.embed_points` can hand a
+#: derivative, from the most faithful to the cheapest.
+DERIVATIVES = ('exact', 'gauss_newton', 'fixed')
+
+
+def _make_jvp_helpers(mesh: MeshField, derivative: str, partial_mask: bool):
     """Build the per-point ``embed_single_jvp`` rule.
 
     The embedding minimises ``D = |m * (x - w(e, xi; p))|^2 / 2`` over ``xi``,
@@ -537,35 +662,43 @@ def _make_jvp_helpers(mesh: MeshField, approx_jac: bool, partial_mask: bool):
 
         H xi_dot = -(dg/dx . x_dot + dg/dp . p_dot)
 
-    with ``W = dw/dxi``, ``r = m * (x - w)`` and ``H = dg/dxi``.  Writing
-    those three derivatives out, rather than handing ``g`` to
-    :func:`jax.jacobian` and :func:`jax.jvp` as this used to, buys two
-    things.
+    with ``W = dw/dxi``, ``r = m * (x - w)`` and ``H = dg/dxi``.
 
-    ``H = W' M W - sum_d r_d d2w_d/dxi2``.  ``W`` is the Jacobian at the
-    converged point, which :func:`_make_nr_solver` has already computed and
-    now returns, so the first term is a matmul on a value that cost nothing.
-    That leaves only the curvature term to differentiate, and contracting it
-    with ``r`` *first* makes it the Hessian of the scalar ``r . w(xi)``
-    instead of a ``(fdim, ndim, ndim)`` tensor -- taken over the element's
-    own kernel, with its parameters already gathered, so nothing
-    differentiates through the mesh-wide parameter scatter.  Measured on a
-    27-element tricubic Hermite mesh at 20k points, ``H`` drops from 25.6 ms
-    to 8.0 ms.
+    *derivative* chooses how much of that to keep:
 
-    And ``w`` is *linear* in ``p``, so the parameter derivatives are not
+    * ``'exact'`` -- all of it.  ``H = W' M W - sum_d r_d d2w_d/dxi2``, and
+      ``dg/dp . p_dot`` carries ``dW/dp . p_dot`` against ``r``.  ``W`` is the
+      Jacobian at the converged point, which :func:`_make_nr_solver` already
+      returns, and the curvature term is the Hessian of the scalar
+      ``r . w(xi)`` over the element's own kernel.
+    * ``'gauss_newton'`` -- the two terms weighted by the residual dropped,
+      ``H = W' M W``.  The residual's tangent is then its parameter tangent
+      projected onto the normal space, ``r_dot = P (x_dot - w_p)``: the
+      reduced Jacobian of eliminating ``xi`` from the joint Gauss-Newton
+      problem, with the exact gradient ``J' r`` (``W' r`` vanishes at the
+      closest point) and only the curvature model left out.  It needs the
+      value alone at the tangent parameters, so it is several times cheaper
+      per column; it is the one to fit with.  The projection is taken in the
+      singular vectors of ``M W`` (:func:`_split_off_tangent`), so the
+      normal part keeps its precision when the tangent is mostly tangential.
+    * ``'fixed'`` -- the point held at its ``(element, xi)``: no sliding,
+      ``xi_dot = 0``.  Cheapest, and separable in the field components,
+      which halves or thirds the colours a coloured Jacobian needs; but as
+      a fitting model it converges slowly, the points lagging the surface.
+
+    ``w`` is *linear* in ``p``, so the parameter derivatives are not
     derivatives at all::
 
         dw/dp . p_dot = w(e, xi; p_dot)
         dW/dp . p_dot = W(e, xi; p_dot)
 
-    -- one more call to the same fused value-and-Jacobian kernel, evaluated
-    at the tangent parameters.  This is why *p_dot* must be widened with
-    zeros in the non-optimisable slots: it is being passed as though it were
-    a parameter vector, and a fixed parameter contributes no motion.
+    -- the same evaluation kernels at the tangent parameters.  This is why
+    *p_dot* must be widened with zeros in the non-optimisable slots: it is
+    being passed as though it were a parameter vector, and a fixed parameter
+    contributes no motion.
 
     *partial_mask* says whether this trace's ``dim_mask`` switches anything
-    off, and selects how ``xi_dot`` is solved for -- see
+    off, and selects how ``'exact'`` solves for ``xi_dot`` -- see
     :func:`_solve_xi_tangent`.  Like the coarse-search mode it is a
     compile-time property of the call, so the two solves never coexist in one
     trace.
@@ -577,35 +710,44 @@ def _make_jvp_helpers(mesh: MeshField, approx_jac: bool, partial_mask: bool):
         eles = jnp.atleast_1d(ele)
         xis = jnp.atleast_2d(xi)
 
-        # w_p = dw/dp . p_dot and W_p = dW/dp . p_dot, by linearity in p.
-        w_p, W_p = mesh.evaluate_embeddings_and_jacobians(
-            eles, xis, fit_params=full_param_dot)
-        w_p, W_p = w_p[0], W_p[0]
-
-        masked_W = jnp.where(dim_mask[:, None], W, 0.0)
-
-        # sum_d r_d d2w_d/dxi2, as the Hessian of a scalar.  `r` is the
-        # primal residual, already masked, so the mask needs no repeating.
-        elem_params = mesh._element_params(eles, full_params)[0]
-        curvature = jax.hessian(
-            lambda x: jnp.dot(r, mesh.elem_evals(elem_params, x[None, :]))
-        )(xi)
-        local_H = W.T @ masked_W - curvature
-
-        # dg/dx . x_dot + dg/dp . p_dot, from g = -W' r.
-        comb_product = (W.T @ jnp.where(dim_mask, w_p - point_dot, 0.0)
-                        - W_p.T @ r)
+        if derivative == 'exact':
+            # w_p = dw/dp . p_dot and W_p = dW/dp . p_dot, by linearity in p.
+            w_p, W_p = mesh.evaluate_embeddings_and_jacobians(
+                eles, xis, fit_params=full_param_dot)
+            w_p, W_p = w_p[0], W_p[0]
+        else:
+            w_p = mesh.evaluate_embeddings(eles, xis, fit_params=full_param_dot)[0]
+        if derivative == 'fixed':
+            return jnp.zeros_like(xi), jnp.where(dim_mask, point_dot - w_p, 0.0)
 
         active_mask = jnp.isclose(xi, 1.0, atol=1e-5) | jnp.isclose(xi, 0, atol=1e-5)
         free_mask = ~active_mask
+        if derivative == 'gauss_newton':
+            xi_dot, r_dot = _split_off_tangent(
+                jnp.where(dim_mask[:, None] & free_mask[None, :], W, 0.0),
+                jnp.where(dim_mask, point_dot - w_p, 0.0))
+            return xi_dot, jnp.where(dim_mask, r_dot, 0.0)
+
+        masked_W = jnp.where(dim_mask[:, None], W, 0.0)
+        local_H = W.T @ masked_W
+        # dg/dx . x_dot + dg/dp . p_dot, from g = -W' r.
+        comb_product = W.T @ jnp.where(dim_mask, w_p - point_dot, 0.0)
+        if derivative == 'exact':
+            # sum_d r_d d2w_d/dxi2, as the Hessian of a scalar.  `r` is the
+            # primal residual, already masked, so the mask needs no repeating.
+            elem_params = mesh._element_params(eles, full_params)[0]
+            local_H = local_H - jax.hessian(
+                lambda x: jnp.dot(r, mesh.elem_evals(elem_params, x[None, :]))
+            )(xi)
+            comb_product = comb_product - W_p.T @ r
+
         masked_H = (
             jnp.where(free_mask[:, None] * free_mask[None, :], local_H, 0.0)
             + jnp.diag(jnp.where(active_mask, 1.0, 0.0))
         )
         masked_comb_product = jnp.where(active_mask, 0.0, comb_product)
 
-        xi_dot = -_solve_xi_tangent(masked_H, masked_comb_product, ndim,
-                                    partial_mask) * (0 if approx_jac else 1)
+        xi_dot = -_solve_xi_tangent(masked_H, masked_comb_product, ndim, partial_mask)
 
         # w_dot = W xi_dot + dw/dp . p_dot, again with W reused.
         w_dot = W @ xi_dot + w_p
@@ -620,7 +762,7 @@ def _make_jvp_helpers(mesh: MeshField, approx_jac: bool, partial_mask: bool):
 # Public builder – called once from generate_mesh()
 # ─────────────────────────────────────────────────────────────────────
 
-def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
+def build_embedding_fn(mesh: MeshField, *, derivative: str = 'exact',
                        robust_init_est: bool = False):
     """Create a JIT-compiled embedding function closed over *mesh*.
 
@@ -636,9 +778,9 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
 
     :param mesh:
         The :class:`~HOMER.mesh.field.MeshField` instance.
-    :param approx_jac:
-        If ``True``, drops the sliding term from the residual gradient
-        estimation for the custom JVP (see ``embed_points`` docs).
+    :param derivative:
+        The tangent the custom JVP hands back, one of :data:`DERIVATIVES`
+        (see :func:`_make_jvp_helpers`).
     :param robust_init_est:
         If ``True``, uses a numeric Jacobian for the initial NR step.
     """
@@ -648,6 +790,42 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
     # Build the NR solver (closed over mesh)
     nr_solve = _make_nr_solver(mesh, ndim, robust_init_est)
 
+    def refine(elem, xi, points, lbound, dim_mask, iterations, tol_sq, fit_params, release):
+        """Refine every point, in two passes so the slow few do not hold up the rest.
+
+        The refinement is vectorised, so a batch iterates until its slowest
+        point stops.  The first pass gives every point :data:`_FIRST_PASS`
+        iterations, which nearly all finish in; the rest are gathered into
+        chunks of a fixed size -- fixed, so this traces -- and refined from where
+        they stopped, holding what they held there, with what is left of
+        *iterations*.  Each point is refined
+        exactly as it would be alone, whatever else is in its batch.
+        """
+        solve = jax.vmap(lambda e, x, p, lb, dm, it: nr_solve(e, x, p, lb, dm, it, tol_sq,
+                                                             fit_params, release=release),
+                         in_axes=(0, 0, 0, 0, 0, None))
+        first = jnp.minimum(iterations, _FIRST_PASS)
+        (elem, xi), res, jac, (done, held) = solve(elem, xi, points, lbound, dim_mask, first)
+
+        n = points.shape[0]
+        chunk = max(1, -(-n // _STRAGGLER_CHUNKS))
+
+        def next_chunk(state):
+            elem, xi, res, jac, pending = state
+            at = jnp.nonzero(pending, size=chunk, fill_value=n)[0]
+            take = jnp.minimum(at, n - 1)
+            #resumed with the directions it was holding where it stopped
+            (e, x), r, j, _ = solve(elem[take], xi[take], points[take], held[take],
+                                    dim_mask[take], iterations - first)
+            return (elem.at[at].set(e, mode='drop'), xi.at[at].set(x, mode='drop'),
+                    res.at[at].set(r, mode='drop'), jac.at[at].set(j, mode='drop'),
+                    pending.at[at].set(False, mode='drop'))
+
+        elem, xi, res, jac, _ = jax.lax.while_loop(
+            lambda state: jnp.any(state[-1]), next_chunk,
+            (elem, xi, res, jac, ~done & (iterations > first)))
+        return (elem, xi), res, jac
+
     # Build the JVP helpers.  `partial_mask` changes how the xi tangent is
     # solved for, and is a compile-time property of the call, so there is one
     # rule per value of it rather than a branch inside the rule.
@@ -656,7 +834,7 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
     def _jvp_rule(partial_mask: bool):
         rule = _jvp_rules.get(partial_mask)
         if rule is None:
-            rule = _make_jvp_helpers(mesh, approx_jac, partial_mask)
+            rule = _make_jvp_helpers(mesh, derivative, partial_mask)
             _jvp_rules[partial_mask] = rule
         return rule
 
@@ -682,12 +860,8 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
         at_lo, at_hi = init_xi < 1e-6, init_xi > 1 - 1e-6
         mf_pt = jax.vmap(mesh.topo_chain_check)(elem_num, init_xi, at_lo, at_hi)
 
-        (en, emb), res, jac = jax.vmap(
-            lambda elem, xi, target, lbound, lmask: nr_solve(
-                elem, xi, target, lbound, lmask, iterations, tol_sq, fit_params
-            )
-        )(elem_num, init_xi, points, mf_pt, dim_mask)
-        return (en, emb), res, jac
+        return refine(elem_num, init_xi, points, mf_pt, dim_mask, iterations, tol_sq,
+                      fit_params, release=True)
 
     def _run_coarse_3d(points, fit_params, dim_mask, grid_res, iterations,
                        tol_sq, surface_embed, window_size, nn_mode):
@@ -706,12 +880,8 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
                 nn_mode=nn_mode,
             )
 
-        (en, emb), res, jac = jax.vmap(
-            lambda elem, xi, target, lbound, lmask: nr_solve(
-                elem, xi, target, lbound, lmask, iterations, tol_sq, fit_params
-            )
-        )(elem_num, init_xi, points, mf_pt, dim_mask)
-        return (en, emb), res, jac
+        return refine(elem_num, init_xi, points, mf_pt, dim_mask, iterations, tol_sq,
+                      fit_params, release=not surface_embed)
 
     # ── The core JIT function (takes only JAX arrays) ────────────
     #
@@ -763,13 +933,8 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
                                                fit_params, surface=surface_embed,
                                                dim_mask=dim_mask)
 
-                (en, emb), res, jac = jax.vmap(
-                    lambda elem, xi, target, lbound, lmask: nr_solve(
-                        elem, xi, target, lbound, lmask, iterations, tol_sq,
-                        fit_params
-                    )
-                )(elem_num, init_xi, points, mf_pt, dim_mask)
-                return (en, emb), res, jac
+                return refine(elem_num, init_xi, points, mf_pt, dim_mask, iterations,
+                              tol_sq, fit_params, release=not surface_embed)
             else:
                 if ndim == 2:
                     return _run_coarse_2d(points, fit_params, dim_mask,
@@ -864,9 +1029,10 @@ def build_embedding_fn(mesh: MeshField, *, approx_jac: bool = False,
         and ``tol`` are passed as traced values so they share one trace
         across all values (B2).
 
-        ``tol`` is the residual norm at which the refinement stops;
-        ``None`` uses :data:`DEFAULT_EMBED_TOL` scaled by the mesh's own
-        extent, and ``0`` runs the full ``iterations`` unconditionally.
+        ``tol`` is the distance at which the refinement stops: a residual
+        that short, or a next step moving the point less than that.  ``None``
+        uses :data:`DEFAULT_EMBED_TOL` scaled by the mesh's own extent, and
+        ``0`` runs the full ``iterations`` unconditionally.
 
         When *chunk_size* is set and the number of query points exceeds
         it, the point set is split into chunks that are processed

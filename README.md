@@ -27,13 +27,13 @@ Fix that mesh parameter - constrain a node to lie on a plane - express another a
 - JSON serialisation/deserialisation
 - Green-Lagrange strain evaluation
 
-#### WIP Features
+#### WIP features
 - Faster sparsity estimation!
 - meta-fitting examples for statistical shape models!
 
 ---
 
-## Supported Basis Functions
+## Supported basis functions
 
 | Class | Type | Nodes per direction | Continuity | Derivative fields on node |
 |---|---|---|---|---|
@@ -56,7 +56,7 @@ More detailed documentation is available at: https://abi-breast-biomechanics-gro
 ___
 
 
-## Quick Example
+## Quick example
 
 ```python
 import numpy as np

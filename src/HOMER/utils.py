@@ -740,6 +740,11 @@ def masked_closest_indices(A, B, dim_mask, chunk_size=256):
     return jax.lax.map(_one, (B, m), batch_size=chunk_size)
 
 
+#: How far beyond the reference points, as a fraction of their extent, the
+#: Morton cube reaches on every side before a query is clamped onto its edge.
+_MORTON_MARGIN = 0.25
+
+
 @partial(jax.jit, static_argnames=['window_size'])
 def approx_closest_indices_Morton_nd(A, B, window_size=32):
     """
@@ -756,26 +761,38 @@ def approx_closest_indices_Morton_nd(A, B, window_size=32):
 
     :returns:
         Index into *A* of the approximate nearest reference point for each
-        point of *B*.  Two trees are searched, the second with its bounding
-        box shifted by 0.137 of its extent so the octree planes fall
-        elsewhere, and the better of the two true distances wins -- which is
-        what removes the Z-curve discontinuities a single tree suffers at its
-        division lines.
+        point of *B*.  Two trees are searched -- one over a cube around *A*,
+        one over *A*'s box axis by axis, whose division lines fall elsewhere --
+        and the better of the two true distances wins, which is what removes
+        the Z-curve discontinuities a single tree suffers at its division
+        lines.  The cube keeps a flat *A* from being stretched across the whole
+        code width; the box resolves *A*'s own extent more finely.
     """
-    # --- TREE 1: Standard Bounding Box ---
-    bbox_min_1 = jnp.min(A, axis=0)
-    bbox_max_1 = jnp.max(A, axis=0) + 1e-5
-    
+    # --- TREE 1: a cube around A ---
+    # A cube, not the box of A: per-axis scaling stretches a flat axis to the
+    # full code width, so a surface lying in a plane put every query a hair to
+    # one side of it at the far end of that axis, and its code far from its
+    # neighbours'.  Read off A alone, so a query's code never depends on what
+    # else is queried with it, and widened by a margin so that a query a little
+    # outside A is not clamped onto its edge.  Anchored at A's corner rather
+    # than its centre: a flat A sits at its own centre on the flat axis, which
+    # is the cube's top-level split, the worst place for a surface to lie.
+    lo = jnp.min(A, axis=0)
+    extent = jnp.max(jnp.max(A, axis=0) - lo)
+    side = extent * (1 + 2 * _MORTON_MARGIN) + 1e-5
+    bbox_min_1 = lo - _MORTON_MARGIN * extent
+    bbox_max_1 = bbox_min_1 + side
+
     idx_1, dist_1 = _single_tree_search(A, B, bbox_min_1, bbox_max_1, window_size)
-    
-    # --- TREE 2: Shifted Bounding Box ---
-    # We apply a large, asymmetric fractional shift to misalign the root octree planes.
-    # Shifting by an irrational or prime-like fraction (e.g., 0.137) ensures that 
-    # the major division lines fall in completely different locations.
-    shift = (bbox_max_1 - bbox_min_1) * 0.137 
-    bbox_min_2 = bbox_min_1 - shift
-    bbox_max_2 = bbox_max_1 + shift
-    
+
+    # --- TREE 2: the box of A, axis by axis ---
+    # Its splits fall elsewhere, which is what a second tree is for, and where
+    # A is not flat its finer resolution on A's own extent seeds a query far
+    # outside A better than the cube does.  Where A is flat it seeds badly, and
+    # the cube's tree, which does not, wins on the true distance.
+    bbox_min_2 = jnp.min(A, axis=0)
+    bbox_max_2 = jnp.max(A, axis=0) + 1e-5
+
     idx_2, dist_2 = _single_tree_search(A, B, bbox_min_2, bbox_max_2, window_size)
     
     # --- COMBINATION ---

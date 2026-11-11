@@ -1,4 +1,4 @@
-# API – embedding
+# API – Embedding
 
 The point-embedding solve. See the [embedding guide](../how-to/embedding.md) for a walkthrough.
 

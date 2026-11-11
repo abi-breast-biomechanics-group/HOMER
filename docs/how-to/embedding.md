@@ -11,7 +11,7 @@ The solve runs on a JAX backend.
 
 ---
 
-## Basic Usage
+## Basic usage
 
 ```python exec="true" source="above" session="embedding"
 import numpy as np
@@ -33,7 +33,7 @@ elem_ids, xis = mesh.embed_points(pts)
 
 ---
 
-## Embedding onto a 2-D Surface
+## Embedding onto a 2-D surface
 
 A volume mesh has somewhere to put an interior point; a surface mesh does not,
 so every point off the sheet keeps a residual.  That makes a 2-D manifold the
@@ -77,7 +77,7 @@ interior.
 
 ---
 
-## Checking Embedding Quality
+## Checking embedding quality
 
 Any `verbose` above 0 prints the mean and max residual error:
 
@@ -95,7 +95,7 @@ elem_ids, xis = mesh.embed_points(pts, verbose=3)
 
 ---
 
-## Recovering the Residual
+## Recovering the residual
 
 When `return_residual=True`, the function returns the vector distance between
 each query point and its nearest mesh location:
@@ -112,7 +112,7 @@ data-to-model distance from each point in pts to the mesh.
 
 ---
 
-## Initial Estimates
+## Initial estimates
 
 If you already have approximate embeddings (e.g. from a previous solve), pass
 them as `init_elexi` to skip the coarse nearest-neighbour search:
@@ -132,7 +132,7 @@ and the provided `dim mask`.
 
 ---
 
-## Surface Embedding (3-D Volume Meshes)
+## Surface embedding (3-D volume meshes)
 
 Often, volumetric data provides point surfaces, which must be embedded into the surface of the mesh.
 To restrict the search to the external faces of a volume mesh, pass
@@ -145,7 +145,7 @@ elem_ids, xis = mesh.embed_points(surface_pts, surface_embed=True)
 
 ---
 
-## Controlling Convergence
+## Controlling convergence
 
 The `iterations` parameter controls how many Newton-Raphson refinement steps
 are taken after the coarse nearest-neighbour search (default 15).  The
@@ -162,7 +162,7 @@ this will only increase runtime if the worst case embeddings were slow.
 
 ---
 
-## Embedding in a Subset of Dimensions
+## Embedding in a subset of dimensions
 
 `dim_mask` restricts the residual to some components of the field, which is
 how you embed against a projection: a silhouette, a single slice, a
@@ -191,7 +191,7 @@ so it cannot express "these components only".
 
 ---
 
-## Differentiating Through the Embedding
+## Differentiating through the embedding
 
 `embed_points` carries a custom JVP, so it can sit inside a larger
 differentiable pipeline — a loss defined on where data lands in parametric
@@ -210,15 +210,22 @@ grad = jax.grad(loss)(mesh.optimisable_param_array)
 print(f"gradient of {grad.shape} over the mesh parameters")
 ```
 
-`approx_jac=True` drops the sliding term from the residual gradient.  It is
-less accurate but keeps the derivative separable by dimension.
-This approximation increases the sparsitty of the jacobian by a factor of the mesh field dimension.
-As the estimate keeps the right sign, the worse convergence per step is often worth the speed up,
-or only possible because of the reduced memory usage.
+`derivative` chooses what differentiating the embedding returns as the points
+follow the mesh:
+
+| `derivative` | what it is | use it for |
+| --- | --- | --- |
+| `'exact'` (default) | the true derivative, the surface's curvature included | sensitivities, where the derivative itself is the answer |
+| `'gauss_newton'` | the terms weighted by the residual left out: the reduced Jacobian of fitting the points' positions and the mesh together | fitting -- the gradient is exact and each column costs a value evaluation rather than a value, Jacobian and Hessian, 3-4x cheaper |
+| `'fixed'` | each point held at the `(element, xi)` it embedded to | the cheapest, and separable in the field components, so a coloured Jacobian needs a third of the colours; but the points lag the surface, so a fit converges slowly |
+
+All three give the same gradient of a sum of squared residuals, `J^T r`, since
+at a closest point the residual is normal to the surface; they differ in the
+curvature model a least-squares solver builds from `J`.
 
 ---
 
-## Tuning the Solve
+## Tuning the solve
 
 | parameter | default | what it does |
 | --- | --- | --- |
@@ -234,13 +241,13 @@ off the mesh, say — keeps the whole batch going to `iterations`.  That costs
 only the saving; a converged point's state is frozen, so its answer is
 identical to the one it would get on its own.
 
-Changing `approx_jac` or `robust_init_est` away from their defaults builds a
-second compiled variant, cached per flag pair, so a fitting loop that passes
-the same flags every call pays the retrace once.
+Changing `derivative` or `robust_init_est` away from their defaults builds a
+second compiled variant, cached per pair, so a fitting loop that passes the
+same ones every call pays the retrace once.
 
 ---
 
-## Using Embedded Coordinates
+## Using embedded coordinates
 
 Once embedded, evaluate any mesh field at those locations:
 

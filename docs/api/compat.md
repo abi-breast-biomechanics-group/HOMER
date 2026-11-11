@@ -1,4 +1,4 @@
-# API – compatibility readers
+# API – Compatibility Readers
 
 Readers for mesh formats HOMER does not write itself, for bringing an
 existing model in.

@@ -38,7 +38,8 @@ def hand_built_sparsity(mesh, elements):
     """Each residual triple depends only on its own element's parameters."""
     pattern = np.zeros((3 * len(elements), mesh.true_param_array.shape[0]))
     for row, element in enumerate(elements):
-        pattern[3 * row:3 * row + 3, mesh.ele_map[element].astype(int)] = 1
+        dofs = mesh.ele_map[element][mesh.ele_weights[element] != 0]
+        pattern[3 * row:3 * row + 3, (dofs[:, None] * mesh.fdim + np.arange(mesh.fdim)).ravel()] = 1
     return sparse.BCOO.fromdense(pattern[:, mesh.optimisable_param_bool])
 
 

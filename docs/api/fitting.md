@@ -1,3 +1,3 @@
-# API – fitting
+# API – Fitting
 
 ::: HOMER.fitting

@@ -32,7 +32,7 @@ provides tools for:
 
 ---
 
-## Quick Example
+## Quick example
 
 ```python exec="true" source="above" session="index"
 import numpy as np
@@ -43,18 +43,13 @@ node0 = MeshNode(loc=np.array([0., 0., 0.]), du=np.zeros(3), dv=np.zeros(3), dud
 node1 = MeshNode(loc=np.array([1., 0., 0.]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 node2 = MeshNode(loc=np.array([0., 1., 0.]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
 node3 = MeshNode(loc=np.array([1., 1., 0.]), du=np.zeros(3), dv=np.zeros(3), dudv=np.zeros(3))
-
-# 2. Link the nodes through a bicubic-Hermite element
-element = MeshElement(node_indexes=[0, 1, 2, 3], basis_functions=H3 * 2)
+# 2. Link the node indexes through a bicubic-Hermite element
+element = MeshElement(node_indexes=[0, 1, 2, 3], basis_functions=H3 ** 2)
 
 # 3. Create the mesh
 mesh = Mesh(nodes=[node0, node1, node2, node3], elements=element)
 
-# 4. Evaluate the surface at a 10×10 grid
-xis = mesh.xi_grid(10)                          # (100, 2)
-pts = mesh.evaluate_embeddings_in_every_element(xis)  # (100, 3)
-
-# 5. Visualise
+# 4. Visualise!
 mesh.plot()
 ```
 
@@ -64,7 +59,7 @@ As a result, it is often better to use the `cube()` geometry object.
 
 ---
 
-## Getting Started
+## Getting started
 
 ### Installation
 
@@ -156,7 +151,7 @@ evaluates in float32. Quantities reached by least squares or Newton-Raphson
 agree to about `1e-3`, exact-arithmetic quantities to about `1e-5`; the test
 suite uses those two tolerances throughout.
 
-### Key Concepts
+### Key concepts
 
 | Term | Description |
 |---|---|
@@ -167,7 +162,7 @@ suite uses those two tolerances throughout.
 | Basis | 1-D interpolation building block: `H3`, `L1`–`L4` |
 | xi | Parametric coordinates in [0, 1]ⁿ |
 
-### Supported Basis Functions
+### Supported basis functions
 
 | Class | Type | Nodes/dir | Continuity | Node fields |
 |---|---|---|---|---|
@@ -200,7 +195,7 @@ See the [How-To Guides](how-to/3d-meshes.md) for detailed walk-throughs.
 
 ---
 
-## Next Steps
+## Next steps
 
 - [Architecture overview](architecture.md) – understand the class hierarchy.
 - [How-To Guides](how-to/3d-meshes.md) – feature-specific recipes.

@@ -108,14 +108,16 @@ def resolve_strategy(strategy) -> Optional[str]:
 
 
 def _element_node_lists(field: 'MeshField') -> np.ndarray:
-    """``(n_elements, n_nodes_per_element)`` array of *index* references."""
+    """``(n_elements, n_nodes_per_element)`` node index at each lattice position.
+
+    ``-1`` where the position has no node of its own -- a hanging node, whose
+    value its element's parameter map draws from other nodes.
+    """
     field._update_id_mappings()
     rows = []
     for element in field.elements:
-        if element.used_index:
-            rows.append([int(n) for n in element.nodes])
-        else:
-            rows.append([field.node_id_to_ind[node_id] for node_id in element.nodes])
+        pool = [int(n) if element.used_index else field.node_id_to_ind[n] for n in element.nodes]
+        rows.append([-1 if k is None else pool[k] for k in element.lattice_nodes])
     return np.array(rows, dtype=int)
 
 
@@ -202,8 +204,9 @@ def _lattice_key(field: 'MeshField', ele_nodes: np.ndarray, topo_lookup) -> np.n
     )
 
     key = np.full((len(field.nodes), stacked.shape[-1]), np.inf)
-    flat_nodes = ele_nodes.ravel()
-    flat_keys = stacked.reshape(-1, stacked.shape[-1])
+    has_node = ele_nodes.ravel() >= 0
+    flat_nodes = ele_nodes.ravel()[has_node]
+    flat_keys = stacked.reshape(-1, stacked.shape[-1])[has_node]
     #np.minimum.at gives the per-element minimum, which is the shared value
     #wherever the elements agree on where the node is.
     np.minimum.at(key, flat_nodes, flat_keys)
@@ -218,6 +221,7 @@ def _bandwidth_permutation(field: 'MeshField', ele_nodes: np.ndarray) -> np.ndar
     n_nodes = len(field.nodes)
     rows = np.repeat(ele_nodes, ele_nodes.shape[1], axis=1).ravel()
     cols = np.tile(ele_nodes, (1, ele_nodes.shape[1])).ravel()
+    rows, cols = rows[(rows >= 0) & (cols >= 0)], cols[(rows >= 0) & (cols >= 0)]
     graph = coo_matrix((np.ones_like(rows), (rows, cols)), shape=(n_nodes, n_nodes)).tocsr()
     return np.asarray(reverse_cuthill_mckee(graph, symmetric_mode=True), dtype=int)
 

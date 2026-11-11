@@ -1,3 +1,3 @@
-# API – geometry
+# API – Geometry
 
 ::: HOMER.geometry

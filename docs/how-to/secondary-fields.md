@@ -25,7 +25,7 @@ Secondary fields:
 
 ---
 
-## How HOMER Fits a Secondary Field
+## How HOMER fits a secondary field
 
 `new_field()` with sample data follows three steps:
 
@@ -44,7 +44,7 @@ Secondary fields:
 
 ---
 
-## Creating a Secondary Field
+## Creating a secondary field
 
 ### Basic API
 
@@ -63,7 +63,7 @@ created but the nodal parameters are left at zero.
 
 ---
 
-## Worked Example – Normal Vector + Scalar Height Fields
+## Worked example – normal vector + scalar height fields
 
 The same workflow is exercised by `tests/test_fields.py`.
 
@@ -150,21 +150,21 @@ mesh.plot(field_to_draw='vec_mag', default_xi_res=6)
 
 ---
 
-## Accessing and Evaluating a Fitted Field
+## Accessing and evaluating a fitted field
 
 ```python exec="true" source="above" session="secondary-fields"
 # Retrieve the secondary MeshField
-fibre_field = mesh['vec_dir']      # MeshField instance
+vector_field = mesh['vec_dir']      # MeshField instance
 
 # Evaluate at arbitrary parametric locations
 elem_ids = np.array([0, 0, 1])
 xis      = np.array([[0.2, 0.3, 0.4],
                      [0.5, 0.5, 0.5],
                      [0.1, 0.9, 0.5]])
-values = fibre_field.evaluate_embeddings(elem_ids, xis)  # (3, 3)
+values = vector_field.evaluate_embeddings(elem_ids, xis)  # (3, 3)
 
 # Or across the whole mesh at once
-all_values = fibre_field.evaluate_embeddings_in_every_element(
+all_values = vector_field.evaluate_embeddings_in_every_element(
     mesh.xi_grid(5)
 )  # (n_elements * 125, 3)
 
@@ -172,7 +172,7 @@ all_values = fibre_field.evaluate_embeddings_in_every_element(
 
 ---
 
-## Visualising Secondary Fields
+## Visualising secondary fields
 
 `Mesh.plot` draws a field in two steps.  It picks the parametric locations —
 `field_xi`, defaulting to a uniform grid at `default_xi_res` — then evaluates

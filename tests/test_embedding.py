@@ -238,3 +238,28 @@ def test_verbose_reports_the_error_without_opening_a_window(patch, sampled, caps
     #verbose=3 draws the residual vectors; given a scene it must not call show()
     patch.embed_points(points[:50], verbose=3, iterations=10, scene=plotter)
     assert len(plotter.actors) > 0
+
+
+def test_points_either_side_of_a_flat_surface_embed_where_they_lie():
+    """A surface lying in a plane: the coarse search's box has no depth across it.
+
+    Scaled axis by axis, that box put a point a hair off the plane at the far
+    end of the flat axis, its Morton code far from its neighbours', and a
+    quarter of such points were seeded half the mesh away and lost.
+    """
+    from HOMER.geometry import basic_surface
+    from HOMER.basis_definitions import H3
+    mesh = basic_surface(basis=[H3] * 2)
+    mesh.refine(10)
+    rng = np.random.default_rng(2)
+    eles = rng.integers(len(mesh.elements), size=4000)
+    xis = 0.02 + 0.96 * rng.random((4000, 2))
+    normals = np.array(mesh.evaluate_normals_ele_xi_pair(eles, xis))
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    offsets = 0.01 * rng.standard_normal(4000)
+    points = np.asarray(mesh.evaluate_embeddings_ele_xi_pair(eles, xis)) + offsets[:, None] * normals
+
+    (found, _), residual = mesh.embed_points(points, return_residual=True)
+
+    np.testing.assert_array_equal(np.asarray(found), eles)
+    np.testing.assert_allclose(np.linalg.norm(np.asarray(residual), axis=1), np.abs(offsets), atol=1e-6)

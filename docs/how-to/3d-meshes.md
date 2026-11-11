@@ -5,7 +5,7 @@ hexahedral meshes.
 
 ---
 
-## H3 × H3 × H3 Volume Mesh
+## H3 × H3 × H3 volume mesh
 
 A tri-cubic-Hermite volume mesh requires 8 corner nodes, each carrying seven
 derivative vectors.
@@ -49,7 +49,7 @@ mesh.plot()
 
 ---
 
-## H3 × H3 × L1 Mixed Volume Mesh
+## H3 × H3 × L1 mixed volume mesh
 
 Use `L1` in the *w* direction for a mesh that is linear along one axis
 but smooth in the other two:
@@ -73,7 +73,7 @@ tangents that bowed the vertical edges outwards above are simply not read by
 
 ---
 
-## Collapsed (Degenerate) Hexahedral Mesh
+## Collapsed (degenerate) hexahedral mesh
 
 A collapsed element shares two or more corner nodes to create wedge or
 pyramid shapes:
@@ -100,7 +100,7 @@ Collapsed elements are useful for certain geometries with a shared central point
 
 ---
 
-## Building from a Trilinear Base Mesh
+## Building from a trilinear base mesh
 
 A convenient workflow is to create a coarse `L1` × `L1` × `L1` mesh, then
 rebase it to the desired configuration (e.g. `H3`).
@@ -120,7 +120,7 @@ mesh = seed.rebase(H3**3)
 
 ---
 
-## Evaluating Mesh Quantities
+## Evaluating mesh quantities
 
 ```python exec="true" source="above" session="3d-meshes"
 import numpy as np

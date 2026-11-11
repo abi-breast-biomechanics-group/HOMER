@@ -14,18 +14,67 @@ import scipy.sparse as sp
 from scipy.sparse.linalg import splu
 
 
+def assemble_param_maps(self) -> None:
+    """Assemble the elements' parameter maps into the field's arrays.
+
+    The parameter vector is a sequence of *DOFs*, one per node field, each
+    :attr:`fdim` entries long.  Every element slot is a weighted sum of DOFs
+    (:attr:`MeshElement.param_map`), padded to the longest such sum in the
+    mesh with zero-weight terms on DOF 0, which is what lets the evaluators
+    apply every element's map as one gather:
+
+    * ``ele_map`` -- ``(n_elements, n_slots, K)`` DOF indices,
+    * ``ele_weights`` -- ``(n_elements, n_slots, K)`` their weights,
+    * ``dof_node`` -- ``(n_dofs,)`` the node each DOF belongs to.
+
+    :raises ValueError:
+        If a node field is not :attr:`fdim` long, or an element draws on a
+        field its node does not carry.
+    """
+    node_dofs, dof_node = [], []
+    for idn, node in enumerate(self.nodes):
+        fields = {'loc': node.loc, **node}
+        if any(np.size(v) != self.fdim for v in fields.values()):
+            raise ValueError(f"Every field of node {idn} must hold {self.fdim} values, "
+                             "one per field component")
+        node_dofs.append({f: len(dof_node) + i for i, f in enumerate(fields)})
+        dof_node += [idn] * len(fields)
+    self.dof_node = np.array(dof_node, dtype=int)
+
+    rows = []
+    for ide, element in enumerate(self.elements):
+        pool = (element.nodes if element.used_index
+                else [self.node_id_to_ind[n] for n in element.nodes])
+        try:
+            rows.append([[(node_dofs[pool[k]][f], w) for k, f, w in element.terms(slot)]
+                         for slot in element.slots])
+        except KeyError as missing:
+            raise ValueError(f"Element {ide} draws on a field its node does not have: "
+                             f"it did not have the required field {missing}") from None
+
+    width = max(len(terms) for row in rows for terms in row)
+    shape = (len(rows), len(rows[0]), width)
+    self.ele_map = np.zeros(shape, dtype=int)
+    self.ele_weights = np.zeros(shape)
+    for ide, row in enumerate(rows):
+        for slot, terms in enumerate(row):
+            if terms:
+                self.ele_map[ide, slot, :len(terms)], self.ele_weights[ide, slot, :len(terms)] = zip(*terms)
+
+
 def get_element_params(self, ele_num: int) -> np.ndarray:
     """
-    returns the flat vector of node parameters associated with this element.
+    returns the flat vector of parameters of this element, its map applied.
 
     :param ele_num:
         Index of the element.
 
     :returns:
-        The element's node parameters, gathered from
-        :attr:`true_param_array` in the element's own node order.
+        The element's parameters drawn from :attr:`true_param_array`, slot
+        by slot, each slot's components together.
     """
-    return self.true_param_array[self.ele_map[ele_num].astype(int)]
+    dofs = np.asarray(self.true_param_array).reshape(-1, self.fdim)
+    return (dofs[self.ele_map[ele_num]] * self.ele_weights[ele_num][..., None]).sum(-2).ravel()
 
 
 def update_from_params(self, inp_params, generate=True):
@@ -86,31 +135,12 @@ def get_xi_weight_mat(self, eles, xis):
 
     :returns:
         numpy.ndarray
-            Weight matrix, shape ``(n_pts, n_nodes)``.
+            Weight matrix, shape ``(n_pts, n_dofs)``.
     """
-    # out_weight = np.zeros((len(eles), len(self.true_param_array)//self.fdim)) #
-    # unique_elem, inv = jnp.unique_inverse(eles)
-    # for ide, e in enumerate(unique_elem):
-    #     mask = ide == inv
-    #     weight_mat = self.generate_weight_matrix(xis[mask]).T #weights associated with each of the parameters for the input matrix.
-    #     relevant_weight_locs = (jnp.atleast_2d(self.ele_map)[e, ::self.fdim]//self.fdim).astype(int)
-    #     out_weight[np.ix_(mask, relevant_weight_locs)] = weight_mat
-    # return out_weight
-    num_rows = eles.shape[0]
-    num_cols = self.true_param_array.shape[0] // self.fdim
-    weight_mat_all = self.generate_weight_matrix(xis).T
-    K = weight_mat_all.shape[1]
-    ele_map_2d = jnp.atleast_2d(self.ele_map)
-    all_relevant_weight_locs = (ele_map_2d[eles, ::self.fdim] // self.fdim).astype(int)  # Shape: (num_rows, K)
-    rows = jnp.repeat(jnp.arange(num_rows), K)
-    cols = all_relevant_weight_locs.ravel()
-    indices = jnp.column_stack([rows, cols])
-    data = jnp.squeeze(weight_mat_all.ravel())
-
-    # 4. Instantiate the sparse BCOO matrix
-    out_weight = jnp.zeros((num_rows, num_cols))
-    # jax.experimental.sparse.BCOO((data, indices), shape=(num_rows, num_cols))       
-    return out_weight.at[(rows, cols)].add(data)
+    weights, columns = self.get_xi_weight_blocks(eles, xis)
+    rows = jnp.repeat(jnp.arange(columns.shape[0]), columns.shape[1])
+    out_weight = jnp.zeros((columns.shape[0], self.true_param_array.shape[0] // self.fdim))
+    return out_weight.at[(rows, columns.ravel())].add(weights.ravel())
 
 
 def get_xi_weight_blocks(self, eles, xis):
@@ -118,11 +148,10 @@ def get_xi_weight_blocks(self, eles, xis):
 
     Every query point draws on exactly one element, so its row of the weight
     matrix has the same small number of non-zeros wherever it lands -- one per
-    nodal degree of freedom of that element.  :meth:`get_xi_weight_mat`
-    scatters those into a dense ``(n_pts, n_nodes)`` array that is almost
-    entirely zero; this returns them as they are computed, alongside the
-    columns they belong in, which is all :func:`sparse_equilibrated_lstsq`
-    needs.
+    term of that element's parameter map.  :meth:`get_xi_weight_mat` scatters
+    those into a dense ``(n_pts, n_dofs)`` array that is almost entirely zero;
+    this returns them as they are computed, alongside the columns they belong
+    in, which is all :func:`sparse_equilibrated_lstsq` needs.
 
     :param eles:
         1-D integer array of element indices, shape ``(n_pts,)``.
@@ -131,14 +160,17 @@ def get_xi_weight_blocks(self, eles, xis):
 
     :returns:
         tuple
-            ``(weights, columns)``, both ``(n_pts, K)`` for *K* the number of
-            nodal degrees of freedom per element.  ``weights[i, k]`` belongs at
-            column ``columns[i, k]`` of row *i*; repeats within a row are
-            summed, as the dense form's scatter-add does.
+            ``(weights, columns)``, both ``(n_pts, n_slots * K)``.
+            ``weights[i, k]`` belongs at column ``columns[i, k]`` of row *i*:
+            a basis weight times the map weight carrying it to that DOF.
+            Repeats within a row are summed, as the dense form's scatter-add
+            does.
     """
-    weights = self.generate_weight_matrix(xis).T
-    columns = (jnp.atleast_2d(self.ele_map)[eles, ::self.fdim] // self.fdim).astype(int)
-    return jnp.squeeze(weights), columns
+    eles = jnp.atleast_1d(jnp.asarray(eles)).astype(int)
+    basis = self.generate_weight_matrix(xis).T.reshape(eles.shape[0], -1)
+    weights = basis[..., None] * jnp.asarray(self.ele_weights)[eles]
+    columns = jnp.asarray(self.ele_map)[eles]
+    return weights.reshape(eles.shape[0], -1), columns.reshape(eles.shape[0], -1)
 
 
 def _splu_augmented_solve(weights, columns, n_cols, top, bottom):

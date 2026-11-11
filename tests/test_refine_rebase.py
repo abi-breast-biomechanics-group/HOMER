@@ -132,27 +132,79 @@ def test_refine_by_non_uniform_xi_breaks_is_exact_for_lagrange():
         assert max_distance_to(mesh, before) < 1e-5, basis
 
 
-@pytest.mark.parametrize("basis", [H3, B3], ids=lambda b: b.__name__)
-def test_non_uniform_refine_of_a_derivative_basis_cannot_be_exact(basis):
+UNEVEN = [np.array([0, 0.3, 1.0]), np.array([0, 0.65, 1.0]), np.array([0, 0.5, 1.0])]
+
+
+def test_refine_by_non_uniform_xi_breaks_is_exact_for_hermite():
+    """A node between two children of different widths carries one ``du``.
+
+    Each child needs ``dx/deta = h * dx/dxi`` with its own ``h``; the children's
+    parameter maps scale the shared derivative by their widths, so one
+    parameter serves both.
+    """
+    mesh = hermite_cube()
+    before = sample_surface(mesh)
+
+    mesh.refine(by_xi_refinement=UNEVEN)
+
+    assert max_distance_to(mesh, before) < 1e-5
+    assert any(e.param_map is not None for e in mesh.elements)
+
+
+def test_a_second_uneven_refine_is_exact_too():
+    """The second refinement reads the first one's widths back off the maps.
+
+    The fit itself is exact, to 1e-14 in float64.  What is left is the embedding
+    solve's, which converges more slowly in elements as thin as these -- 0.06 of
+    the original across -- and is still two orders below what an inexact
+    refinement of these splits leaves.
+    """
+    mesh = hermite_cube()
+    before = sample_surface(mesh)
+
+    mesh.refine(by_xi_refinement=UNEVEN)
+    mesh.refine(by_xi_refinement=[np.array([0, 0.2, 1.0])] * 3)
+
+    assert mean_distance_to(mesh, before) < 2e-6
+    assert max_distance_to(mesh, before) < 2e-5
+
+
+def test_an_even_refine_writes_no_maps():
+    mesh = hermite_cube()
+
+    mesh.refine(2)
+
+    assert all(e.param_map is None for e in mesh.elements)
+
+
+def test_an_unevenly_refined_mesh_rebases_and_round_trips(tmp_path):
+    from HOMER import Mesh
+    mesh = hermite_cube()
+    before = sample_surface(mesh)
+    mesh.refine(by_xi_refinement=UNEVEN)
+
+    mesh.save(tmp_path / 'uneven.json')
+    loaded = Mesh.load(tmp_path / 'uneven.json')
+
+    assert max_distance_to(loaded, before) < 1e-5
+    assert max_distance_to(loaded.rebase([L3] * 3), before) < 1e-4
+
+
+def test_non_uniform_refine_of_a_control_net_cannot_be_exact():
     """A representability limit, not a solver one -- so it is pinned, not fixed.
 
-    ``H3``: the node between two children of different widths carries one
-    ``du``, but each child needs ``dx/deta = h * dx/dxi`` with its own ``h``.
-    One shared parameter cannot serve both.  (``MeshElement.scale_factors``
-    is the hook that would let it; it is never populated.)
-
-    ``B3``: an interior knot makes the knot vector non-uniform, which a
-    uniform B-spline basis has no way to express.
-
-    Both show the same signature -- at the floor when the two halves are equal,
-    two orders of magnitude worse the moment they are not, and no better in
-    float64, because the least-squares system cannot match its own targets.
+    An interior knot makes the knot vector non-uniform, which a uniform
+    B-spline basis has no way to express: unlike a Hermite derivative, no
+    scaling of the control points recovers it.  At the floor when the two
+    halves are equal, two orders of magnitude worse the moment they are not,
+    and no better in float64, because the least-squares system cannot match its
+    own targets.
     """
-    even = hermite_cube().rebase([basis] * 3)
+    even = hermite_cube().rebase([B3] * 3)
     before = sample_surface(even)
     even.refine(by_xi_refinement=[np.array([0, 0.5, 1.0])] * 3)
 
-    uneven = hermite_cube().rebase([basis] * 3)
+    uneven = hermite_cube().rebase([B3] * 3)
     uneven.refine(by_xi_refinement=[np.array([0, 0.49, 1.0]),      #2% uneven is enough
                                     np.array([0, 0.5, 1.0]),
                                     np.array([0, 0.5, 1.0])])

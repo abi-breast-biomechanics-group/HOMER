@@ -101,6 +101,24 @@ class Mesh(MeshField):
             field.refine(refinement_factor, by_xi_refinement, clean_nodes, preserve_fixed_params,
                          reorder_nodes)
 
+    def refine_elements(self, element_ids) -> np.ndarray:
+        """Refine the chosen elements of the geometry *and* of every secondary field.
+
+        Calls :meth:`MeshField.refine_elements` on the coordinate mesh and on
+        every field in :attr:`fields`, which share its elements, and so balance
+        the same way.
+
+        :param element_ids:
+            Indices of the elements to refine.
+
+        :returns:
+            The indices of the elements refined, balance included.
+        """
+        refined = super().refine_elements(element_ids)
+        for field in self.fields.values():
+            field.refine_elements(element_ids)
+        return refined
+
     def rebase(self, new_basis: BasisGroup, in_place=False, res=10, preserve_fixed_params=True,
                reorder_nodes=True) -> 'Mesh':
         """ Rebases self, capturing the rebase of the underlying mesh field.
