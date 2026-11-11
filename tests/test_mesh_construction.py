@@ -228,7 +228,7 @@ def test_gauss_quadrature_reproduces_the_volume_of_an_affine_element():
     quadrature = (np.abs(np.linalg.det(jac)) * arr(weights)).sum()
 
     assert quadrature == pytest.approx(1.0, abs=EXACT)
-    assert quadrature == pytest.approx(mesh.get_volume(), abs=EXACT)
+    assert quadrature == pytest.approx(float(mesh.get_volume()), abs=EXACT)
 
 
 def test_get_volume_is_exact_on_a_curved_element():
@@ -373,7 +373,7 @@ def test_drop_elements_removes_the_element_and_its_orphaned_nodes():
     from HOMER.geometry import cubeMNO
 
     mesh = cubeMNO([2, 2, 2], basis=[L1] * 3)
-    before_volume = mesh.get_volume()
+    before_volume = float(mesh.get_volume())
 
     mesh.drop_elements([0])
 
